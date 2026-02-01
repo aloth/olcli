@@ -1,0 +1,13 @@
+# Source files (dist is published)
+src/
+tsconfig.json
+
+# Tests
+test/
+
+# Dev files
+.gitignore
+.DS_Store
+
+# Auth files
+.olauth
