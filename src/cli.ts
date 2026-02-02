@@ -11,7 +11,13 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { OverleafClient } from './client.js';
+
+// Read version from package.json
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
+const VERSION = pkg.version;
 import {
   getSessionCookie,
   setSessionCookie,
@@ -27,7 +33,7 @@ const program = new Command();
 program
   .name('olcli')
   .description('Overleaf CLI - interact with Overleaf projects from the command line')
-  .version('0.1.0');
+  .version(VERSION);
 
 /**
  * Helper to get authenticated client

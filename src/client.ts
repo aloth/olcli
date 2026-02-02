@@ -7,6 +7,14 @@
 
 import * as cheerio from 'cheerio';
 import { CookieJar, Cookie } from 'tough-cookie';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Read version from package.json
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
+const USER_AGENT = `olcli/${pkg.version}`;
 
 const BASE_URL = 'https://www.overleaf.com';
 const PROJECT_URL = `${BASE_URL}/project`;
@@ -77,7 +85,7 @@ export class OverleafClient {
     const response = await fetch(PROJECT_URL, {
       headers: {
         'Cookie': Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; '),
-        'User-Agent': 'olcli/0.1.0'
+        'User-Agent': USER_AGENT
       }
     });
 
@@ -135,7 +143,7 @@ export class OverleafClient {
   private getHeaders(includeContentType = false): Record<string, string> {
     const headers: Record<string, string> = {
       'Cookie': this.getCookieHeader(),
-      'User-Agent': 'olcli/0.1.0',
+      'User-Agent': USER_AGENT,
       'X-Csrf-Token': this.csrf
     };
     if (includeContentType) {
@@ -414,7 +422,6 @@ export class OverleafClient {
 
   /**
    * Upload a file to a project
-   * Based on Overleaf-Workshop implementation and fix from PR #73 for filename handling
    */
   async uploadFile(
     projectId: string,
@@ -456,7 +463,7 @@ export class OverleafClient {
       method: 'POST',
       headers: {
         'Cookie': this.getCookieHeader(),
-        'User-Agent': 'olcli/0.1.0',
+        'User-Agent': USER_AGENT,
         'X-Csrf-Token': this.csrf
       },
       body: formData
