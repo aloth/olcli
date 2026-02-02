@@ -2,7 +2,7 @@
 
 **Overleaf CLI** — Sync and manage your LaTeX projects from the command line.
 
-[![npm version](https://img.shields.io/npm/v/olcli.svg)](https://www.npmjs.com/package/olcli)
+[![npm version](https://img.shields.io/npm/v/@aloth/olcli.svg)](https://www.npmjs.com/package/@aloth/olcli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features
@@ -28,7 +28,7 @@ brew install olcli
 ### npm
 
 ```bash
-npm install -g olcli
+npm install -g @aloth/olcli
 ```
 
 ## Quick Start
