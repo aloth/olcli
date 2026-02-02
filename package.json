@@ -1,10 +1,10 @@
 {
   "name": "@aloth/olcli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Overleaf CLI - sync and manage LaTeX projects from the command line",
   "type": "module",
   "bin": {
-    "olcli": "./dist/cli.js"
+    "olcli": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
