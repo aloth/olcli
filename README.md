@@ -5,6 +5,10 @@
 [![npm version](https://img.shields.io/npm/v/@aloth/olcli.svg)](https://www.npmjs.com/package/@aloth/olcli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+<p align="center">
+  <img src="screenshots/demo.gif" alt="olcli demo" width="600">
+</p>
+
 ## Features
 
 - 📋 **List** all your Overleaf projects
