@@ -662,6 +662,7 @@ program
   .option('--project <name>', 'Project name or ID (overrides .olcli.json)')
   .option('--all', 'Upload all files (not just changed)')
   .option('--dry-run', 'Show what would be uploaded without uploading')
+  .option('--probe-folder', 'Probe for correct folder ID (use if uploads fail with folder_not_found)')
   .option('--cookie <session>', 'Session cookie override')
   .action(async (dir, options) => {
     const targetDir = dir || '.';
@@ -671,12 +672,14 @@ program
     let projectId: string | undefined;
     let projectName: string | undefined;
     let lastPull: Date | undefined;
+    let rootFolderId: string | undefined;
 
     if (existsSync(metaPath)) {
       const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
       projectId = meta.projectId;
       projectName = meta.projectName;
       lastPull = meta.lastPull ? new Date(meta.lastPull) : undefined;
+      rootFolderId = meta.rootFolderId;
     }
 
     if (options.project) {
@@ -757,24 +760,48 @@ program
         return;
       }
 
+      // If --probe-folder is set, or if we don't have a cached rootFolderId, try probing
+      if (options.probeFolder && !rootFolderId) {
+        spinner.text = 'Probing for correct folder ID...';
+        rootFolderId = await client.probeRootFolderId(projectId!) ?? undefined;
+        if (rootFolderId) {
+          // Save the discovered folder ID
+          if (existsSync(metaPath)) {
+            const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
+            meta.rootFolderId = rootFolderId;
+            writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+          }
+          spinner.succeed(`Found root folder ID: ${rootFolderId}`);
+          spinner.start(`Uploading ${filesToUpload.length} file(s)...`);
+        } else {
+          spinner.fail('Could not find valid root folder ID');
+          console.log(chalk.yellow('Try manually specifying rootFolderId in .olcli.json'));
+          process.exit(1);
+        }
+      }
+
       spinner.text = `Uploading ${filesToUpload.length} file(s)...`;
 
       let uploaded = 0;
       let failed = 0;
+      let folderNotFoundCount = 0;
 
       for (const file of filesToUpload) {
         try {
           const content = readFileSync(file.path);
-          await client.uploadFile(projectId!, null, file.relativePath, content);
+          await client.uploadFile(projectId!, rootFolderId || null, file.relativePath, content);
           uploaded++;
           spinner.text = `Uploading... (${uploaded}/${filesToUpload.length})`;
         } catch (error: any) {
           console.error(chalk.yellow(`\n  Warning: Failed to upload ${file.relativePath}: ${error.message}`));
           failed++;
+          if (error.message.includes('folder_not_found')) {
+            folderNotFoundCount++;
+          }
         }
       }
 
-      // Update last pull time
+      // Update last push time
       if (existsSync(metaPath)) {
         const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
         meta.lastPush = new Date().toISOString();
@@ -782,7 +809,10 @@ program
       }
 
       if (failed > 0) {
-        spinner.warn(`Uploaded ${uploaded} files, ${failed} failed`);
+        spinner.warn(`Uploaded ${uploaded} file(s), ${failed} failed`);
+        if (folderNotFoundCount > 0 && !rootFolderId) {
+          console.log(chalk.yellow('  Tip: Try running with --probe-folder to find the correct folder ID'));
+        }
       } else {
         spinner.succeed(`Uploaded ${uploaded} file(s) to "${projectName}"`);
       }

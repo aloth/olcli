@@ -421,6 +421,69 @@ export class OverleafClient {
   }
 
   /**
+   * Find root folder ID by probing multiple candidates
+   * This handles cases where projectId - 1 doesn't work
+   */
+  async probeRootFolderId(projectId: string): Promise<string | null> {
+    const candidates: string[] = [];
+    
+    // Method 1: Try projectId - 1 (most common)
+    candidates.push(this.computeRootFolderId(projectId));
+    
+    const prefix = projectId.slice(0, 16);
+    const suffix = parseInt(projectId.slice(16), 16);
+    
+    // Method 2: Try a wide range around the project ID
+    // Some projects have root folder created with different offsets
+    for (let i = 2; i <= 50; i++) {
+      if (suffix - i >= 0) {
+        candidates.push(prefix + (suffix - i).toString(16).padStart(8, '0'));
+      }
+    }
+    for (let i = 1; i <= 50; i++) {
+      candidates.push(prefix + (suffix + i).toString(16).padStart(8, '0'));
+    }
+
+    // Test each candidate with a minimal probe request
+    for (const folderId of candidates) {
+      try {
+        // Try to create a temp file to probe the folder
+        const testFileName = `.olcli-probe-${Date.now()}.tmp`;
+        const formData = new FormData();
+        formData.append('targetFolderId', folderId);
+        formData.append('name', testFileName);
+        formData.append('type', 'text/plain');
+        formData.append('qqfile', new Blob(['probe']), testFileName);
+
+        const response = await fetch(`${UPLOAD_URL.replace('{id}', projectId)}?folder_id=${folderId}`, {
+          method: 'POST',
+          headers: {
+            'Cookie': this.getCookieHeader(),
+            'User-Agent': USER_AGENT,
+            'X-Csrf-Token': this.csrf
+          },
+          body: formData
+        });
+
+        const data = await response.json() as any;
+        if (data.success !== false && data.entity_id) {
+          // Success! Delete the probe file and return this folder ID
+          try {
+            await this.deleteEntity(projectId, data.entity_id, 'doc');
+          } catch (e) {
+            // Ignore delete errors for probe file
+          }
+          return folderId;
+        }
+      } catch (e) {
+        // Continue to next candidate
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Upload a file to a project
    */
   async uploadFile(
@@ -430,7 +493,7 @@ export class OverleafClient {
     content: Buffer
   ): Promise<{ success: boolean; entityId?: string; entityType?: string }> {
     // If no folder ID provided, get the root folder
-    const targetFolderId = folderId || await this.getRootFolderId(projectId);
+    let targetFolderId = folderId || await this.getRootFolderId(projectId);
 
     // Extract just the filename without path (PR #73 fix)
     const baseName = fileName.split('/').pop() || fileName;
@@ -452,33 +515,60 @@ export class OverleafClient {
     };
     const mimeType = mimeTypes[ext] || 'application/octet-stream';
 
-    const formData = new FormData();
-    // Match Overleaf-Workshop: include targetFolderId in form data
-    formData.append('targetFolderId', targetFolderId);
-    formData.append('name', baseName);
-    formData.append('type', mimeType);
-    formData.append('qqfile', new Blob([content]), baseName);
+    // Helper function to attempt upload with a specific folder ID
+    const tryUpload = async (fid: string): Promise<{ success: boolean; entityId?: string; entityType?: string; error?: string }> => {
+      const formData = new FormData();
+      formData.append('targetFolderId', fid);
+      formData.append('name', baseName);
+      formData.append('type', mimeType);
+      formData.append('qqfile', new Blob([content]), baseName);
 
-    const response = await fetch(`${UPLOAD_URL.replace('{id}', projectId)}?folder_id=${targetFolderId}`, {
-      method: 'POST',
-      headers: {
-        'Cookie': this.getCookieHeader(),
-        'User-Agent': USER_AGENT,
-        'X-Csrf-Token': this.csrf
-      },
-      body: formData
-    });
+      const response = await fetch(`${UPLOAD_URL.replace('{id}', projectId)}?folder_id=${fid}`, {
+        method: 'POST',
+        headers: {
+          'Cookie': this.getCookieHeader(),
+          'User-Agent': USER_AGENT,
+          'X-Csrf-Token': this.csrf
+        },
+        body: formData
+      });
 
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Failed to upload file: ${response.status} - ${text}`);
+      if (!response.ok) {
+        const text = await response.text();
+        return { success: false, error: `${response.status} - ${text}` };
+      }
+
+      const data = await response.json() as any;
+      if (data.success === false && data.error === 'folder_not_found') {
+        return { success: false, error: 'folder_not_found' };
+      }
+      return {
+        success: data.success !== false,
+        entityId: data.entity_id,
+        entityType: data.entity_type
+      };
+    };
+
+    // First attempt with computed/cached folder ID
+    let result = await tryUpload(targetFolderId);
+    
+    // If folder not found, probe for the correct folder ID
+    if (!result.success && result.error === 'folder_not_found') {
+      const probedFolderId = await this.probeRootFolderId(projectId);
+      if (probedFolderId && probedFolderId !== targetFolderId) {
+        targetFolderId = probedFolderId;
+        result = await tryUpload(targetFolderId);
+      }
     }
 
-    const data = await response.json() as any;
+    if (!result.success) {
+      throw new Error(`Failed to upload file: ${result.error || 'unknown error'}`);
+    }
+
     return {
-      success: data.success !== false,
-      entityId: data.entity_id,
-      entityType: data.entity_type
+      success: result.success,
+      entityId: result.entityId,
+      entityType: result.entityType
     };
   }
 
