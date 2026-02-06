@@ -1,7 +1,7 @@
 {
   "name": "@aloth/olcli",
   "version": "0.1.3",
-  "description": "Overleaf CLI - sync and manage LaTeX projects from the command line",
+  "description": "Command-line interface for Overleaf — Sync, manage, and compile LaTeX projects from your terminal",
   "type": "module",
   "bin": {
     "olcli": "dist/cli.js"
@@ -14,13 +14,24 @@
   },
   "keywords": [
     "overleaf",
+    "overleaf-cli",
     "latex",
+    "latex-cli",
     "cli",
+    "command-line",
     "sync",
     "tex",
     "pdf",
     "academic",
-    "writing"
+    "writing",
+    "latex-editor",
+    "overleaf-sync",
+    "research",
+    "compile",
+    "arxiv",
+    "terminal",
+    "typescript",
+    "latex-tools"
   ],
   "author": "Alexander Loth <alex@alexloth.com> (https://alexloth.com)",
   "license": "MIT",
