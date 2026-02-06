@@ -1,9 +1,11 @@
-# olcli
+# olcli — Overleaf CLI
 
-**Overleaf CLI** — Sync and manage your LaTeX projects from the command line.
+**Command-line interface for Overleaf** — Sync, manage, and compile LaTeX projects from your terminal.
 
 [![npm version](https://img.shields.io/npm/v/@aloth/olcli.svg)](https://www.npmjs.com/package/@aloth/olcli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+Work with Overleaf projects directly from your command line. Edit locally with your favorite editor, version control with Git, and sync seamlessly with Overleaf's cloud compilation.
 
 <p align="center">
   <img src="screenshots/demo.gif" alt="olcli demo" width="600">
@@ -11,14 +13,23 @@
 
 ## Features
 
+**Full Overleaf command-line access:**
+
 - 📋 **List** all your Overleaf projects
-- ⬇️ **Pull** project files to local directory
+- ⬇️ **Pull** project files to local directory for offline editing
 - ⬆️ **Push** local changes back to Overleaf
 - 🔄 **Sync** bidirectionally with smart conflict detection
-- 📄 **Compile** and download PDFs
+- 📄 **Compile** PDFs using Overleaf's remote compiler
 - 📦 **Download** individual files or full project archives
 - 📤 **Upload** files to projects
 - 📊 **Output** compile artifacts (`.bbl`, `.log`, `.aux` for arXiv submissions)
+
+**Perfect for:**
+- Editing LaTeX in your preferred text editor (Vim, VS Code, Emacs, etc.)
+- Version control with Git while using Overleaf's compiler
+- Automating workflows and CI/CD pipelines
+- Offline work with periodic sync
+- Collaborative projects where some prefer CLI, others prefer web
 
 ## Installation
 
@@ -29,40 +40,58 @@ brew tap aloth/tap
 brew install olcli
 ```
 
-### npm
+### npm (all platforms)
+
+Install globally to use the `olcli` command anywhere:
 
 ```bash
 npm install -g @aloth/olcli
 ```
 
+Or use with `npx` without installation:
+
+```bash
+npx @aloth/olcli list
+```
+
 ## Quick Start
 
-### 1. Authenticate
+### 1. Authenticate with Overleaf
 
-Get your session cookie from Overleaf:
+Get your session cookie from Overleaf.com:
 
 1. Log into [overleaf.com](https://www.overleaf.com)
-2. Open Developer Tools (F12) → Application → Cookies
+2. Open Developer Tools (F12 or Cmd+Option+I) → Application/Storage → Cookies
 3. Copy the value of `overleaf_session2`
+
+Store it with olcli:
 
 ```bash
 olcli auth --cookie "your_session_cookie_value"
 ```
 
-### 2. List Projects
+**Tip:** The cookie stays valid for weeks. Just refresh it when authentication fails.
+
+### 2. List Your Projects
 
 ```bash
 olcli list
 ```
 
-### 3. Pull a Project
+See all your Overleaf projects with IDs and last modified dates.
+
+### 3. Pull a Project Locally
+
+Download any project to work on it locally:
 
 ```bash
 olcli pull "My Thesis"
 cd My_Thesis/
 ```
 
-### 4. Edit and Sync
+Now you can edit `.tex` files with your preferred editor (Vim, VS Code, Emacs, etc.).
+
+### 4. Edit Locally, Sync to Overleaf
 
 ```bash
 # Edit files locally with your favorite editor
@@ -71,15 +100,21 @@ vim main.tex
 # Push changes back to Overleaf
 olcli push
 
-# Or sync bidirectionally
+# Or sync bidirectionally (pull + push in one command)
 olcli sync
 ```
 
+Your collaborators can continue using the Overleaf web editor — changes sync seamlessly.
+
 ### 5. Compile and Download PDF
+
+Use Overleaf's remote compiler from the command line:
 
 ```bash
 olcli pdf
 ```
+
+The compiled PDF downloads automatically to your current directory.
 
 ## Commands
 
@@ -103,7 +138,53 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli output [type]` | Download compile output files |
 | `olcli check` | Show config paths and credential sources |
 
-## arXiv Submissions
+## Use Cases
+
+### Local Editing with Overleaf Compilation
+
+Work offline in your favorite editor, push when ready, compile remotely:
+
+```bash
+olcli pull "Research Paper"
+cd Research_Paper
+vim introduction.tex
+git commit -am "Update intro"
+olcli push
+olcli pdf
+```
+
+### Git Version Control + Overleaf
+
+Keep your LaTeX project in Git while using Overleaf's compiler:
+
+```bash
+olcli pull "My Thesis" thesis
+cd thesis
+git init
+git add .
+git commit -m "Initial import from Overleaf"
+
+# Daily workflow
+vim chapters/methods.tex
+git commit -am "Draft methods section"
+olcli sync  # Sync with Overleaf
+olcli pdf
+```
+
+### Automated Workflows
+
+Integrate Overleaf compilation into CI/CD:
+
+```bash
+#!/bin/bash
+olcli auth --cookie "$OVERLEAF_SESSION"
+olcli pull "Automated Report"
+./generate-data.py > tables/results.tex
+olcli push
+olcli pdf -o report-$(date +%Y-%m-%d).pdf
+```
+
+### arXiv Submissions
 
 Download the `.bbl` file for arXiv submissions:
 
