@@ -140,6 +140,26 @@ export class OverleafClient {
     return Object.entries(this.cookies).map(([k, v]) => `${k}=${v}`).join('; ');
   }
 
+  private applySetCookieHeaders(headers: Headers): void {
+    const setCookieHeaders = headers.getSetCookie?.() || [];
+    for (const setCookie of setCookieHeaders) {
+      const match = setCookie.match(/^([^=]+)=([^;]+)/);
+      if (match) {
+        this.cookies[match[1]] = match[2];
+      }
+    }
+  }
+
+  private async fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   private getHeaders(includeContentType = false): Record<string, string> {
     const headers: Record<string, string> = {
       'Cookie': this.getCookieHeader(),
@@ -403,6 +423,151 @@ export class OverleafClient {
   }
 
   /**
+   * Decode Socket.IO 0.9 payloads. Frames may be a single packet or \ufffd-length framed packets.
+   */
+  private decodeSocketIoPayload(payload: string): string[] {
+    if (!payload) return [];
+    if (!payload.startsWith('\ufffd')) return [payload];
+
+    const packets: string[] = [];
+    let i = 0;
+
+    while (i < payload.length) {
+      if (payload[i] !== '\ufffd') break;
+      i += 1;
+
+      let len = '';
+      while (i < payload.length && payload[i] !== '\ufffd') {
+        len += payload[i];
+        i += 1;
+      }
+
+      if (i >= payload.length || payload[i] !== '\ufffd') break;
+      i += 1;
+
+      const packetLen = Number.parseInt(len, 10);
+      if (!Number.isFinite(packetLen) || packetLen < 0) break;
+
+      packets.push(payload.slice(i, i + packetLen));
+      i += packetLen;
+    }
+
+    return packets;
+  }
+
+  /**
+   * Extract root folder ID from a Socket.IO event packet (joinProjectResponse).
+   */
+  private extractRootFolderIdFromSocketPacket(packet: string): string | null {
+    if (!packet.startsWith('5:::')) return null;
+
+    try {
+      const payload = JSON.parse(packet.slice(4));
+      if (payload?.name !== 'joinProjectResponse') return null;
+
+      const rootFolderId = payload?.args?.[0]?.project?.rootFolder?.[0]?._id;
+      return typeof rootFolderId === 'string' ? rootFolderId : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * main problem to resolve root folder ID from Overleaf's collaboration join payload
+   * authoritative for projects where ObjectID arithmetic does not apply
+   */
+  private async getRootFolderIdFromSocket(projectId: string): Promise<string | null> {
+    let sid: string | null = null;
+
+    try {
+      const handshakeUrl = `${BASE_URL}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+      const handshakeResponse = await this.fetchWithTimeout(handshakeUrl, {
+        headers: {
+          'Cookie': this.getCookieHeader(),
+          'User-Agent': USER_AGENT
+        }
+      }, 5000);
+
+      if (!handshakeResponse.ok) return null;
+      this.applySetCookieHeaders(handshakeResponse.headers);
+
+      const handshakeBody = (await handshakeResponse.text()).trim();
+      sid = handshakeBody.split(':')[0];
+      if (!sid) return null;
+
+      const buildPollUrl = () =>
+        `${BASE_URL}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+
+      let discoveredRootFolderId: string | null = null;
+
+      // poll a few frames, first is usually connect ack, next includes joinProjectResponse
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const pollResponse = await this.fetchWithTimeout(buildPollUrl(), {
+          headers: {
+            'Cookie': this.getCookieHeader(),
+            'User-Agent': USER_AGENT
+          }
+        }, 5000);
+
+        if (!pollResponse.ok) return null;
+        this.applySetCookieHeaders(pollResponse.headers);
+
+        const payload = await pollResponse.text();
+        const packets = this.decodeSocketIoPayload(payload);
+
+        for (const packet of packets) {
+          const rootFolderId = this.extractRootFolderIdFromSocketPacket(packet);
+          if (rootFolderId) {
+            discoveredRootFolderId = rootFolderId;
+            break;
+          }
+
+          if (packet.startsWith('2::')) {
+            //reply to heartbeat to keep polling transport alive
+            const heartbeatResponse = await this.fetchWithTimeout(buildPollUrl(), {
+              method: 'POST',
+              headers: {
+                'Cookie': this.getCookieHeader(),
+                'User-Agent': USER_AGENT,
+                'Content-Type': 'text/plain;charset=UTF-8'
+              },
+              body: '2::'
+            }, 5000);
+            this.applySetCookieHeaders(heartbeatResponse.headers);
+          }
+        }
+
+        if (discoveredRootFolderId) {
+          return discoveredRootFolderId;
+        }
+      }
+    } catch {
+      // Fall back to non-socket methods.
+    } finally {
+      if (sid) {
+        try {
+          const disconnectUrl =
+            `${BASE_URL}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+          const disconnectResponse = await this.fetchWithTimeout(disconnectUrl, {
+            method: 'POST',
+            headers: {
+              'Cookie': this.getCookieHeader(),
+              'User-Agent': USER_AGENT,
+              'Content-Type': 'text/plain;charset=UTF-8'
+            },
+            body: '0::'
+          }, 5000);
+          this.applySetCookieHeaders(disconnectResponse.headers);
+        } catch {
+          // Ignore cleanup failures.
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Get root folder ID for a project (tries multiple methods)
    */
   async getRootFolderId(projectId: string): Promise<string> {
@@ -416,7 +581,13 @@ export class OverleafClient {
       // Fall through to computed method
     }
 
-    // Method 2: Compute from project ID (projectId - 1)
+    // Method 2: Ask collaboration socket (authoritative project tree)
+    const socketRootFolderId = await this.getRootFolderIdFromSocket(projectId);
+    if (socketRootFolderId) {
+      return socketRootFolderId;
+    }
+
+    // Method 3: Compute from project ID (projectId - 1)
     return this.computeRootFolderId(projectId);
   }
 
@@ -523,7 +694,7 @@ export class OverleafClient {
       formData.append('type', mimeType);
       formData.append('qqfile', new Blob([content]), baseName);
 
-      const response = await fetch(`${UPLOAD_URL.replace('{id}', projectId)}?folder_id=${fid}`, {
+      const response = await fetch(`${UPLOAD_URL.replace('{id}', projectId)}?folder_id=${encodeURIComponent(fid)}`, {
         method: 'POST',
         headers: {
           'Cookie': this.getCookieHeader(),
@@ -535,6 +706,16 @@ export class OverleafClient {
 
       if (!response.ok) {
         const text = await response.text();
+        // Overleaf returns folder_not_found as HTTP 422 JSON.
+        // Parse the body first so caller can trigger folder probing fallback.
+        try {
+          const data = JSON.parse(text);
+          if (data?.error === 'folder_not_found') {
+            return { success: false, error: 'folder_not_found' };
+          }
+        } catch (e) {
+          // Ignore non-JSON responses and return generic HTTP error below.
+        }
         return { success: false, error: `${response.status} - ${text}` };
       }
 
@@ -551,8 +732,17 @@ export class OverleafClient {
 
     // First attempt with computed/cached folder ID
     let result = await tryUpload(targetFolderId);
-    
-    // If folder not found, probe for the correct folder ID
+
+    // If cached folder ID is stale, re-resolve root folder ID and retry once.
+    if (!result.success && result.error === 'folder_not_found') {
+      const refreshedRootFolderId = await this.getRootFolderId(projectId);
+      if (refreshedRootFolderId !== targetFolderId) {
+        targetFolderId = refreshedRootFolderId;
+        result = await tryUpload(targetFolderId);
+      }
+    }
+
+    // If folder is still unresolved, probe for a valid root folder ID
     if (!result.success && result.error === 'folder_not_found') {
       const probedFolderId = await this.probeRootFolderId(projectId);
       if (probedFolderId && probedFolderId !== targetFolderId) {
