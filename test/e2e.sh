@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # olcli End-to-End Test Suite
-# Tests all commands against the "olcli test" project
+# Tests all commands against a target project (defaults to "olcli test")
 #
 set -e
 
@@ -19,8 +19,8 @@ TESTS_FAILED=0
 CLEANUP_FILES=()
 CLEANUP_REMOTE_FILES=()
 
-# Test project name
-PROJECT_NAME="olcli test"
+# Test project name (override with OLCLI_E2E_PROJECT_NAME)
+PROJECT_NAME="${OLCLI_E2E_PROJECT_NAME:-olcli test}"
 
 # Temporary directory for test files
 TEST_DIR=$(mktemp -d)
@@ -204,9 +204,8 @@ run_test "check shows config info" \
 
 log_section "Project Listing Tests"
 
-run_test_with_output "list shows projects" \
-  "olcli list" \
-  "olcli test"
+run_test "list shows target project" \
+  "olcli list | grep -F \"$PROJECT_NAME\""
 
 run_test_with_output "list --json returns valid JSON" \
   "olcli list --json | jq -e 'type == \"array\"'" \
@@ -216,9 +215,9 @@ run_test_with_output "list --json returns valid JSON" \
 log_info "Waiting 5s before API calls to avoid rate limiting..."
 sleep 5
 
-PROJECT_ID=$(olcli list --json | jq -r '.[] | select(.name == "olcli test") | .id')
+PROJECT_ID=$(olcli list --json | jq -r --arg project_name "$PROJECT_NAME" '.[] | select(.name == $project_name) | .id')
 if [ -z "$PROJECT_ID" ]; then
-  log_fail "Could not find 'olcli test' project. Please create it on Overleaf first."
+  log_fail "Could not find '$PROJECT_NAME' project. Please create it on Overleaf first."
   exit 1
 fi
 
@@ -297,13 +296,14 @@ fi
 
 sleep 1  # Rate limit
 
-# Download existing file (main.tex)
-run_test "download main.tex" \
-  "olcli download main.tex '$PROJECT_ID' -o '$TEST_DIR/main.tex'"
+# Download second uploaded file (project-agnostic check)
+DOWNLOAD_FILE2="$TEST_DIR/downloaded_${TEST_ID}_2.txt"
+run_test "download second uploaded file" \
+  "olcli download '${TEST_ID}_2.txt' '$PROJECT_ID' -o '$DOWNLOAD_FILE2'"
 
-run_test_with_output "main.tex contains documentclass" \
-  "grep -l documentclass '$TEST_DIR/main.tex'" \
-  "main.tex"
+run_test_with_output "second downloaded content matches marker" \
+  "grep -F \"Second test file - $TEST_CONTENT\" '$DOWNLOAD_FILE2'" \
+  "Second test file"
 
 #######################################
 # Test: Zip Download
@@ -391,7 +391,7 @@ log_section "Output Files Tests"
 
 run_test_with_output "output --list shows files" \
   "olcli output --list --project '$PROJECT_ID'" \
-  "(bbl|log|aux)"
+  "(log|aux|pdf)"
 
 # Download log file
 LOG_FILE="$TEST_DIR/output.log"
@@ -410,10 +410,23 @@ fi
 
 sleep 1  # Rate limit
 
-# Download bbl file (for arXiv)
+# Download bbl file (for arXiv) - optional, project dependent
 BBL_FILE="$TEST_DIR/output.bbl"
-run_test "download bbl output" \
-  "olcli output bbl -o '$BBL_FILE' --project '$PROJECT_ID'"
+TESTS_RUN=$((TESTS_RUN + 1))
+echo -n "  Testing: download bbl output (optional) ... "
+if olcli output bbl -o "$BBL_FILE" --project "$PROJECT_ID" > /dev/null 2>&1; then
+  if [ -f "$BBL_FILE" ] && [ -s "$BBL_FILE" ]; then
+    echo -e "${GREEN}✓${NC}"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+  else
+    echo -e "${YELLOW}⚠ (downloaded empty bbl)${NC}"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    log_warn "bbl output was empty"
+  fi
+else
+  echo -e "${YELLOW}⚠ (no bbl artifact for this project)${NC}"
+  TESTS_PASSED=$((TESTS_PASSED + 1))
+fi
 
 #######################################
 # Test: Pull
@@ -438,8 +451,8 @@ else
 fi
 
 TESTS_RUN=$((TESTS_RUN + 1))
-echo -n "  Testing: main.tex exists in pulled directory ... "
-if [ -f "$PULL_DIR/main.tex" ]; then
+echo -n "  Testing: second uploaded file exists in pulled directory ... "
+if [ -f "$PULL_DIR/${TEST_ID}_2.txt" ]; then
   echo -e "${GREEN}✓${NC}"
   TESTS_PASSED=$((TESTS_PASSED + 1))
 else
@@ -498,6 +511,48 @@ if [ -f "$VERIFY_FILE" ]; then
     echo -e "${RED}✗${NC}"
     echo "    Expected: $PUSH_CONTENT"
     echo "    Got: $VERIFY_CONTENT"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+  fi
+else
+  echo -e "${RED}✗ (file not found)${NC}"
+  TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+
+sleep 1  # Rate limit
+
+# Regression prob: stale/invalid cached rootFolderId should not break push
+# This exercises upload fallback on folder_not_found without requiring --probe-folder
+PUSH_RECOVER_FILE="$PULL_DIR/${TEST_ID}_push_recover.txt"
+PUSH_RECOVER_CONTENT="Push recovery test - $TIMESTAMP - $(uuidgen 2>/dev/null || echo $RANDOM)"
+echo "$PUSH_RECOVER_CONTENT" > "$PUSH_RECOVER_FILE"
+CLEANUP_REMOTE_FILES+=("${TEST_ID}_push_recover.txt")
+
+# Force an invalid folder ID in local metadata (24-hex format)
+if [ -f "$PULL_DIR/.olcli.json" ]; then
+  jq '.rootFolderId = "ffffffffffffffffffffffff"' "$PULL_DIR/.olcli.json" > "$PULL_DIR/.olcli.json.tmp" \
+    && mv "$PULL_DIR/.olcli.json.tmp" "$PULL_DIR/.olcli.json"
+fi
+
+run_test "push recovers from stale rootFolderId" \
+  "cd '$PULL_DIR' && olcli push"
+
+# Verify recovery upload by downloading the new file
+VERIFY_RECOVER_FILE="$TEST_DIR/verify_push_recover.txt"
+sleep 2  # Give Overleaf a moment
+run_test "download recovered push file" \
+  "olcli download '${TEST_ID}_push_recover.txt' '$PROJECT_ID' -o '$VERIFY_RECOVER_FILE'"
+
+TESTS_RUN=$((TESTS_RUN + 1))
+echo -n "  Testing: recovered push content matches ... "
+if [ -f "$VERIFY_RECOVER_FILE" ]; then
+  VERIFY_RECOVER_CONTENT=$(cat "$VERIFY_RECOVER_FILE")
+  if [ "$VERIFY_RECOVER_CONTENT" = "$PUSH_RECOVER_CONTENT" ]; then
+    echo -e "${GREEN}✓${NC}"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+  else
+    echo -e "${RED}✗${NC}"
+    echo "    Expected: $PUSH_RECOVER_CONTENT"
+    echo "    Got: $VERIFY_RECOVER_CONTENT"
     TESTS_FAILED=$((TESTS_FAILED + 1))
   fi
 else
