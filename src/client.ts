@@ -473,6 +473,37 @@ export class OverleafClient {
   }
 
   /**
+   * Extract full folder tree from a Socket.IO joinProjectResponse packet.
+   * Returns a map of folder path -> folder ID, e.g. { '': rootId, 'figures': figuresId }
+   */
+  private extractFolderTreeFromSocketPacket(packet: string): Record<string, string> | null {
+    if (!packet.startsWith('5:::')) return null;
+
+    try {
+      const payload = JSON.parse(packet.slice(4));
+      if (payload?.name !== 'joinProjectResponse') return null;
+
+      const rootFolder = payload?.args?.[0]?.project?.rootFolder?.[0];
+      if (!rootFolder?._id) return null;
+
+      const folderMap: Record<string, string> = {};
+
+      function walkFolders(folder: any, currentPath: string): void {
+        folderMap[currentPath] = folder._id;
+        for (const sub of folder.folders || []) {
+          const subPath = currentPath ? `${currentPath}/${sub.name}` : sub.name;
+          walkFolders(sub, subPath);
+        }
+      }
+
+      walkFolders(rootFolder, '');
+      return folderMap;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * main problem to resolve root folder ID from Overleaf's collaboration join payload
    * authoritative for projects where ObjectID arithmetic does not apply
    */
@@ -568,6 +599,136 @@ export class OverleafClient {
   }
 
   /**
+   * Get full folder tree for a project via Socket.IO.
+   * Returns a map of folder path -> folder ID, e.g. { '': rootId, 'figures': figuresId }
+   */
+  async getFolderTreeFromSocket(projectId: string): Promise<Record<string, string> | null> {
+    let sid: string | null = null;
+
+    try {
+      const handshakeUrl = `${BASE_URL}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+      const handshakeResponse = await this.fetchWithTimeout(handshakeUrl, {
+        headers: {
+          'Cookie': this.getCookieHeader(),
+          'User-Agent': USER_AGENT
+        }
+      }, 5000);
+
+      if (!handshakeResponse.ok) return null;
+      this.applySetCookieHeaders(handshakeResponse.headers);
+
+      const handshakeBody = (await handshakeResponse.text()).trim();
+      sid = handshakeBody.split(':')[0];
+      if (!sid) return null;
+
+      const buildPollUrl = () =>
+        `${BASE_URL}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const pollResponse = await this.fetchWithTimeout(buildPollUrl(), {
+          headers: {
+            'Cookie': this.getCookieHeader(),
+            'User-Agent': USER_AGENT
+          }
+        }, 5000);
+
+        if (!pollResponse.ok) return null;
+        this.applySetCookieHeaders(pollResponse.headers);
+
+        const payload = await pollResponse.text();
+        const packets = this.decodeSocketIoPayload(payload);
+
+        for (const packet of packets) {
+          const folderTree = this.extractFolderTreeFromSocketPacket(packet);
+          if (folderTree) return folderTree;
+
+          if (packet.startsWith('2::')) {
+            const heartbeatResponse = await this.fetchWithTimeout(buildPollUrl(), {
+              method: 'POST',
+              headers: {
+                'Cookie': this.getCookieHeader(),
+                'User-Agent': USER_AGENT,
+                'Content-Type': 'text/plain;charset=UTF-8'
+              },
+              body: '2::'
+            }, 5000);
+            this.applySetCookieHeaders(heartbeatResponse.headers);
+          }
+        }
+      }
+    } catch {
+      // Fall back
+    } finally {
+      if (sid) {
+        try {
+          const disconnectUrl =
+            `${BASE_URL}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+          await this.fetchWithTimeout(disconnectUrl, {
+            method: 'POST',
+            headers: {
+              'Cookie': this.getCookieHeader(),
+              'User-Agent': USER_AGENT,
+              'Content-Type': 'text/plain;charset=UTF-8'
+            },
+            body: '0::'
+          }, 5000);
+        } catch {
+          // Ignore cleanup failures.
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Resolve a folder path to a folder ID, creating missing folders as needed.
+   * folderTree is a map of path -> ID (fetched once per push session).
+   * folderPath is e.g. 'figures' or 'a/b/c'.
+   */
+  async resolveFolderId(
+    projectId: string,
+    folderTree: Record<string, string>,
+    folderPath: string
+  ): Promise<string> {
+    if (!folderPath || folderPath === '') return folderTree[''];
+    if (folderTree[folderPath]) return folderTree[folderPath];
+
+    // Create each missing segment
+    const segments = folderPath.split('/');
+    let currentPath = '';
+
+    for (const segment of segments) {
+      const parentPath = currentPath;
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+
+      if (folderTree[currentPath]) continue;
+
+      const parentId = folderTree[parentPath];
+      if (!parentId) throw new Error(`Cannot resolve parent folder for: ${currentPath}`);
+
+      try {
+        const newId = await this.createFolder(projectId, parentId, segment);
+        folderTree[currentPath] = newId;
+      } catch (e: any) {
+        if (e.message === 'Folder already exists') {
+          // Folder exists but we don't have its ID - re-fetch tree
+          const freshTree = await this.getFolderTreeFromSocket(projectId);
+          if (freshTree?.[currentPath]) {
+            folderTree[currentPath] = freshTree[currentPath];
+          } else {
+            throw new Error(`Folder '${currentPath}' exists but could not resolve its ID`);
+          }
+        } else {
+          throw e;
+        }
+      }
+    }
+
+    return folderTree[folderPath];
+  }
+
+  /**
    * Get root folder ID for a project (tries multiple methods)
    */
   async getRootFolderId(projectId: string): Promise<string> {
@@ -655,19 +816,28 @@ export class OverleafClient {
   }
 
   /**
-   * Upload a file to a project
+   * Upload a file to a project.
+   * If folderTree is provided and fileName contains a path (e.g. 'figures/img.png'),
+   * the file will be uploaded into the correct subfolder, creating it if needed.
    */
   async uploadFile(
     projectId: string,
     folderId: string | null,
     fileName: string,
-    content: Buffer
+    content: Buffer,
+    folderTree?: Record<string, string>
   ): Promise<{ success: boolean; entityId?: string; entityType?: string }> {
-    // If no folder ID provided, get the root folder
-    let targetFolderId = folderId || await this.getRootFolderId(projectId);
-
-    // Extract just the filename without path (PR #73 fix)
+    // Extract just the filename without path
     const baseName = fileName.split('/').pop() || fileName;
+
+    // Resolve target folder: if fileName has a directory part and we have a folderTree, use it
+    const dirPart = fileName.includes('/') ? fileName.split('/').slice(0, -1).join('/') : '';
+    let targetFolderId: string;
+    if (dirPart && folderTree) {
+      targetFolderId = await this.resolveFolderId(projectId, folderTree, dirPart);
+    } else {
+      targetFolderId = folderId || await this.getRootFolderId(projectId);
+    }
 
     // Determine MIME type
     const ext = baseName.split('.').pop()?.toLowerCase() || '';
