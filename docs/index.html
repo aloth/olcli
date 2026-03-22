@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>olcli — Overleaf CLI: Sync, Compile & Manage LaTeX from Your Terminal</title>
+<meta name="description" content="Command-line interface for Overleaf. Pull, push, sync, and compile LaTeX projects from your terminal. Install via Homebrew or npm.">
+<meta property="og:title" content="olcli — Overleaf CLI">
+<meta property="og:description" content="Sync, compile, and manage LaTeX projects from your terminal.">
+<meta property="og:url" content="https://aloth.github.io/olcli/">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--green:#3fb950;--blue:#58a6ff;--purple:#bc8cff;--yellow:#d29922;--red:#f85149;--cyan:#39d353;--text:#e6edf3;--muted:#8b949e;--dimmed:#484f58}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);overflow-x:hidden;-webkit-font-smoothing:antialiased}
+
+/* Hero */
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:60px 24px 40px;position:relative}
+.hero::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:800px;height:600px;background:radial-gradient(ellipse,rgba(88,166,255,0.08) 0%,transparent 70%);pointer-events:none}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:6px 16px;font-size:13px;font-weight:500;color:var(--muted);margin-bottom:28px}
+.hero-badge code{font-family:'JetBrains Mono',monospace;color:var(--green);font-size:12px}
+.hero h1{font-size:clamp(2.5rem,7vw,4.5rem);font-weight:800;line-height:1.05;margin-bottom:20px;letter-spacing:-0.03em}
+.hero h1 .accent{background:linear-gradient(135deg,var(--green),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero p{font-size:clamp(1rem,2.5vw,1.3rem);color:var(--muted);max-width:560px;line-height:1.6;margin-bottom:36px}
+
+/* Install bar */
+.install-bar{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-bottom:48px}
+.install-option{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 24px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:border-color 0.2s,transform 0.2s;position:relative}
+.install-option:hover{border-color:var(--green);transform:translateY(-2px)}
+.install-label{font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--dimmed);font-weight:600}
+.install-cmd{font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--green)}
+.install-option .copy-hint{position:absolute;top:-8px;right:-8px;background:var(--green);color:var(--bg);font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;opacity:0;transition:opacity 0.2s}
+.install-option:hover .copy-hint{opacity:1}
+
+/* Terminal */
+.terminal{max-width:min(680px,90vw);width:100%;background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;text-align:left;box-shadow:0 20px 60px rgba(0,0,0,0.4)}
+.terminal-bar{background:#21262d;padding:10px 16px;display:flex;align-items:center;gap:8px}
+.terminal-dot{width:12px;height:12px;border-radius:50%}
+.terminal-dot.r{background:#f85149}.terminal-dot.y{background:#d29922}.terminal-dot.g{background:#3fb950}
+.terminal-bar span{flex:1;text-align:center;font-size:12px;color:var(--dimmed);font-family:'JetBrains Mono',monospace}
+.terminal-body{padding:20px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.8}
+.terminal-body .prompt{color:var(--green)}
+.terminal-body .cmd{color:var(--text)}
+.terminal-body .flag{color:var(--purple)}
+.terminal-body .string{color:var(--yellow)}
+.terminal-body .output{color:var(--muted)}
+.terminal-body .success{color:var(--green)}
+.terminal-body .line{opacity:0;animation:typeLine 0.3s forwards}
+@keyframes typeLine{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.terminal-body .line:nth-child(1){animation-delay:0.3s}
+.terminal-body .line:nth-child(2){animation-delay:0.8s}
+.terminal-body .line:nth-child(3){animation-delay:1.3s}
+.terminal-body .line:nth-child(4){animation-delay:1.5s}
+.terminal-body .line:nth-child(5){animation-delay:1.7s}
+.terminal-body .line:nth-child(6){animation-delay:2.5s}
+.terminal-body .line:nth-child(7){animation-delay:3.0s}
+.terminal-body .line:nth-child(8){animation-delay:3.2s}
+.terminal-body .line:nth-child(9){animation-delay:4.0s}
+.terminal-body .line:nth-child(10){animation-delay:4.5s}
+.terminal-body .line:nth-child(11){animation-delay:4.7s}
+
+/* Features */
+.features{padding:100px 24px;position:relative}
+.features::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--border),transparent)}
+.features h2{text-align:center;font-size:clamp(1.5rem,4vw,2.2rem);font-weight:800;margin-bottom:12px}
+.features .subtitle{text-align:center;color:var(--muted);font-size:1.05rem;margin-bottom:56px;max-width:500px;margin-left:auto;margin-right:auto}
+.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;max-width:900px;margin:0 auto}
+.feature-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px 24px;transition:border-color 0.2s,transform 0.2s}
+.feature-card:hover{border-color:var(--green);transform:translateY(-3px)}
+.feature-icon{font-size:32px;margin-bottom:14px}
+.feature-card h3{font-size:1rem;font-weight:700;margin-bottom:6px}
+.feature-card p{color:var(--muted);font-size:0.9rem;line-height:1.5}
+
+/* Workflow comparison */
+.comparison{padding:80px 24px}
+.comparison h2{text-align:center;font-size:clamp(1.5rem,4vw,2.2rem);font-weight:800;margin-bottom:48px}
+.compare-table{max-width:700px;margin:0 auto;border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.compare-row{display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid var(--border)}
+.compare-row:last-child{border-bottom:none}
+.compare-cell{padding:14px 18px;font-size:0.9rem}
+.compare-header{background:#21262d;font-weight:700;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.03em;color:var(--muted)}
+.compare-cell.label{color:var(--muted);font-weight:500}
+.compare-cell .yes{color:var(--green)}
+.compare-cell .no{color:var(--red)}
+.compare-cell .partial{color:var(--yellow)}
+
+/* Use cases */
+.usecases{padding:80px 24px}
+.usecases h2{text-align:center;font-size:clamp(1.5rem,4vw,2.2rem);font-weight:800;margin-bottom:48px}
+.usecase-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;max-width:900px;margin:0 auto}
+.usecase-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:24px}
+.usecase-card h3{font-size:1rem;font-weight:700;margin-bottom:8px}
+.usecase-card code{font-family:'JetBrains Mono',monospace;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 14px;display:block;margin-top:12px;font-size:12px;line-height:1.6;color:var(--green);overflow-x:auto}
+
+/* CTA */
+.cta{padding:80px 24px;text-align:center;position:relative}
+.cta::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--border),transparent)}
+.cta h2{font-size:clamp(1.5rem,4vw,2.2rem);font-weight:800;margin-bottom:12px}
+.cta p{color:var(--muted);font-size:1.05rem;margin-bottom:32px}
+.cta-buttons{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:14px 28px;border-radius:10px;font-weight:600;font-size:1rem;text-decoration:none;transition:transform 0.2s,box-shadow 0.2s}
+.btn:hover{transform:translateY(-2px)}
+.btn-primary{background:var(--green);color:var(--bg);box-shadow:0 4px 20px rgba(63,185,80,0.3)}
+.btn-primary:hover{box-shadow:0 8px 30px rgba(63,185,80,0.4)}
+.btn-secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+.btn-secondary:hover{border-color:var(--muted)}
+.btn svg{width:20px;height:20px;fill:currentColor}
+
+.stats{display:flex;gap:40px;justify-content:center;margin-top:48px;flex-wrap:wrap}
+.stat{text-align:center}
+.stat .num{font-size:1.8rem;font-weight:800;color:var(--green)}
+.stat .label{font-size:0.85rem;color:var(--dimmed);margin-top:4px}
+
+footer{border-top:1px solid var(--border);padding:24px;text-align:center;color:var(--dimmed);font-size:0.85rem}
+footer a{color:var(--muted);text-decoration:none}
+
+@media(max-width:600px){
+  .install-bar{flex-direction:column;align-items:center}
+  .compare-cell{padding:10px 12px;font-size:0.8rem}
+  .terminal-body{font-size:11px;padding:14px}
+}
+</style>
+</head>
+<body>
+
+<section class="hero">
+  <div class="hero-badge">v0.1.6 · <code>MIT Licensed</code> · Node.js</div>
+  <h1>Overleaf,<br>from your <span class="accent">terminal.</span></h1>
+  <p>Pull, push, sync, and compile LaTeX projects without leaving your editor. Works with Git, CI/CD, and AI agents.</p>
+
+  <div class="install-bar">
+    <div class="install-option" onclick="navigator.clipboard.writeText('brew tap aloth/tap && brew install olcli')">
+      <div>
+        <div class="install-label">Homebrew</div>
+        <div class="install-cmd">brew install aloth/tap/olcli</div>
+      </div>
+      <div class="copy-hint">Click to copy</div>
+    </div>
+    <div class="install-option" onclick="navigator.clipboard.writeText('npm install -g @aloth/olcli')">
+      <div>
+        <div class="install-label">npm</div>
+        <div class="install-cmd">npm install -g @aloth/olcli</div>
+      </div>
+      <div class="copy-hint">Click to copy</div>
+    </div>
+  </div>
+
+  <div class="terminal">
+    <div class="terminal-bar">
+      <div class="terminal-dot r"></div>
+      <div class="terminal-dot y"></div>
+      <div class="terminal-dot g"></div>
+      <span>olcli — zsh</span>
+    </div>
+    <div class="terminal-body">
+      <div class="line"><span class="prompt">$ </span><span class="cmd">olcli list</span></div>
+      <div class="line"><span class="output">  PhD Thesis</span></div>
+      <div class="line"><span class="output">  Conference Paper (ICML 2026)</span></div>
+      <div class="line"><span class="output">  Grant Proposal</span></div>
+      <div class="line"><br></div>
+      <div class="line"><span class="prompt">$ </span><span class="cmd">olcli pull </span><span class="string">"Conference Paper"</span><span class="cmd"> paper</span></div>
+      <div class="line"><span class="success">✓ Pulled 12 files to ./paper/</span></div>
+      <div class="line"><br></div>
+      <div class="line"><span class="prompt">$ </span><span class="cmd">vim paper/main.tex</span></div>
+      <div class="line"><span class="prompt">$ </span><span class="cmd">olcli sync</span></div>
+      <div class="line"><span class="success">✓ Pushed 1 file · Pulled 0 files · PDF compiled</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="features">
+  <h2>Everything you need</h2>
+  <p class="subtitle">Full Overleaf access without opening a browser.</p>
+  <div class="feature-grid">
+    <div class="feature-card">
+      <div class="feature-icon">🔄</div>
+      <h3>Bidirectional Sync</h3>
+      <p>Smart conflict detection. Local wins if newer, remote changes pulled automatically.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📄</div>
+      <h3>Remote Compilation</h3>
+      <p>Compile PDFs using Overleaf's servers. Download output artifacts (.bbl, .log) for arXiv.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">✏️</div>
+      <h3>Your Editor, Your Way</h3>
+      <p>Vim, VS Code, Emacs, Sublime — edit locally in whatever you're fastest with.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🤖</div>
+      <h3>AI Agent Ready</h3>
+      <p>AgentSkills compatible. Let AI assistants manage your LaTeX projects programmatically.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📦</div>
+      <h3>arXiv Workflow</h3>
+      <p>Download .bbl files, create submission zips, and prepare camera-ready papers from CLI.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔐</div>
+      <h3>Flexible Auth</h3>
+      <p>Session cookie via env var, .olauth file, or global config. Works in CI/CD pipelines.</p>
+    </div>
+  </div>
+</section>
+
+<section class="comparison">
+  <h2>Why olcli?</h2>
+  <div class="compare-table">
+    <div class="compare-row">
+      <div class="compare-cell compare-header"></div>
+      <div class="compare-cell compare-header" style="color:var(--green)">olcli</div>
+      <div class="compare-cell compare-header">Overleaf Web</div>
+    </div>
+    <div class="compare-row">
+      <div class="compare-cell label">Use any editor</div>
+      <div class="compare-cell"><span class="yes">✓</span></div>
+      <div class="compare-cell"><span class="no">✗</span></div>
+    </div>
+    <div class="compare-row">
+      <div class="compare-cell label">Git version control</div>
+      <div class="compare-cell"><span class="yes">✓</span></div>
+      <div class="compare-cell"><span class="partial">Premium only</span></div>
+    </div>
+    <div class="compare-row">
+      <div class="compare-cell label">Offline editing</div>
+      <div class="compare-cell"><span class="yes">✓</span></div>
+      <div class="compare-cell"><span class="no">✗</span></div>
+    </div>
+    <div class="compare-row">
+      <div class="compare-cell label">CI/CD automation</div>
+      <div class="compare-cell"><span class="yes">✓</span></div>
+      <div class="compare-cell"><span class="no">✗</span></div>
+    </div>
+    <div class="compare-row">
+      <div class="compare-cell label">AI agent integration</div>
+      <div class="compare-cell"><span class="yes">✓</span></div>
+      <div class="compare-cell"><span class="no">✗</span></div>
+    </div>
+    <div class="compare-row">
+      <div class="compare-cell label">Cloud compilation</div>
+      <div class="compare-cell"><span class="yes">✓</span></div>
+      <div class="compare-cell"><span class="yes">✓</span></div>
+    </div>
+    <div class="compare-row">
+      <div class="compare-cell label">Real-time collab</div>
+      <div class="compare-cell"><span class="no">✗</span></div>
+      <div class="compare-cell"><span class="yes">✓</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="usecases">
+  <h2>Common workflows</h2>
+  <div class="usecase-grid">
+    <div class="usecase-card">
+      <h3>📝 Daily thesis work</h3>
+      <p>Edit locally, sync when ready, compile to check output.</p>
+      <code>olcli pull "PhD Thesis" thesis<br>vim thesis/chapters/results.tex<br>olcli sync<br>olcli pdf -o draft.pdf</code>
+    </div>
+    <div class="usecase-card">
+      <h3>📮 arXiv submission</h3>
+      <p>Download compiled artifacts and package for upload.</p>
+      <code>olcli output bbl -o main.bbl<br>olcli zip -o arxiv-submission.zip</code>
+    </div>
+    <div class="usecase-card">
+      <h3>💾 Backup all projects</h3>
+      <p>One-liner to archive every project as a zip.</p>
+      <code>olcli list --json | jq -r '.[].name' \<br>  | xargs -I{} olcli zip "{}" -o "{}.zip"</code>
+    </div>
+  </div>
+</section>
+
+<section class="cta">
+  <h2>Start using olcli</h2>
+  <p>Free, open source, MIT licensed. Install in 10 seconds.</p>
+  <div class="cta-buttons">
+    <a href="https://www.npmjs.com/package/@aloth/olcli" class="btn btn-primary">
+      Install via npm
+    </a>
+    <a href="https://github.com/aloth/olcli" class="btn btn-secondary">
+      <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      View on GitHub ⭐
+    </a>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="num">19</div><div class="label">GitHub Stars</div></div>
+    <div class="stat"><div class="num">7</div><div class="label">Releases</div></div>
+    <div class="stat"><div class="num">MIT</div><div class="label">License</div></div>
+  </div>
+</section>
+
+<footer>
+  <p>Made by <a href="https://alexloth.com">Alexander Loth</a> · <a href="https://github.com/aloth/overleaf-skill">Agent Skill</a></p>
+</footer>
+
+</body>
+</html>
