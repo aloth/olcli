@@ -61,6 +61,28 @@ npx @aloth/olcli list
 npx skills add aloth/olcli
 ```
 
+### Arch Linux
+
+The package is available on the [Arch User Repository (AUR)](https://aur.archlinux.org/packages/olcli). 
+
+You can install it using your preferred AUR helper (such as `yay` or `paru`):
+
+```bash
+yay -S olcli
+# or
+paru -S olcli
+```
+
+#### Manual Installation:
+If you prefer not to use an AUR helper, you can build and install the package manually using makepkg:
+code Bash
+
+```bash
+git clone https://aur.archlinux.org/olcli.git
+cd olcli
+makepkg -si
+```
+
 ## Quick Start
 
 ### 1. Authenticate with Overleaf
