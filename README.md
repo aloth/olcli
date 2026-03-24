@@ -3,6 +3,8 @@
 **Command-line interface for Overleaf** — Sync, manage, and compile LaTeX projects from your terminal.
 
 [![npm version](https://img.shields.io/npm/v/@aloth/olcli.svg)](https://www.npmjs.com/package/@aloth/olcli)
+[![Homebrew version](https://img.shields.io/homebrew/v/olcli)](https://formulae.brew.sh/formula/olcli)
+[![AUR Package](https://img.shields.io/aur/version/olcli)](https://aur.archlinux.org/packages/olcli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![AgentSkills](https://img.shields.io/badge/AgentSkills-compatible-blue)](https://agentskills.io)
 
