@@ -468,47 +468,43 @@ program
     }
   });
 
-// NOTE: delete and rename commands are disabled - they require entity IDs
-// which are not exposed via the current Overleaf API without Socket.IO.
-// Use the Overleaf web UI for these operations.
-//
-// program
-//   .command('delete <file> [project]')
-//   .alias('rm')
-//   .description('Delete a file from a project')
-//   .option('--cookie <session>', 'Session cookie override')
-//   .action(async (file, project, options) => {
-//     const spinner = ora('Deleting file...').start();
-//     try {
-//       const client = await getClient(options.cookie);
-//       const proj = await resolveProject(client, project);
-//       await client.deleteByPath(proj.id, file);
-//       spinner.succeed(`Deleted: ${file}`);
-//       setLastProject(proj.id);
-//     } catch (error: any) {
-//       spinner.fail(`Failed: ${error.message}`);
-//       process.exit(1);
-//     }
-//   });
-//
-// program
-//   .command('rename <oldname> <newname> [project]')
-//   .alias('mv')
-//   .description('Rename a file in a project')
-//   .option('--cookie <session>', 'Session cookie override')
-//   .action(async (oldname, newname, project, options) => {
-//     const spinner = ora('Renaming file...').start();
-//     try {
-//       const client = await getClient(options.cookie);
-//       const proj = await resolveProject(client, project);
-//       await client.renameByPath(proj.id, oldname, newname);
-//       spinner.succeed(`Renamed: ${oldname} → ${newname}`);
-//       setLastProject(proj.id);
-//     } catch (error: any) {
-//       spinner.fail(`Failed: ${error.message}`);
-//       process.exit(1);
-//     }
-//   });
+program
+  .command('delete <file> [project]')
+  .alias('rm')
+  .description('Delete a file from a project (uses socket.io to resolve entity ID)')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (file, project, options) => {
+    const spinner = ora('Deleting file...').start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      await client.deleteByPath(proj.id, file);
+      spinner.succeed(`Deleted: ${file}`);
+      setLastProject(proj.id);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('rename <oldname> <newname> [project]')
+  .alias('mv')
+  .description('Rename a file in a project (uses socket.io to resolve entity ID)')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (oldname, newname, project, options) => {
+    const spinner = ora('Renaming file...').start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      await client.renameByPath(proj.id, oldname, newname);
+      spinner.succeed(`Renamed: ${oldname} → ${newname}`);
+      setLastProject(proj.id);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPILE COMMAND
