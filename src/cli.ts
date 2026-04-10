@@ -25,7 +25,9 @@ import {
   setLastProject,
   getConfigPath,
   saveOlAuth,
-  clearConfig
+  clearConfig,
+  getBaseUrl,
+  setBaseUrl
 } from './config.js';
 
 const program = new Command();
@@ -33,12 +35,13 @@ const program = new Command();
 program
   .name('olcli')
   .description('Overleaf CLI - interact with Overleaf projects from the command line')
-  .version(VERSION);
+  .version(VERSION)
+  .option('--base-url <url>', 'Overleaf instance base URL (overrides OVERLEAF_BASE_URL and config)');
 
 /**
  * Helper to get authenticated client
  */
-async function getClient(cookieOpt?: string): Promise<OverleafClient> {
+async function getClient(cookieOpt?: string, baseUrlOpt?: string): Promise<OverleafClient> {
   const cookie = cookieOpt || getSessionCookie();
   if (!cookie) {
     console.error(chalk.red('No session cookie found.'));
@@ -47,7 +50,8 @@ async function getClient(cookieOpt?: string): Promise<OverleafClient> {
     console.error('Or create .olauth file in current directory');
     process.exit(1);
   }
-  return OverleafClient.fromSessionCookie(cookie);
+  const baseUrl = baseUrlOpt || (program.opts().baseUrl as string | undefined) || getBaseUrl();
+  return OverleafClient.fromSessionCookie(cookie, baseUrl);
 }
 
 /**
@@ -118,7 +122,8 @@ program
 
     const spinner = ora('Verifying session...').start();
     try {
-      const client = await OverleafClient.fromSessionCookie(options.cookie);
+      const baseUrl = (program.opts().baseUrl as string | undefined) || getBaseUrl();
+      const client = await OverleafClient.fromSessionCookie(options.cookie, baseUrl);
       const projects = await client.listProjects();
 
       setSessionCookie(options.cookie);
@@ -149,7 +154,8 @@ program
 
     const spinner = ora('Checking session...').start();
     try {
-      const client = await OverleafClient.fromSessionCookie(cookie);
+      const baseUrl = (program.opts().baseUrl as string | undefined) || getBaseUrl();
+      const client = await OverleafClient.fromSessionCookie(cookie, baseUrl);
       const projects = await client.listProjects();
       spinner.succeed(`Authenticated with access to ${projects.length} projects`);
     } catch (error: any) {
@@ -1008,6 +1014,27 @@ program
       spinner.fail(`Failed: ${error.message}`);
       process.exit(1);
     }
+  });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONFIG COMMANDS
+// ─────────────────────────────────────────────────────────────────────────────
+
+const configCmd = program
+  .command('config')
+  .description('Manage olcli configuration');
+
+configCmd.command('set-url <url>')
+  .description('Set the Overleaf instance base URL')
+  .action((url: string) => {
+    setBaseUrl(url);
+    console.log(chalk.green(`Base URL set to: ${url}`));
+  });
+
+configCmd.command('get-url')
+  .description('Get the current Overleaf instance base URL')
+  .action(() => {
+    console.log(getBaseUrl());
   });
 
 // ─────────────────────────────────────────────────────────────────────────────
