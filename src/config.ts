@@ -11,6 +11,7 @@ interface OlcliConfig {
   sessionCookie?: string;
   csrf?: string;
   lastProject?: string;
+  baseUrl?: string;
 }
 
 const config = new Conf<OlcliConfig>({
@@ -18,7 +19,8 @@ const config = new Conf<OlcliConfig>({
   schema: {
     sessionCookie: { type: 'string' },
     csrf: { type: 'string' },
-    lastProject: { type: 'string' }
+    lastProject: { type: 'string' },
+    baseUrl: { type: 'string' }
   }
 });
 
@@ -69,6 +71,23 @@ export function getLastProject(): string | undefined {
 
 export function setLastProject(projectId: string): void {
   config.set('lastProject', projectId);
+}
+
+export function getBaseUrl(): string {
+  // Check environment variable first (consistent with OVERLEAF_SESSION pattern)
+  if (process.env.OVERLEAF_BASE_URL) {
+    return process.env.OVERLEAF_BASE_URL;
+  }
+  // Fall back to config, then default
+  return config.get('baseUrl') || 'https://www.overleaf.com';
+}
+
+export function setBaseUrl(url: string): void {
+  config.set('baseUrl', url);
+}
+
+export function clearBaseUrl(): void {
+  config.delete('baseUrl');
 }
 
 export function clearConfig(): void {
