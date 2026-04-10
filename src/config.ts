@@ -12,6 +12,7 @@ interface OlcliConfig {
   csrf?: string;
   lastProject?: string;
   baseUrl?: string;
+  sessionCookieName?: string;
 }
 
 const config = new Conf<OlcliConfig>({
@@ -20,7 +21,8 @@ const config = new Conf<OlcliConfig>({
     sessionCookie: { type: 'string' },
     csrf: { type: 'string' },
     lastProject: { type: 'string' },
-    baseUrl: { type: 'string' }
+    baseUrl: { type: 'string' },
+    sessionCookieName: { type: 'string' }
   }
 });
 
@@ -88,6 +90,23 @@ export function setBaseUrl(url: string): void {
 
 export function clearBaseUrl(): void {
   config.delete('baseUrl');
+}
+
+export function getSessionCookieName(): string {
+  // Check environment variable first
+  if (process.env.OVERLEAF_COOKIE_NAME) {
+    return process.env.OVERLEAF_COOKIE_NAME;
+  }
+  // Fall back to config, then default
+  return config.get('sessionCookieName') || 'overleaf_session2';
+}
+
+export function setSessionCookieName(name: string): void {
+  config.set('sessionCookieName', name);
+}
+
+export function clearSessionCookieName(): void {
+  config.delete('sessionCookieName');
 }
 
 export function clearConfig(): void {

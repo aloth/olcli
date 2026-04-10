@@ -83,9 +83,9 @@ export class OverleafClient {
   /**
    * Create client from session cookie string
    */
-  static async fromSessionCookie(sessionCookie: string, baseUrl?: string): Promise<OverleafClient> {
+  static async fromSessionCookie(sessionCookie: string, baseUrl?: string, cookieName: string = 'overleaf_session2'): Promise<OverleafClient> {
     const cookies: Record<string, string> = {
-      'overleaf_session2': sessionCookie
+      [cookieName]: sessionCookie
     };
 
     const resolvedBaseUrl = baseUrl || 'https://www.overleaf.com';
