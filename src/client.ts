@@ -186,6 +186,43 @@ export class OverleafClient {
    * Get all projects (not archived, not trashed)
    */
   async listProjects(): Promise<Project[]> {
+    // Method 0: POST /api/project (newer self-hosted Overleaf instances)
+    try {
+      const apiResponse = await fetch(`${this.baseUrl}/api/project`, {
+        method: 'POST',
+        headers: {
+          ...this.getHeaders(true),
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ sort: { by: 'lastUpdated', order: 'desc' } })
+      });
+      if (apiResponse.ok) {
+        const data = await apiResponse.json() as any;
+        const projects: any[] = data.projects || data;
+        if (Array.isArray(projects) && projects.length > 0) {
+          return projects
+            .filter((p: any) => !p.archived && !p.trashed)
+            .map((p: any) => ({
+              id: p.id || p._id,
+              name: p.name,
+              lastUpdated: p.lastUpdated,
+              lastUpdatedBy: p.lastUpdatedBy,
+              owner: p.owner,
+              archived: p.archived,
+              trashed: p.trashed
+            }));
+        }
+        // API responded but returned empty — could be genuinely 0 projects,
+        // or the instance doesn't support this endpoint. Fall through to HTML.
+        if (Array.isArray(projects)) {
+          // Genuine empty list — return it
+          return [];
+        }
+      }
+    } catch (e) {
+      // Endpoint not available, fall through to HTML scraping
+    }
+
     const response = await fetch(this.projectUrl, {
       headers: this.getHeaders()
     });
