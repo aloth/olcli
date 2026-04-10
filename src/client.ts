@@ -548,6 +548,120 @@ export class OverleafClient {
   }
 
   /**
+   * Extract full rootFolder array from a Socket.IO joinProjectResponse packet.
+   */
+  private extractRootFolderFromSocketPacket(packet: string): FolderEntry[] | null {
+    if (!packet.startsWith('5:::')) return null;
+
+    try {
+      const payload = JSON.parse(packet.slice(4));
+      if (payload?.name !== 'joinProjectResponse') return null;
+
+      const rootFolder = payload?.args?.[0]?.project?.rootFolder;
+      if (Array.isArray(rootFolder) && rootFolder.length > 0) {
+        return rootFolder as FolderEntry[];
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Get full project file tree (rootFolder with _ids) via socket.io joinProject.
+   * This is the only reliable way to get entity _ids on ShareLaTeX/IHEP instances
+   * that don't expose rootFolder in HTML meta tags.
+   */
+  async getProjectFileTreeFromSocket(projectId: string): Promise<FolderEntry[] | null> {
+    let sid: string | null = null;
+
+    try {
+      const handshakeUrl = `${this.baseUrl}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+      const handshakeResponse = await this.fetchWithTimeout(handshakeUrl, {
+        headers: {
+          'Cookie': this.getCookieHeader(),
+          'User-Agent': USER_AGENT
+        }
+      }, 5000);
+
+      if (!handshakeResponse.ok) return null;
+      this.applySetCookieHeaders(handshakeResponse.headers);
+
+      const handshakeBody = (await handshakeResponse.text()).trim();
+      sid = handshakeBody.split(':')[0];
+      if (!sid) return null;
+
+      const buildPollUrl = () =>
+        `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+
+      let discoveredRootFolder: FolderEntry[] | null = null;
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const pollResponse = await this.fetchWithTimeout(buildPollUrl(), {
+          headers: {
+            'Cookie': this.getCookieHeader(),
+            'User-Agent': USER_AGENT
+          }
+        }, 5000);
+
+        if (!pollResponse.ok) return null;
+        this.applySetCookieHeaders(pollResponse.headers);
+
+        const payload = await pollResponse.text();
+        const packets = this.decodeSocketIoPayload(payload);
+
+        for (const packet of packets) {
+          const rootFolder = this.extractRootFolderFromSocketPacket(packet);
+          if (rootFolder) {
+            discoveredRootFolder = rootFolder;
+            break;
+          }
+
+          if (packet.startsWith('2::')) {
+            const heartbeatResponse = await this.fetchWithTimeout(buildPollUrl(), {
+              method: 'POST',
+              headers: {
+                'Cookie': this.getCookieHeader(),
+                'User-Agent': USER_AGENT,
+                'Content-Type': 'text/plain;charset=UTF-8'
+              },
+              body: '2::'
+            }, 5000);
+            this.applySetCookieHeaders(heartbeatResponse.headers);
+          }
+        }
+
+        if (discoveredRootFolder) {
+          return discoveredRootFolder;
+        }
+      }
+    } catch {
+      // Fall through
+    } finally {
+      if (sid) {
+        try {
+          const disconnectUrl =
+            `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+          const disconnectResponse = await this.fetchWithTimeout(disconnectUrl, {
+            method: 'POST',
+            headers: {
+              'Cookie': this.getCookieHeader(),
+              'User-Agent': USER_AGENT,
+              'Content-Type': 'text/plain;charset=UTF-8'
+            },
+            body: '0::'
+          }, 5000);
+          this.applySetCookieHeaders(disconnectResponse.headers);
+        } catch {
+          // Ignore cleanup failures.
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * main problem to resolve root folder ID from Overleaf's collaboration join payload
    * authoritative for projects where ObjectID arithmetic does not apply
    */
@@ -877,14 +991,14 @@ export class OverleafClient {
   }
 
   /**
-   * Find entity ID by path (searches through project file tree)
+   * Find entity ID by path (searches through project file tree).
+   * Tries socket.io first (works on IHEP/ShareLaTeX), then falls back to HTML meta tags.
    */
   async findEntityByPath(projectId: string, targetPath: string): Promise<{
     id: string;
     type: 'doc' | 'file' | 'folder';
     name: string;
   } | null> {
-    const projectInfo = await this.getProjectInfo(projectId);
     const normalizedTarget = targetPath.replace(/^\//, '');
 
     function searchFolder(folder: FolderEntry, currentPath: string): { id: string; type: 'doc' | 'file' | 'folder'; name: string } | null {
@@ -917,9 +1031,27 @@ export class OverleafClient {
       return null;
     }
 
-    if (projectInfo.rootFolder?.[0]) {
-      return searchFolder(projectInfo.rootFolder[0], '');
+    // Method 1: Use socket.io (works on IHEP/ShareLaTeX which don't expose file tree in HTML)
+    try {
+      const rootFolder = await this.getProjectFileTreeFromSocket(projectId);
+      if (rootFolder?.[0]) {
+        const result = searchFolder(rootFolder[0], '');
+        if (result) return result;
+      }
+    } catch {
+      // Fall through to HTML scraping
     }
+
+    // Method 2: Fall back to HTML meta tag scraping (overleaf.com SaaS)
+    try {
+      const projectInfo = await this.getProjectInfo(projectId);
+      if (projectInfo.rootFolder?.[0]) {
+        return searchFolder(projectInfo.rootFolder[0], '');
+      }
+    } catch {
+      // Both methods failed
+    }
+
     return null;
   }
 
@@ -1072,5 +1204,55 @@ export class OverleafClient {
    */
   async downloadOutputFile(url: string): Promise<Buffer> {
     return this.downloadBuffer(url);
+  }
+
+  /**
+   * Create a new project
+   * Note: ShareLaTeX/IHEP instances return project_id (not id) in response
+   */
+  async createProject(name: string): Promise<{ id: string; name: string }> {
+    const response = await fetch(`${this.baseUrl}/project/new`, {
+      method: 'POST',
+      headers: this.getHeaders(true),
+      body: JSON.stringify({ projectName: name })
+    });
+    if (!response.ok) throw new Error(`Failed to create project: ${response.status}`);
+    const data = await response.json() as any;
+    // ShareLaTeX returns project_id, standard Overleaf returns id or _id
+    return { id: data.project_id || data.id || data._id, name };
+  }
+
+  /**
+   * Move a project to the trash (soft delete)
+   */
+  async trashProject(projectId: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/project/${projectId}/trash`, {
+      method: 'POST',
+      headers: this.getHeaders()
+    });
+    if (!response.ok) throw new Error(`Failed to trash project: ${response.status}`);
+  }
+
+  /**
+   * Permanently delete a project (must be in trash first)
+   */
+  async deleteProject(projectId: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/project/${projectId}`, {
+      method: 'DELETE',
+      headers: this.getHeaders()
+    });
+    if (!response.ok) throw new Error(`Failed to delete project: ${response.status}`);
+  }
+
+  /**
+   * Rename a project
+   */
+  async renameProject(projectId: string, newName: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/project/${projectId}/rename`, {
+      method: 'POST',
+      headers: this.getHeaders(true),
+      body: JSON.stringify({ newProjectName: newName })
+    });
+    if (!response.ok) throw new Error(`Failed to rename project: ${response.status}`);
   }
 }

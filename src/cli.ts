@@ -1057,6 +1057,107 @@ configCmd.command('get-cookie-name')
   });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PROJECT CRUD COMMANDS
+// ─────────────────────────────────────────────────────────────────────────────
+
+program
+  .command('create-project <name>')
+  .description('Create a new project')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (name, options) => {
+    const spinner = ora(`Creating project "${name}"...`).start();
+    try {
+      const client = await getClient(options.cookie);
+      const project = await client.createProject(name);
+      spinner.succeed(`Created project "${project.name}"`);
+      console.log(`  ID: ${chalk.cyan(project.id)}`);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('delete-project <project>')
+  .description('Move project to trash (or permanently delete with --permanent)')
+  .option('--permanent', 'Permanently delete (skips trash; project must already be in trash)')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (project, options) => {
+    const spinner = ora('Resolving project...').start();
+    try {
+      const client = await getClient(options.cookie);
+
+      let projectId: string;
+      let projectName: string;
+
+      // If it looks like a MongoDB ObjectId (24 hex chars), use it directly
+      if (/^[a-f0-9]{24}$/i.test(project)) {
+        projectId = project;
+        projectName = project;
+      } else {
+        spinner.text = 'Looking up project by name...';
+        const proj = await client.getProject(project);
+        if (!proj) {
+          spinner.fail(`Project not found: ${project}`);
+          process.exit(1);
+        }
+        projectId = proj.id;
+        projectName = proj.name;
+      }
+
+      if (options.permanent) {
+        spinner.text = `Permanently deleting "${projectName}"...`;
+        await client.deleteProject(projectId);
+        spinner.succeed(`Permanently deleted project "${projectName}" (${projectId})`);
+      } else {
+        spinner.text = `Moving "${projectName}" to trash...`;
+        await client.trashProject(projectId);
+        spinner.succeed(`Moved project "${projectName}" to trash (${projectId})`);
+        console.log(chalk.dim('  Use --permanent to permanently delete'));
+      }
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('rename-project <project> <new-name>')
+  .description('Rename a project (by name or ID)')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (project, newName, options) => {
+    const spinner = ora('Resolving project...').start();
+    try {
+      const client = await getClient(options.cookie);
+
+      let projectId: string;
+      let projectName: string;
+
+      // If it looks like a MongoDB ObjectId (24 hex chars), use it directly
+      if (/^[a-f0-9]{24}$/i.test(project)) {
+        projectId = project;
+        projectName = project;
+      } else {
+        spinner.text = 'Looking up project by name...';
+        const proj = await client.getProject(project);
+        if (!proj) {
+          spinner.fail(`Project not found: ${project}`);
+          process.exit(1);
+        }
+        projectId = proj.id;
+        projectName = proj.name;
+      }
+
+      spinner.text = `Renaming "${projectName}" to "${newName}"...`;
+      await client.renameProject(projectId, newName);
+      spinner.succeed(`Renamed "${projectName}" → "${newName}" (${projectId})`);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+// ─────────────────────────────────────────────────────────────────────────────
 // HELP
 // ─────────────────────────────────────────────────────────────────────────────
 
