@@ -3,6 +3,7 @@
 **Command-line interface for Overleaf** — Sync, manage, and compile LaTeX projects from your terminal.
 
 [![npm version](https://img.shields.io/npm/v/@aloth/olcli.svg)](https://www.npmjs.com/package/@aloth/olcli)
+[![AUR Package](https://img.shields.io/aur/version/olcli)](https://aur.archlinux.org/packages/olcli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![AgentSkills](https://img.shields.io/badge/AgentSkills-compatible-blue)](https://agentskills.io)
 
@@ -59,6 +60,28 @@ npx @aloth/olcli list
 
 ```bash
 npx skills add aloth/olcli
+```
+
+### Arch Linux
+
+The package is available on the [Arch User Repository (AUR)](https://aur.archlinux.org/packages/olcli). 
+
+You can install it using your preferred AUR helper (such as `yay` or `paru`):
+
+```bash
+yay -S olcli
+# or
+paru -S olcli
+```
+
+#### Manual Installation:
+If you prefer not to use an AUR helper, you can build and install the package manually using makepkg:
+code Bash
+
+```bash
+git clone https://aur.archlinux.org/olcli.git
+cd olcli
+makepkg -si
 ```
 
 ## Quick Start
