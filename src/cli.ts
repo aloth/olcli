@@ -780,6 +780,15 @@ program
         }
       }
 
+      // Fetch folder tree once so uploads go into correct subfolders
+      spinner.text = 'Resolving folder structure...';
+      let folderTree = await client.getFolderTreeFromSocket(projectId!);
+      if (!folderTree) {
+        // Fallback: build minimal tree with just root
+        const resolvedRootId = rootFolderId || await client.getRootFolderId(projectId!);
+        folderTree = { '': resolvedRootId };
+      }
+
       spinner.text = `Uploading ${filesToUpload.length} file(s)...`;
 
       let uploaded = 0;
@@ -789,7 +798,7 @@ program
       for (const file of filesToUpload) {
         try {
           const content = readFileSync(file.path);
-          await client.uploadFile(projectId!, rootFolderId || null, file.relativePath, content);
+          await client.uploadFile(projectId!, rootFolderId || null, file.relativePath, content, folderTree);
           uploaded++;
           spinner.text = `Uploading... (${uploaded}/${filesToUpload.length})`;
         } catch (error: any) {
