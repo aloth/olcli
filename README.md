@@ -3,6 +3,7 @@
 **Command-line interface for Overleaf** — Sync, manage, and compile LaTeX projects from your terminal.
 
 [![npm version](https://img.shields.io/npm/v/@aloth/olcli.svg)](https://www.npmjs.com/package/@aloth/olcli)
+[![AUR Package](https://img.shields.io/aur/version/olcli)](https://aur.archlinux.org/packages/olcli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![AgentSkills](https://img.shields.io/badge/AgentSkills-compatible-blue)](https://agentskills.io)
 
@@ -23,6 +24,9 @@ Work with Overleaf projects directly from your command line. Edit locally with y
 - 📄 **Compile** PDFs using Overleaf's remote compiler
 - 📦 **Download** individual files or full project archives
 - 📤 **Upload** files to projects
+- 🗂️ **Preserve folder structure** when pushing nested files
+- 🧹 **Skip generated `output.pdf`** during push/sync so compiled artifacts are not uploaded back to Overleaf
+- ⚙️ **Support self-hosted Overleaf/ShareLaTeX instances** via configurable base URL and session cookie name
 - 📊 **Output** compile artifacts (`.bbl`, `.log`, `.aux` for arXiv submissions)
 
 **Perfect for:**
@@ -59,6 +63,28 @@ npx @aloth/olcli list
 
 ```bash
 npx skills add aloth/olcli
+```
+
+### Arch Linux
+
+The package is available on the [Arch User Repository (AUR)](https://aur.archlinux.org/packages/olcli). 
+
+You can install it using your preferred AUR helper (such as `yay` or `paru`):
+
+```bash
+yay -S olcli
+# or
+paru -S olcli
+```
+
+#### Manual Installation:
+If you prefer not to use an AUR helper, you can build and install the package manually using makepkg:
+code Bash
+
+```bash
+git clone https://aur.archlinux.org/olcli.git
+cd olcli
+makepkg -si
 ```
 
 ## Quick Start
@@ -139,10 +165,14 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli sync [dir]` | Bidirectional sync (pull + push) |
 | `olcli upload <file> [project]` | Upload a single file |
 | `olcli download <file> [project]` | Download a single file |
+| `olcli delete <file> [project]` | Delete a remote file by path |
+| `olcli rename <oldname> <newname> [project]` | Rename a remote file by path |
 | `olcli zip [project]` | Download project as zip archive |
 | `olcli compile [project]` | Trigger PDF compilation |
 | `olcli pdf [project]` | Compile and download PDF |
 | `olcli output [type]` | Download compile output files |
+| `olcli config set-url <url>` | Set a self-hosted Overleaf base URL |
+| `olcli config set-cookie-name <name>` | Set the session cookie name |
 | `olcli check` | Show config paths and credential sources |
 
 ## Use Cases
@@ -221,6 +251,8 @@ olcli output --list
 
 ### Push
 - Uploads files modified after last pull
+- Preserves nested folder structure when uploading
+- Skips generated `output.pdf`
 - Use `--all` to upload all files
 - Use `--dry-run` to preview changes
 
@@ -228,6 +260,7 @@ olcli output --list
 - Pulls remote changes
 - Preserves local modifications (local wins if newer)
 - Pushes local changes to remote
+- Skips generated `output.pdf` during upload phase
 - Use `--verbose` to see detailed file operations
 
 ## Configuration
@@ -244,6 +277,22 @@ For project-specific credentials, create `.olauth` in your project directory:
 
 ```
 s%3AyourSessionCookieValue...
+```
+
+### Self-hosted Overleaf / ShareLaTeX
+
+You can point `olcli` at a self-hosted instance and override the session cookie name.
+
+```bash
+olcli --base-url https://latex.example.org list
+olcli --base-url https://latex.example.org --cookie-name overleaf.sid whoami
+```
+
+Persist these settings in `olcli` config:
+
+```bash
+olcli config set-url https://latex.example.org
+olcli config set-cookie-name overleaf.sid
 ```
 
 ## Examples
