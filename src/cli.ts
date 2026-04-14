@@ -25,7 +25,11 @@ import {
   setLastProject,
   getConfigPath,
   saveOlAuth,
-  clearConfig
+  clearConfig,
+  getBaseUrl,
+  setBaseUrl,
+  getSessionCookieName,
+  setSessionCookieName
 } from './config.js';
 
 const program = new Command();
@@ -33,12 +37,14 @@ const program = new Command();
 program
   .name('olcli')
   .description('Overleaf CLI - interact with Overleaf projects from the command line')
-  .version(VERSION);
+  .version(VERSION)
+  .option('--base-url <url>', 'Overleaf instance base URL (overrides OVERLEAF_BASE_URL and config)')
+  .option('--cookie-name <name>', 'Session cookie name (default: overleaf_session2, use overleaf.sid for older instances)');
 
 /**
  * Helper to get authenticated client
  */
-async function getClient(cookieOpt?: string): Promise<OverleafClient> {
+async function getClient(cookieOpt?: string, baseUrlOpt?: string): Promise<OverleafClient> {
   const cookie = cookieOpt || getSessionCookie();
   if (!cookie) {
     console.error(chalk.red('No session cookie found.'));
@@ -47,7 +53,9 @@ async function getClient(cookieOpt?: string): Promise<OverleafClient> {
     console.error('Or create .olauth file in current directory');
     process.exit(1);
   }
-  return OverleafClient.fromSessionCookie(cookie);
+  const baseUrl = baseUrlOpt || (program.opts().baseUrl as string | undefined) || getBaseUrl();
+  const cookieName = (program.opts().cookieName as string | undefined) || getSessionCookieName();
+  return OverleafClient.fromSessionCookie(cookie, baseUrl, cookieName);
 }
 
 /**
@@ -118,7 +126,9 @@ program
 
     const spinner = ora('Verifying session...').start();
     try {
-      const client = await OverleafClient.fromSessionCookie(options.cookie);
+      const baseUrl = (program.opts().baseUrl as string | undefined) || getBaseUrl();
+      const cookieName = (program.opts().cookieName as string | undefined) || getSessionCookieName();
+      const client = await OverleafClient.fromSessionCookie(options.cookie, baseUrl, cookieName);
       const projects = await client.listProjects();
 
       setSessionCookie(options.cookie);
@@ -149,7 +159,9 @@ program
 
     const spinner = ora('Checking session...').start();
     try {
-      const client = await OverleafClient.fromSessionCookie(cookie);
+      const baseUrl = (program.opts().baseUrl as string | undefined) || getBaseUrl();
+      const cookieName = (program.opts().cookieName as string | undefined) || getSessionCookieName();
+      const client = await OverleafClient.fromSessionCookie(cookie, baseUrl, cookieName);
       const projects = await client.listProjects();
       spinner.succeed(`Authenticated with access to ${projects.length} projects`);
     } catch (error: any) {
@@ -728,6 +740,8 @@ program
           const fullPath = join(currentDir, entry.name);
           const relativePath = relativeBase ? `${relativeBase}/${entry.name}` : entry.name;
 
+          if (!entry.isDirectory() && entry.name === 'output.pdf') continue;
+
           if (entry.isDirectory()) {
             scanDir(fullPath, relativePath);
           } else {
@@ -969,6 +983,9 @@ program
 
       // Check for new local files (not in remote)
       for (const [path, localFile] of localFiles) {
+        if (path === 'output.pdf' || path.endsWith('/output.pdf')) {
+          continue;
+        }
         if (!remoteFiles.has(path)) {
           filesToUpload.push({ path, content: localFile.content });
           filesNewLocal.push(path);
@@ -1023,6 +1040,40 @@ program
 // HELP
 // ─────────────────────────────────────────────────────────────────────────────
 
+const configCmd = program
+  .command('config')
+  .description('Manage olcli configuration');
+
+configCmd
+  .command('set-url <url>')
+  .description('Set the Overleaf instance base URL')
+  .action((url: string) => {
+    setBaseUrl(url);
+    console.log(chalk.green(`Base URL set to: ${url}`));
+  });
+
+configCmd
+  .command('get-url')
+  .description('Get the current Overleaf instance base URL')
+  .action(() => {
+    console.log(getBaseUrl());
+  });
+
+configCmd
+  .command('set-cookie-name <name>')
+  .description('Set the session cookie name (e.g. overleaf.sid for older instances)')
+  .action((name: string) => {
+    setSessionCookieName(name);
+    console.log(chalk.green(`Session cookie name set to: ${name}`));
+  });
+
+configCmd
+  .command('get-cookie-name')
+  .description('Get the current session cookie name')
+  .action(() => {
+    console.log(getSessionCookieName());
+  });
+
 program
   .command('check')
   .description('Show credential sources and config path')
@@ -1046,4 +1097,4 @@ program
     }
   });
 
-program.parse();
+program.parse(process.argv);

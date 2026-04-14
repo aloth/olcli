@@ -16,13 +16,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
 const USER_AGENT = `olcli/${pkg.version}`;
 
-const BASE_URL = 'https://www.overleaf.com';
-const PROJECT_URL = `${BASE_URL}/project`;
-const DOWNLOAD_URL = `${BASE_URL}/project/{id}/download/zip`;
-const UPLOAD_URL = `${BASE_URL}/project/{id}/upload`;
-const FOLDER_URL = `${BASE_URL}/project/{id}/folder`;
-const DELETE_URL = `${BASE_URL}/project/{projectId}/{type}/{entityId}`;
-const COMPILE_URL = `${BASE_URL}/project/{id}/compile?enable_pdf_caching=true`;
+const DEFAULT_BASE_URL = 'https://www.overleaf.com';
 
 export interface Project {
   id: string;
@@ -62,27 +56,58 @@ export interface FileEntry {
 export interface Credentials {
   cookies: Record<string, string>;
   csrf: string;
+  baseUrl?: string;
 }
 
 export class OverleafClient {
   private cookies: Record<string, string>;
   private csrf: string;
+  private baseUrl: string;
 
   constructor(credentials: Credentials) {
     this.cookies = credentials.cookies;
     this.csrf = credentials.csrf;
+    this.baseUrl = credentials.baseUrl || DEFAULT_BASE_URL;
+  }
+
+  private projectUrl(): string {
+    return `${this.baseUrl}/project`;
+  }
+
+  private downloadUrl(projectId: string): string {
+    return `${this.baseUrl}/project/${projectId}/download/zip`;
+  }
+
+  private uploadUrl(projectId: string): string {
+    return `${this.baseUrl}/project/${projectId}/upload`;
+  }
+
+  private folderUrl(projectId: string): string {
+    return `${this.baseUrl}/project/${projectId}/folder`;
+  }
+
+  private deleteUrl(projectId: string, entityType: string, entityId: string): string {
+    return `${this.baseUrl}/project/${projectId}/${entityType}/${entityId}`;
+  }
+
+  private compileUrl(projectId: string): string {
+    return `${this.baseUrl}/project/${projectId}/compile?enable_pdf_caching=true`;
   }
 
   /**
    * Create client from session cookie string
    */
-  static async fromSessionCookie(sessionCookie: string): Promise<OverleafClient> {
+  static async fromSessionCookie(
+    sessionCookie: string,
+    baseUrl: string = DEFAULT_BASE_URL,
+    cookieName: string = 'overleaf_session2'
+  ): Promise<OverleafClient> {
     const cookies: Record<string, string> = {
-      'overleaf_session2': sessionCookie
+      [cookieName]: sessionCookie
     };
 
     // Fetch CSRF token from project page
-    const response = await fetch(PROJECT_URL, {
+    const response = await fetch(`${baseUrl}/project`, {
       headers: {
         'Cookie': Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; '),
         'User-Agent': USER_AGENT
@@ -133,7 +158,7 @@ export class OverleafClient {
       throw new Error('Could not find CSRF token. Session may have expired.');
     }
 
-    return new OverleafClient({ cookies, csrf });
+    return new OverleafClient({ cookies, csrf, baseUrl });
   }
 
   private getCookieHeader(): string {
@@ -176,7 +201,7 @@ export class OverleafClient {
    * Get all projects (not archived, not trashed)
    */
   async listProjects(): Promise<Project[]> {
-    const response = await fetch(PROJECT_URL, {
+    const response = await fetch(this.projectUrl(), {
       headers: this.getHeaders()
     });
 
@@ -266,7 +291,7 @@ export class OverleafClient {
    * Get detailed project info including file tree
    */
   async getProjectInfo(projectId: string): Promise<ProjectInfo> {
-    const response = await fetch(`${PROJECT_URL}/${projectId}`, {
+    const response = await fetch(`${this.projectUrl()}/${projectId}`, {
       headers: this.getHeaders()
     });
 
@@ -363,15 +388,14 @@ export class OverleafClient {
    * Content-Disposition headers. See: https://github.com/aloth/olcli/issues/2
    */
   async downloadProject(projectId: string): Promise<Buffer> {
-    const url = DOWNLOAD_URL.replace('{id}', projectId);
-    return this.downloadBuffer(url);
+    return this.downloadBuffer(this.downloadUrl(projectId));
   }
 
   /**
    * Compile project and get PDF
    */
   async compileProject(projectId: string): Promise<{ pdfUrl: string; logs: string[] }> {
-    const response = await fetch(COMPILE_URL.replace('{id}', projectId), {
+    const response = await fetch(this.compileUrl(projectId), {
       method: 'POST',
       headers: this.getHeaders(true),
       body: JSON.stringify({
@@ -398,7 +422,7 @@ export class OverleafClient {
     }
 
     return {
-      pdfUrl: `${BASE_URL}${pdfFile.url}`,
+      pdfUrl: `${this.baseUrl}${pdfFile.url}`,
       logs: data.compileGroup ? [`Compile group: ${data.compileGroup}`] : []
     };
   }
@@ -415,7 +439,7 @@ export class OverleafClient {
    * Create a folder in a project
    */
   async createFolder(projectId: string, parentFolderId: string, name: string): Promise<string> {
-    const response = await fetch(FOLDER_URL.replace('{id}', projectId), {
+    const response = await fetch(this.folderUrl(projectId), {
       method: 'POST',
       headers: this.getHeaders(true),
       body: JSON.stringify({
@@ -539,7 +563,7 @@ export class OverleafClient {
     let sid: string | null = null;
 
     try {
-      const handshakeUrl = `${BASE_URL}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+      const handshakeUrl = `${this.baseUrl}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
       const handshakeResponse = await this.fetchWithTimeout(handshakeUrl, {
         headers: {
           'Cookie': this.getCookieHeader(),
@@ -555,7 +579,7 @@ export class OverleafClient {
       if (!sid) return null;
 
       const buildPollUrl = () =>
-        `${BASE_URL}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+        `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
 
       let discoveredRootFolderId: string | null = null;
 
@@ -606,7 +630,7 @@ export class OverleafClient {
       if (sid) {
         try {
           const disconnectUrl =
-            `${BASE_URL}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+            `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
           const disconnectResponse = await this.fetchWithTimeout(disconnectUrl, {
             method: 'POST',
             headers: {
@@ -634,7 +658,7 @@ export class OverleafClient {
     let sid: string | null = null;
 
     try {
-      const handshakeUrl = `${BASE_URL}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+      const handshakeUrl = `${this.baseUrl}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
       const handshakeResponse = await this.fetchWithTimeout(handshakeUrl, {
         headers: {
           'Cookie': this.getCookieHeader(),
@@ -650,7 +674,7 @@ export class OverleafClient {
       if (!sid) return null;
 
       const buildPollUrl = () =>
-        `${BASE_URL}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+        `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
 
       for (let attempt = 0; attempt < 3; attempt++) {
         const pollResponse = await this.fetchWithTimeout(buildPollUrl(), {
@@ -690,7 +714,7 @@ export class OverleafClient {
       if (sid) {
         try {
           const disconnectUrl =
-            `${BASE_URL}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+            `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
           await this.fetchWithTimeout(disconnectUrl, {
             method: 'POST',
             headers: {
@@ -815,7 +839,7 @@ export class OverleafClient {
         formData.append('type', 'text/plain');
         formData.append('qqfile', new Blob(['probe']), testFileName);
 
-        const response = await fetch(`${UPLOAD_URL.replace('{id}', projectId)}?folder_id=${folderId}`, {
+        const response = await fetch(`${this.uploadUrl(projectId)}?folder_id=${folderId}`, {
           method: 'POST',
           headers: {
             'Cookie': this.getCookieHeader(),
@@ -892,7 +916,7 @@ export class OverleafClient {
       formData.append('type', mimeType);
       formData.append('qqfile', new Blob([content]), baseName);
 
-      const response = await fetch(`${UPLOAD_URL.replace('{id}', projectId)}?folder_id=${encodeURIComponent(fid)}`, {
+      const response = await fetch(`${this.uploadUrl(projectId)}?folder_id=${encodeURIComponent(fid)}`, {
         method: 'POST',
         headers: {
           'Cookie': this.getCookieHeader(),
@@ -968,10 +992,7 @@ export class OverleafClient {
     entityId: string,
     entityType: 'doc' | 'file' | 'folder'
   ): Promise<void> {
-    const url = DELETE_URL
-      .replace('{projectId}', projectId)
-      .replace('{type}', entityType)
-      .replace('{entityId}', entityId);
+    const url = this.deleteUrl(projectId, entityType, entityId);
 
     const response = await fetch(url, {
       method: 'DELETE',
@@ -987,7 +1008,7 @@ export class OverleafClient {
    * Get list of entities (files/docs) with paths
    */
   async getEntities(projectId: string): Promise<{ path: string; type: 'doc' | 'file' }[]> {
-    const response = await fetch(`${BASE_URL}/project/${projectId}/entities`, {
+    const response = await fetch(`${this.baseUrl}/project/${projectId}/entities`, {
       headers: this.getHeaders()
     });
 
@@ -1051,7 +1072,7 @@ export class OverleafClient {
    */
   async downloadFile(projectId: string, fileId: string, fileType: 'doc' | 'file'): Promise<Buffer> {
     const endpoint = fileType === 'doc' ? 'doc' : 'file';
-    const response = await fetch(`${BASE_URL}/project/${projectId}/${endpoint}/${fileId}`, {
+    const response = await fetch(`${this.baseUrl}/project/${projectId}/${endpoint}/${fileId}`, {
       headers: this.getHeaders()
     });
 
@@ -1079,7 +1100,7 @@ export class OverleafClient {
     entityType: 'doc' | 'file' | 'folder',
     newName: string
   ): Promise<void> {
-    const response = await fetch(`${BASE_URL}/project/${projectId}/${entityType}/${entityId}/rename`, {
+    const response = await fetch(`${this.baseUrl}/project/${projectId}/${entityType}/${entityId}/rename`, {
       method: 'POST',
       headers: this.getHeaders(true),
       body: JSON.stringify({ name: newName })
@@ -1161,7 +1182,7 @@ export class OverleafClient {
     pdfUrl?: string;
     outputFiles: { path: string; type: string; url: string }[];
   }> {
-    const response = await fetch(COMPILE_URL.replace('{id}', projectId), {
+    const response = await fetch(this.compileUrl(projectId), {
       method: 'POST',
       headers: this.getHeaders(true),
       body: JSON.stringify({
@@ -1181,11 +1202,11 @@ export class OverleafClient {
 
     return {
       status: data.status,
-      pdfUrl: pdfFile ? `${BASE_URL}${pdfFile.url}` : undefined,
+      pdfUrl: pdfFile ? `${this.baseUrl}${pdfFile.url}` : undefined,
       outputFiles: (data.outputFiles || []).map((f: any) => ({
         path: f.path,
         type: f.type,
-        url: `${BASE_URL}${f.url}`
+        url: `${this.baseUrl}${f.url}`
       }))
     };
   }

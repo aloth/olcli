@@ -11,6 +11,8 @@ interface OlcliConfig {
   sessionCookie?: string;
   csrf?: string;
   lastProject?: string;
+  baseUrl?: string;
+  sessionCookieName?: string;
 }
 
 const config = new Conf<OlcliConfig>({
@@ -18,9 +20,27 @@ const config = new Conf<OlcliConfig>({
   schema: {
     sessionCookie: { type: 'string' },
     csrf: { type: 'string' },
-    lastProject: { type: 'string' }
+    lastProject: { type: 'string' },
+    baseUrl: { type: 'string' },
+    sessionCookieName: { type: 'string' }
   }
 });
+
+export function getBaseUrl(): string {
+  return process.env.OVERLEAF_BASE_URL || config.get('baseUrl') || 'https://www.overleaf.com';
+}
+
+export function setBaseUrl(url: string): void {
+  config.set('baseUrl', url);
+}
+
+export function getSessionCookieName(): string {
+  return process.env.OVERLEAF_COOKIE_NAME || config.get('sessionCookieName') || 'overleaf_session2';
+}
+
+export function setSessionCookieName(name: string): void {
+  config.set('sessionCookieName', name);
+}
 
 export function getSessionCookie(): string | undefined {
   // Check environment variable first
@@ -36,7 +56,8 @@ export function getSessionCookie(): string | undefined {
       // Parse cookie from olauth file (format: key=value or just value)
       if (content.includes('=')) {
         const cookies = content.split(';').map(c => c.trim());
-        const sessionCookie = cookies.find(c => c.startsWith('overleaf_session2='));
+        const cookieName = getSessionCookieName();
+        const sessionCookie = cookies.find(c => c.startsWith(`${cookieName}=`));
         if (sessionCookie) {
           return sessionCookie.split('=')[1];
         }
@@ -84,5 +105,5 @@ export function getConfigPath(): string {
  */
 export function saveOlAuth(cookie: string, path?: string): void {
   const authPath = path || join(process.cwd(), '.olauth');
-  writeFileSync(authPath, `overleaf_session2=${cookie}`, 'utf-8');
+  writeFileSync(authPath, `${getSessionCookieName()}=${cookie}`, 'utf-8');
 }
