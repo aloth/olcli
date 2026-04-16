@@ -100,7 +100,7 @@ export class OverleafClient {
   static async fromSessionCookie(
     sessionCookie: string,
     baseUrl: string = DEFAULT_BASE_URL,
-    cookieName: string = 'overleaf_session2'
+      cookieName: string = 'overleaf_session2'
   ): Promise<OverleafClient> {
     const cookies: Record<string, string> = {
       [cookieName]: sessionCookie
@@ -110,7 +110,7 @@ export class OverleafClient {
     const response = await fetch(`${baseUrl}/project`, {
       headers: {
         'Cookie': Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; '),
-        'User-Agent': USER_AGENT
+          'User-Agent': USER_AGENT
       }
     });
 
@@ -259,16 +259,16 @@ export class OverleafClient {
 
     // Filter out archived and trashed
     return projectsData
-      .filter((p: any) => !p.archived && !p.trashed)
-      .map((p: any) => ({
-        id: p.id || p._id,
-        name: p.name,
-        lastUpdated: p.lastUpdated,
-        lastUpdatedBy: p.lastUpdatedBy,
-        owner: p.owner,
-        archived: p.archived,
-        trashed: p.trashed
-      }));
+    .filter((p: any) => !p.archived && !p.trashed)
+    .map((p: any) => ({
+      id: p.id || p._id,
+      name: p.name,
+      lastUpdated: p.lastUpdated,
+      lastUpdatedBy: p.lastUpdatedBy,
+      owner: p.owner,
+      archived: p.archived,
+      trashed: p.trashed
+    }));
   }
 
   /**
@@ -288,55 +288,87 @@ export class OverleafClient {
   }
 
   /**
-   * Get detailed project info including file tree
+   * Get detailed project info including file tree (via WebSocket)
    */
   async getProjectInfo(projectId: string): Promise<ProjectInfo> {
-    const response = await fetch(`${this.projectUrl()}/${projectId}`, {
-      headers: this.getHeaders()
-    });
+    let sid: string | null = null;
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch project info: ${response.status}`);
-    }
+    try {
+      // 1. Initiate Socket.io Handshake
+      const handshakeUrl = `${this.baseUrl}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+      const handshakeResponse = await this.fetchWithTimeout(handshakeUrl, {
+        headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT }
+      }, 5000);
 
-    const html = await response.text();
-    const $ = cheerio.load(html);
+      if (!handshakeResponse.ok) throw new Error(`Socket handshake failed: ${handshakeResponse.status}`);
+      this.applySetCookieHeaders(handshakeResponse.headers);
 
-    // Look for project data in meta tags
-    let projectInfo: ProjectInfo | undefined;
+      const handshakeBody = (await handshakeResponse.text()).trim();
+      sid = handshakeBody.split(':')[0];
+      if (!sid) throw new Error('Could not parse socket session ID');
 
-    // Try ol-project meta tag
-    const projectMeta = $('meta[name="ol-project"]').attr('content');
-    if (projectMeta) {
-      try {
-        projectInfo = JSON.parse(projectMeta);
-      } catch (e) {
-        // Continue
-      }
-    }
+      // 2. Poll the socket for the project data
+      const pollUrl = `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
 
-    // Try to find in other meta tags
-    if (!projectInfo) {
-      const metas = $('meta[content]').toArray();
-      for (const meta of metas) {
-        const content = $(meta).attr('content') || '';
-        if (content.includes('rootFolder')) {
-          try {
-            projectInfo = JSON.parse(content);
-            break;
-          } catch (e) {
-            // Continue
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const pollResponse = await this.fetchWithTimeout(pollUrl, {
+          headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT }
+        }, 5000);
+
+        if (!pollResponse.ok) throw new Error(`Socket poll failed: ${pollResponse.status}`);
+        this.applySetCookieHeaders(pollResponse.headers);
+
+        const payload = await pollResponse.text();
+        const packets = this.decodeSocketIoPayload(payload);
+
+        for (const packet of packets) {
+          // Look for the main event packet
+          if (packet.startsWith('5:::')) {
+            try {
+              const payloadJson = JSON.parse(packet.slice(4));
+              if (payloadJson?.name === 'joinProjectResponse') {
+                const projectData = payloadJson?.args?.[0]?.project;
+
+                if (projectData) {
+                  // Map the socket data to the strict TypeScript ProjectInfo interface
+                  return {
+                    _id: projectData._id,
+                    name: projectData.name,
+                    rootDoc_id: projectData.rootDoc_id,
+                    rootFolder: projectData.rootFolder
+                  };
+                }
+              }
+            } catch (e) { }
+          }
+
+          // Reply to heartbeat
+          if (packet.startsWith('2::')) {
+            await this.fetchWithTimeout(pollUrl, {
+              method: 'POST',
+              headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT, 'Content-Type': 'text/plain;charset=UTF-8' },
+              body: '2::'
+            }, 5000);
           }
         }
       }
+    } finally {
+      // 3. Cleanly disconnect the socket
+      if (sid) {
+        try {
+          const disconnectUrl = `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+          await this.fetchWithTimeout(disconnectUrl, {
+            method: 'POST',
+            headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT, 'Content-Type': 'text/plain;charset=UTF-8' },
+            body: '0::'
+          }, 5000);
+        } catch { /* ignore */ }
+      }
     }
 
-    if (!projectInfo) {
-      throw new Error('Could not parse project info');
-    }
-
-    return projectInfo;
+    throw new Error('Could not parse project info from WebSocket');
   }
+
 
   /**
    * Download a URL as a Buffer using Node.js http/https modules.
@@ -579,7 +611,7 @@ export class OverleafClient {
       if (!sid) return null;
 
       const buildPollUrl = () =>
-        `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+      `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
 
       let discoveredRootFolderId: string | null = null;
 
@@ -674,7 +706,7 @@ export class OverleafClient {
       if (!sid) return null;
 
       const buildPollUrl = () =>
-        `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+      `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
 
       for (let attempt = 0; attempt < 3; attempt++) {
         const pollResponse = await this.fetchWithTimeout(buildPollUrl(), {
@@ -810,13 +842,13 @@ export class OverleafClient {
    */
   async probeRootFolderId(projectId: string): Promise<string | null> {
     const candidates: string[] = [];
-    
+
     // Method 1: Try projectId - 1 (most common)
     candidates.push(this.computeRootFolderId(projectId));
-    
+
     const prefix = projectId.slice(0, 16);
     const suffix = parseInt(projectId.slice(16), 16);
-    
+
     // Method 2: Try a wide range around the project ID
     // Some projects have root folder created with different offsets
     for (let i = 2; i <= 50; i++) {
@@ -1031,7 +1063,7 @@ export class OverleafClient {
     const projectInfo = await this.getProjectInfo(projectId);
     const normalizedTarget = targetPath.replace(/^\//, '');
 
-    function searchFolder(folder: FolderEntry, currentPath: string): { id: string; type: 'doc' | 'file' | 'folder'; name: string } | null {
+      function searchFolder(folder: FolderEntry, currentPath: string): { id: string; type: 'doc' | 'file' | 'folder'; name: string } | null {
       // Check docs
       for (const doc of folder.docs || []) {
         const docPath = currentPath ? `${currentPath}/${doc.name}` : doc.name;
@@ -1139,39 +1171,39 @@ export class OverleafClient {
   async downloadByPath(projectId: string, path: string): Promise<Buffer> {
     const normalizedPath = path.replace(/^\//, '');
 
-    // First check if file exists
-    const entities = await this.getEntities(projectId);
-    const entityExists = entities.find(e => 
-      e.path.replace(/^\//, '') === normalizedPath || 
-      e.path === `/${normalizedPath}`
-    );
+      // First check if file exists
+      const entities = await this.getEntities(projectId);
+    const entityExists = entities.find(e =>
+                                       e.path.replace(/^\//, '') === normalizedPath ||
+                                         e.path === `/${normalizedPath}`
+                                      );
 
-    if (!entityExists) {
-      throw new Error(`File not found: ${path}`);
-    }
+                                      if (!entityExists) {
+                                        throw new Error(`File not found: ${path}`);
+                                      }
 
-    // Try to find entity with ID for direct download
-    try {
-      const entity = await this.findEntityByPath(projectId, path);
-      if (entity && entity.type !== 'folder') {
-        return await this.downloadFile(projectId, entity.id, entity.type);
-      }
-    } catch (e) {
-      // Fall through to zip method
-    }
+                                      // Try to find entity with ID for direct download
+                                      try {
+                                        const entity = await this.findEntityByPath(projectId, path);
+                                        if (entity && entity.type !== 'folder') {
+                                          return await this.downloadFile(projectId, entity.id, entity.type);
+                                        }
+                                      } catch (e) {
+                                        // Fall through to zip method
+                                      }
 
-    // Fallback: download zip and extract the file
-    const zipBuffer = await this.downloadProject(projectId);
-    const AdmZip = (await import('adm-zip')).default;
-    const zip = new AdmZip(zipBuffer);
+                                      // Fallback: download zip and extract the file
+                                      const zipBuffer = await this.downloadProject(projectId);
+                                      const AdmZip = (await import('adm-zip')).default;
+                                      const zip = new AdmZip(zipBuffer);
 
-    for (const entry of zip.getEntries()) {
-      if (entry.entryName === normalizedPath || entry.entryName === path) {
-        return entry.getData();
-      }
-    }
+                                      for (const entry of zip.getEntries()) {
+                                        if (entry.entryName === normalizedPath || entry.entryName === path) {
+                                          return entry.getData();
+                                        }
+                                      }
 
-    throw new Error(`File not found in archive: ${path}`);
+                                      throw new Error(`File not found in archive: ${path}`);
   }
 
   /**
