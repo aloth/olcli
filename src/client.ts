@@ -998,16 +998,21 @@ export class OverleafClient {
       formData.append('type', mimeType);
       formData.append('qqfile', new Blob([content]), baseName);
 
-      const response = await this.httpRequest(`${this.uploadUrl(projectId)}?folder_id=${encodeURIComponent(fid)}`, {
+      const res = await fetch(`${this.uploadUrl(projectId)}?folder_id=${encodeURIComponent(fid)}`, {
         method: 'POST',
         headers: {
           'Cookie': this.getCookieHeader(),
           'User-Agent': USER_AGENT,
           'X-Csrf-Token': this.csrf
         },
-        body: formData as unknown as Buffer,
-        expect: 'text'
+        body: formData as any
       });
+      const text = await res.text();
+      let setCookie: string[] = [];
+      if (res.headers && typeof res.headers.getSetCookie === 'function') {
+        setCookie = res.headers.getSetCookie();
+      }
+      const response = { ok: res.ok, status: res.status, body: text, headers: { 'set-cookie': setCookie } };
 
       if (!response.ok) {
         const text = response.body as string;
