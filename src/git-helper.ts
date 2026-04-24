@@ -62,28 +62,33 @@ for await (const line of rl) {
   }
 }
 
-/*
- * Function handling the option request from git-remote-helper
- */
-    function runOption(argv:  string[]): void {//TODO: Actually handle options
-      console.log("unsupported")
-    }
+    /*
+     * Function handling the option request from git-remote-helper
+     */
+function runOption(argv:  string[]): void {//TODO: Actually handle options
+  console.log("unsupported")
+}
 /*
  * Function handling the list request from git-remote-helper
  */
 function runList(argv:  string[]): void {
-  let hash = '?';
-  try {
-    const remoteName = process.argv[2];
-    hash = execSync(`git rev-parse refs/remotes/${remoteName}/main`, {
-      stdio: ['ignore', 'pipe', 'ignore'],
-      encoding: 'utf8'
-    }).trim();
-  } catch {
-    hash = '?';
+  const isPushing = argv.includes('for-push');
+
+  if (isPushing) {
+    try {
+      const remoteName = process.argv[2];
+      const hash = execSync(`git rev-parse refs/remotes/${remoteName}/main`, {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        encoding: 'utf8'
+      }).trim();
+      console.log(`${hash} refs/heads/main`);
+    } catch {
+      console.log(`? refs/heads/main`);
+    }
+  } else {
+    console.log(`? refs/heads/main`);
   }
 
-  console.log(`${hash} refs/heads/main`);
   console.log(`@refs/heads/main HEAD`);
   console.log('');
 }
