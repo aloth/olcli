@@ -18,6 +18,18 @@ TESTS_PASSED=0
 TESTS_FAILED=0
 CLEANUP_FILES=()
 CLEANUP_REMOTE_FILES=()
+EXE="$(pwd)/dist/cli.js"
+
+if test -f $EXE; then
+  if ! [[ -x "$EXE" ]]
+  then
+    chmod +x $EXE
+  fi
+else
+  echo "Binary file does not exist, compile first."
+  exit
+fi
+
 
 # Test project name (override with OLCLI_E2E_PROJECT_NAME)
 PROJECT_NAME="${OLCLI_E2E_PROJECT_NAME:-olcli test}"
@@ -58,16 +70,16 @@ run_test() {
   local name="$1"
   local cmd="$2"
   local expect_success="${3:-true}"
-  
+
   TESTS_RUN=$((TESTS_RUN + 1))
-  
+
   echo -n "  Testing: $name ... "
-  
+
   local output
   local exit_code
-  
+
   output=$(eval "$cmd" 2>&1) && exit_code=0 || exit_code=$?
-  
+
   if [ "$expect_success" = "true" ]; then
     if [ $exit_code -eq 0 ]; then
       echo -e "${GREEN}✓${NC}"
@@ -103,16 +115,16 @@ run_test_with_output() {
   local name="$1"
   local cmd="$2"
   local expected_pattern="$3"
-  
+
   TESTS_RUN=$((TESTS_RUN + 1))
-  
+
   echo -n "  Testing: $name ... "
-  
+
   local output
   local exit_code
-  
+
   output=$(eval "$cmd" 2>&1) && exit_code=0 || exit_code=$?
-  
+
   if [ $exit_code -eq 0 ] && echo "$output" | grep -qE "$expected_pattern"; then
     echo -e "${GREEN}✓${NC}"
     TESTS_PASSED=$((TESTS_PASSED + 1))
@@ -132,18 +144,18 @@ run_test_with_output() {
 # Cleanup function
 cleanup() {
   log_section "Cleanup"
-  
+
   # Remove local temp files
   if [ -d "$TEST_DIR" ]; then
     log_info "Removing temp directory: $TEST_DIR"
     rm -rf "$TEST_DIR"
   fi
-  
+
   # Remove remote test files (best effort)
   for file in "${CLEANUP_REMOTE_FILES[@]}"; do
     log_info "Note: Test file '$file' may remain on Overleaf (delete manually if needed)"
   done
-  
+
   # Summary
   echo ""
   log_section "Test Results"
@@ -152,7 +164,7 @@ cleanup() {
   echo -e "  ${GREEN}Passed:${NC}       $TESTS_PASSED"
   echo -e "  ${RED}Failed:${NC}       $TESTS_FAILED"
   echo ""
-  
+
   if [ $TESTS_FAILED -eq 0 ]; then
     log_success "All tests passed! 🎉"
     exit 0
@@ -178,12 +190,12 @@ log_info "Test directory: $TEST_DIR"
 log_info "Project: $PROJECT_NAME"
 
 # Verify olcli is available
-if ! command -v olcli &> /dev/null; then
+if ! command -v $EXE &> /dev/null; then
   log_fail "olcli command not found. Run 'npm link' first."
   exit 1
 fi
 
-log_info "olcli version: $(olcli --version)"
+log_info "olcli version: $($EXE --version)"
 
 #######################################
 # Test: Authentication
@@ -192,11 +204,11 @@ log_info "olcli version: $(olcli --version)"
 log_section "Authentication Tests"
 
 run_test_with_output "whoami returns user info" \
-  "olcli whoami" \
+  "$EXE whoami" \
   "(Logged in as|Email:|Authenticated)"
 
 run_test "check shows config info" \
-  "olcli check"
+  "$EXE check"
 
 #######################################
 # Test: Project Listing
@@ -205,17 +217,17 @@ run_test "check shows config info" \
 log_section "Project Listing Tests"
 
 run_test "list shows target project" \
-  "olcli list | grep -F \"$PROJECT_NAME\""
+  "$EXE list | grep -F \"$PROJECT_NAME\""
 
 run_test_with_output "list --json returns valid JSON" \
-  "olcli list --json | jq -e 'type == \"array\"'" \
+  "$EXE list --json | jq -e 'type == \"array\"'" \
   "true"
 
 # Get project ID for later tests
 log_info "Waiting 5s before API calls to avoid rate limiting..."
 sleep 5
 
-PROJECT_ID=$(olcli list --json | jq -r --arg project_name "$PROJECT_NAME" '.[] | select(.name == $project_name) | .id')
+PROJECT_ID=$($EXE list --json | jq -r --arg project_name "$PROJECT_NAME" '.[] | select(.name == $project_name) | .id')
 if [ -z "$PROJECT_ID" ]; then
   log_fail "Could not find '$PROJECT_NAME' project. Please create it on Overleaf first."
   exit 1
@@ -231,15 +243,15 @@ log_info "Using project ID directly to minimize API calls"
 log_section "Project Info Tests"
 
 run_test_with_output "info by name" \
-  "olcli info '$PROJECT_NAME'" \
+  "$EXE info '$PROJECT_NAME'" \
   "(Project:|Files:)"
 
 run_test_with_output "info by ID" \
-  "olcli info '$PROJECT_ID'" \
+  "$EXE info '$PROJECT_ID'" \
   "(Project:|Files:)"
 
 run_test_with_output "info --json returns valid JSON" \
-  "olcli info '$PROJECT_ID' --json | jq -e '.project.id'" \
+  "$EXE info '$PROJECT_ID' --json | jq -e '.project.id'" \
   "$PROJECT_ID"
 
 #######################################
@@ -254,7 +266,7 @@ echo "$TEST_CONTENT" > "$TEST_FILE"
 CLEANUP_REMOTE_FILES+=("${TEST_ID}.txt")
 
 run_test "upload file to project" \
-  "olcli upload '$TEST_FILE' '$PROJECT_ID'"
+  "$EXE upload '$TEST_FILE' '$PROJECT_ID'"
 
 # Create file in subfolder test
 TEST_FILE2="$TEST_DIR/${TEST_ID}_2.txt"
@@ -262,7 +274,7 @@ echo "Second test file - $TEST_CONTENT" > "$TEST_FILE2"
 CLEANUP_REMOTE_FILES+=("${TEST_ID}_2.txt")
 
 run_test "upload second file" \
-  "olcli upload '$TEST_FILE2' '$PROJECT_ID'"
+  "$EXE upload '$TEST_FILE2' '$PROJECT_ID'"
 
 #######################################
 # Test: File Download (single file)
@@ -273,7 +285,7 @@ log_section "File Download Tests"
 DOWNLOAD_FILE="$TEST_DIR/downloaded_${TEST_ID}.txt"
 
 run_test "download single file" \
-  "olcli download '${TEST_ID}.txt' '$PROJECT_ID' -o '$DOWNLOAD_FILE'"
+  "$EXE download '${TEST_ID}.txt' '$PROJECT_ID' -o '$DOWNLOAD_FILE'"
 
 # Verify content matches
 TESTS_RUN=$((TESTS_RUN + 1))
@@ -299,7 +311,7 @@ sleep 1  # Rate limit
 # Download second uploaded file (project-agnostic check)
 DOWNLOAD_FILE2="$TEST_DIR/downloaded_${TEST_ID}_2.txt"
 run_test "download second uploaded file" \
-  "olcli download '${TEST_ID}_2.txt' '$PROJECT_ID' -o '$DOWNLOAD_FILE2'"
+  "$EXE download '${TEST_ID}_2.txt' '$PROJECT_ID' -o '$DOWNLOAD_FILE2'"
 
 run_test_with_output "second downloaded content matches marker" \
   "grep -F \"Second test file - $TEST_CONTENT\" '$DOWNLOAD_FILE2'" \
@@ -314,7 +326,7 @@ log_section "Zip Archive Tests"
 ZIP_FILE="$TEST_DIR/project.zip"
 
 run_test "download project as zip" \
-  "olcli zip '$PROJECT_ID' -o '$ZIP_FILE'"
+  "$EXE zip '$PROJECT_ID' -o '$ZIP_FILE'"
 
 TESTS_RUN=$((TESTS_RUN + 1))
 echo -n "  Testing: zip file is valid ... "
@@ -346,7 +358,7 @@ fi
 log_section "Compile Tests"
 
 run_test_with_output "compile project" \
-  "olcli compile '$PROJECT_ID'" \
+  "$EXE compile '$PROJECT_ID'" \
   "(success|failure|Compiled)"
 
 #######################################
@@ -360,7 +372,7 @@ PDF_FILE="$TEST_DIR/output.pdf"
 # Note: This may fail if compilation fails
 TESTS_RUN=$((TESTS_RUN + 1))
 echo -n "  Testing: download PDF ... "
-if olcli pdf "$PROJECT_ID" -o "$PDF_FILE" 2>&1; then
+if $EXE pdf "$PROJECT_ID" -o "$PDF_FILE" 2>&1; then
   if [ -f "$PDF_FILE" ] && [ -s "$PDF_FILE" ]; then
     # Check PDF magic bytes
     if head -c 4 "$PDF_FILE" | grep -q "%PDF"; then
@@ -390,13 +402,13 @@ sleep 1  # Rate limit
 log_section "Output Files Tests"
 
 run_test_with_output "output --list shows files" \
-  "olcli output --list --project '$PROJECT_ID'" \
+  "$EXE output --list --project '$PROJECT_ID'" \
   "(log|aux|pdf)"
 
 # Download log file
 LOG_FILE="$TEST_DIR/output.log"
 run_test "download log output" \
-  "olcli output log -o '$LOG_FILE' --project '$PROJECT_ID'"
+  "$EXE output log -o '$LOG_FILE' --project '$PROJECT_ID'"
 
 TESTS_RUN=$((TESTS_RUN + 1))
 echo -n "  Testing: log file has content ... "
@@ -414,7 +426,7 @@ sleep 1  # Rate limit
 BBL_FILE="$TEST_DIR/output.bbl"
 TESTS_RUN=$((TESTS_RUN + 1))
 echo -n "  Testing: download bbl output (optional) ... "
-if olcli output bbl -o "$BBL_FILE" --project "$PROJECT_ID" > /dev/null 2>&1; then
+if $EXE output bbl -o "$BBL_FILE" --project "$PROJECT_ID" > /dev/null 2>&1; then
   if [ -f "$BBL_FILE" ] && [ -s "$BBL_FILE" ]; then
     echo -e "${GREEN}✓${NC}"
     TESTS_PASSED=$((TESTS_PASSED + 1))
@@ -438,7 +450,7 @@ PULL_DIR="$TEST_DIR/pulled_project"
 mkdir -p "$PULL_DIR"
 
 run_test "pull project to directory" \
-  "olcli pull '$PROJECT_ID' '$PULL_DIR' --force"
+  "$EXE pull '$PROJECT_ID' '$PULL_DIR' --force"
 
 TESTS_RUN=$((TESTS_RUN + 1))
 echo -n "  Testing: .olcli.json created ... "
@@ -489,16 +501,16 @@ sleep 1
 touch "$PUSH_TEST_FILE"
 
 run_test "push --dry-run shows changes" \
-  "cd '$PULL_DIR' && olcli push --dry-run"
+  "cd '$PULL_DIR' && $EXE push --dry-run"
 
 run_test "push uploads changes" \
-  "cd '$PULL_DIR' && olcli push --all"
+  "cd '$PULL_DIR' && $EXE push --all"
 
 # Verify by downloading
 VERIFY_FILE="$TEST_DIR/verify_push.txt"
 sleep 2  # Give Overleaf a moment
 run_test "download pushed file" \
-  "olcli download '${TEST_ID}_push.txt' '$PROJECT_ID' -o '$VERIFY_FILE'"
+  "$EXE download '${TEST_ID}_push.txt' '$PROJECT_ID' -o '$VERIFY_FILE'"
 
 TESTS_RUN=$((TESTS_RUN + 1))
 echo -n "  Testing: pushed content matches ... "
@@ -534,13 +546,13 @@ if [ -f "$PULL_DIR/.olcli.json" ]; then
 fi
 
 run_test "push recovers from stale rootFolderId" \
-  "cd '$PULL_DIR' && olcli push"
+  "cd '$PULL_DIR' && $EXE push"
 
 # Verify recovery upload by downloading the new file
 VERIFY_RECOVER_FILE="$TEST_DIR/verify_push_recover.txt"
 sleep 2  # Give Overleaf a moment
 run_test "download recovered push file" \
-  "olcli download '${TEST_ID}_push_recover.txt' '$PROJECT_ID' -o '$VERIFY_RECOVER_FILE'"
+  "$EXE download '${TEST_ID}_push_recover.txt' '$PROJECT_ID' -o '$VERIFY_RECOVER_FILE'"
 
 TESTS_RUN=$((TESTS_RUN + 1))
 echo -n "  Testing: recovered push content matches ... "
@@ -573,7 +585,7 @@ mkdir -p "$SYNC_DIR"
 
 # Initial pull
 run_test "sync (initial pull)" \
-  "olcli pull '$PROJECT_ID' '$SYNC_DIR' --force"
+  "$EXE pull '$PROJECT_ID' '$SYNC_DIR' --force"
 
 # Create local file
 SYNC_TEST_FILE="$SYNC_DIR/${TEST_ID}_sync.txt"
@@ -582,13 +594,13 @@ echo "$SYNC_CONTENT" > "$SYNC_TEST_FILE"
 CLEANUP_REMOTE_FILES+=("${TEST_ID}_sync.txt")
 
 run_test "sync bidirectional" \
-  "cd '$SYNC_DIR' && olcli sync"
+  "cd '$SYNC_DIR' && $EXE sync"
 
 # Verify upload
 SYNC_VERIFY="$TEST_DIR/verify_sync.txt"
 sleep 2
 run_test "verify synced file exists" \
-  "olcli download '${TEST_ID}_sync.txt' '$PROJECT_ID' -o '$SYNC_VERIFY'"
+  "$EXE download '${TEST_ID}_sync.txt' '$PROJECT_ID' -o '$SYNC_VERIFY'"
 
 # NOTE: delete and rename commands are disabled in olcli (require Socket.IO)
 # Delete test files manually via Overleaf web UI
@@ -600,11 +612,11 @@ run_test "verify synced file exists" \
 log_section "Error Handling Tests"
 
 run_test "download nonexistent file fails gracefully" \
-  "olcli download 'nonexistent_file_xyz.tex' '$PROJECT_ID'" \
+  "$EXE download 'nonexistent_file_xyz.tex' '$PROJECT_ID'" \
   false
 
 run_test "info for nonexistent project fails gracefully" \
-  "olcli info 'project_that_does_not_exist_xyz'" \
+  "$EXE info 'project_that_does_not_exist_xyz'" \
   false
 
 #######################################
@@ -615,7 +627,7 @@ log_section "Edge Case Tests"
 
 # Project by ID
 run_test "commands work with project ID" \
-  "olcli info '$PROJECT_ID'"
+  "$EXE info '$PROJECT_ID'"
 
 # Special characters in filename (safe ones only)
 SPECIAL_FILE="$TEST_DIR/test-file_123.txt"
@@ -623,10 +635,10 @@ echo "special filename test" > "$SPECIAL_FILE"
 CLEANUP_REMOTE_FILES+=("test-file_123.txt")
 
 run_test "upload file with dashes and underscores" \
-  "olcli upload '$SPECIAL_FILE' '$PROJECT_ID'"
+  "$EXE upload '$SPECIAL_FILE' '$PROJECT_ID'"
 
 run_test "download file with dashes and underscores" \
-  "olcli download 'test-file_123.txt' '$PROJECT_ID' -o '$TEST_DIR/dl_special.txt'"
+  "$EXE download 'test-file_123.txt' '$PROJECT_ID' -o '$TEST_DIR/dl_special.txt'"
 
 #######################################
 # Cleanup Note

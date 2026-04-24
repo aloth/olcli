@@ -4,7 +4,8 @@
   "description": "Command-line interface for Overleaf — Sync, manage, and compile LaTeX projects from your terminal",
   "type": "module",
   "bin": {
-    "olcli": "dist/cli.js"
+    "olcli": "dist/cli.js",
+    "git-remote-overleaf": "dist/git-helper.js"
   },
   "scripts": {
     "build": "tsc",
@@ -54,7 +55,7 @@
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",
-    "@types/node": "^22.0.0",
+    "@types/node": "^22.19.17",
     "@types/tough-cookie": "^4.0.5",
     "tsx": "^4.7.0",
     "typescript": "^5.4.0"
