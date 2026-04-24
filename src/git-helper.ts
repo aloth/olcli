@@ -169,7 +169,7 @@ async function runPush(refToUpdate:  string){//TODO Check if push is necessary
         //console.error(`[olcli] Pushing commit: ${commitMsg}`);
 
         // 2. Get files added/modified in THIS commit
-        console.error(hash)
+        //console.error(hash)
         const uploadStr = execSync(`git diff-tree --no-commit-id --name-only --diff-filter=ACMR -r ${hash}`, { encoding: 'utf8' }).trim();
         const filesToUpload = uploadStr ? uploadStr.split('\n') : [];
 
@@ -277,11 +277,11 @@ async function runImport(refToUpdate:  string){
     }
     const overleafTime = Math.floor(new Date(projInfo.lastUpdated).getTime() / 1000);
     const localTime = getLastSyncTime();
-    console.error(localTime, overleafTime)
+    //console.error(localTime, overleafTime)
     const hasLocalHistory = localTime > 0;
 
     if (overleafTime === localTime) {
-      console.error(`[olcli] Project '${projInfo.name}' already up to date...`);
+      //console.error(`[olcli] Project '${projInfo.name}' already up to date...`);
 
       const localHash = getLocalCommitHash(refToUpdate);
 
@@ -293,7 +293,7 @@ async function runImport(refToUpdate:  string){
         console.log(''); // Finish the batch
       });
     }else{
-      console.error(`[olcli] Fetching project '${projInfo.name}'...`);
+      //console.error(`[olcli] Fetching project '${projInfo.name}'...`);
       const zipBuffer = await client.downloadProject(projectId);
 
       tempDir = mkdtempSync(join(tmpdir(), 'overleaf-sync-'));
