@@ -7,9 +7,11 @@ import AdmZip from 'adm-zip';
 import { execSync } from 'node:child_process';
 
 // Hide the arguments so Commander doesn't panic
-const url = process.argv[3];
+const url = process.argv[3].split('/');
 //TODO add url support
-const projectId = url;
+
+const projectId = url[url.length -1];
+const baseUrl = url[0]+"//"+url[2];
 
 // Dynamically import the client
 const { getClient } = await import('./client.js');
