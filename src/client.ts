@@ -6,6 +6,7 @@
  */
 
 import * as cheerio from 'cheerio';
+import { CookieJar, Cookie } from 'tough-cookie';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,8 +23,6 @@ import {
   getSessionCookieName,
   setSessionCookieName
 } from './config.js';
-import * as https from 'node:https';
-import * as http from 'node:http';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -138,23 +137,27 @@ export class OverleafClient {
     };
 
     // Fetch CSRF token from project page
-    const initialHeaders: Record<string, string> = {
-      'Cookie': Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; '),
-        'User-Agent': USER_AGENT
-    };
-    const bootstrapClient = new OverleafClient({ cookies, csrf: 'bootstrap', baseUrl });
-    const response = await bootstrapClient.httpRequest(`${baseUrl}/project`, {
-      headers: initialHeaders,
-      expect: 'text'
+    const response = await fetch(`${baseUrl}/project`, {
+      headers: {
+        'Cookie': Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; '),
+          'User-Agent': USER_AGENT
+      }
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch projects page: ${response.status}`);
+      throw new Error(`Failed to fetch projects page: ${response.status} ${response.statusText}`);
     }
 
-    bootstrapClient.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+    // Capture any new cookies from response
+    const setCookieHeaders = response.headers.getSetCookie?.() || [];
+    for (const setCookie of setCookieHeaders) {
+      const match = setCookie.match(/^([^=]+)=([^;]+)/);
+      if (match) {
+        cookies[match[1]] = match[2];
+      }
+    }
 
-    const html = response.body as string;
+    const html = await response.text();
     const $ = cheerio.load(html);
 
     // Try multiple methods to find CSRF token (based on PR #66, #82)
@@ -185,13 +188,31 @@ export class OverleafClient {
       throw new Error('Could not find CSRF token. Session may have expired.');
     }
 
-    // Update cookies if the bootstrap request added anything
-    const updatedCookies = bootstrapClient.cookies;
-    return new OverleafClient({ cookies: updatedCookies, csrf, baseUrl });
+    return new OverleafClient({ cookies, csrf, baseUrl });
   }
 
   private getCookieHeader(): string {
     return Object.entries(this.cookies).map(([k, v]) => `${k}=${v}`).join('; ');
+  }
+
+  private applySetCookieHeaders(headers: Headers): void {
+    const setCookieHeaders = headers.getSetCookie?.() || [];
+    for (const setCookie of setCookieHeaders) {
+      const match = setCookie.match(/^([^=]+)=([^;]+)/);
+      if (match) {
+        this.cookies[match[1]] = match[2];
+      }
+    }
+  }
+
+  private async fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   private getHeaders(includeContentType = false): Record<string, string> {
@@ -206,111 +227,19 @@ export class OverleafClient {
     return headers;
   }
 
-  private normalizeHeaders(headers?: Record<string, string>): Record<string, string> {
-    const normalized: Record<string, string> = {};
-    if (!headers) return normalized;
-    for (const [key, value] of Object.entries(headers)) {
-      if (typeof value === 'string') {
-        normalized[key] = value;
-      }
-    }
-    return normalized;
-  }
-
-  private applySetCookieHeaders(setCookie: string[] | undefined): void {
-    if (!setCookie) return;
-    for (const setCookieHeader of setCookie) {
-      const match = setCookieHeader.match(/^([^=]+)=([^;]+)/);
-      if (match) {
-        this.cookies[match[1]] = match[2];
-      }
-    }
-  }
-
-  private async httpRequest(url: string, options: {
-    method?: string;
-    headers?: Record<string, string>;
-    body?: string | Buffer;
-    timeoutMs?: number;
-    maxRedirects?: number;
-    expect?: 'text' | 'json' | 'buffer';
-  } = {}): Promise<{ status: number; ok: boolean; headers: Record<string, string | string[]>; body: string | Buffer | any }> {
-    const method = options.method || 'GET';
-    const timeoutMs = options.timeoutMs ?? 10000;
-    const maxRedirects = options.maxRedirects ?? 5;
-    const expect = options.expect ?? 'text';
-
-    const doRequest = (reqUrl: string, redirectsLeft: number): Promise<{ status: number; ok: boolean; headers: Record<string, string | string[]>; body: string | Buffer | any }> => {
-      return new Promise((resolve, reject) => {
-        const parsedUrl = new URL(reqUrl);
-        const transport = parsedUrl.protocol === 'https:' ? https : http;
-        const headers = this.normalizeHeaders(options.headers);
-
-        const req = transport.request(reqUrl, { method, headers }, (res) => {
-          const status = res.statusCode || 0;
-          const resHeaders = res.headers as Record<string, string | string[]>;
-
-          if (status >= 300 && status < 400 && res.headers.location && redirectsLeft > 0) {
-            const redirectUrl = new URL(res.headers.location, reqUrl).toString();
-            res.resume();
-            doRequest(redirectUrl, redirectsLeft - 1).then(resolve, reject);
-            return;
-          }
-
-          const chunks: Buffer[] = [];
-          res.on('data', (chunk: Buffer) => chunks.push(chunk));
-          res.on('end', () => {
-            const buffer = Buffer.concat(chunks);
-            let body: any = buffer;
-            if (expect === 'text') {
-              body = buffer.toString('utf-8');
-            } else if (expect === 'json') {
-              try {
-                body = JSON.parse(buffer.toString('utf-8'));
-              } catch (e) {
-                return reject(new Error(`Failed to parse JSON response from ${reqUrl}`));
-              }
-            }
-            resolve({ status, ok: status >= 200 && status < 300, headers: resHeaders, body });
-          });
-          res.on('error', reject);
-        });
-
-        req.on('error', reject);
-
-        if (timeoutMs) {
-          req.setTimeout(timeoutMs, () => {
-            req.destroy(new Error(`Request timeout after ${timeoutMs}ms`));
-          });
-        }
-
-        if (options.body) {
-          req.write(options.body);
-        }
-
-        req.end();
-      });
-    };
-
-    return doRequest(url, maxRedirects);
-  }
-
   /**
    * Get all projects (not archived, not trashed)
    */
   async listProjects(): Promise<Project[]> {
-    const response = await this.httpRequest(this.projectUrl(), {
-      headers: this.getHeaders(),
-      expect: 'text'
+    const response = await fetch(this.projectUrl(), {
+      headers: this.getHeaders()
     });
 
     if (!response.ok) {
       throw new Error(`Failed to fetch projects: ${response.status}`);
     }
 
-    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
-
-    const html = response.body as string;
+    const html = await response.text();
     const $ = cheerio.load(html);
 
     // Try new Overleaf structure first (PR #82)
@@ -413,58 +342,87 @@ export class OverleafClient {
   }
 
   /**
-   * Get detailed project info including file tree
+   * Get detailed project info including file tree (via WebSocket)
    */
   async getProjectInfo(projectId: string): Promise<ProjectInfo> {
-    const response = await this.httpRequest(`${this.projectUrl()}/${projectId}`, {
-      headers: this.getHeaders(),
-      expect: 'text'
-    });
+    let sid: string | null = null;
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch project info: ${response.status}`);
-    }
+    try {
+      // 1. Initiate Socket.io Handshake
+      const handshakeUrl = `${this.baseUrl}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+      const handshakeResponse = await this.fetchWithTimeout(handshakeUrl, {
+        headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT }
+      }, 5000);
 
-    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+      if (!handshakeResponse.ok) throw new Error(`Socket handshake failed: ${handshakeResponse.status}`);
+      this.applySetCookieHeaders(handshakeResponse.headers);
 
-    const html = response.body as string;
-    const $ = cheerio.load(html);
+      const handshakeBody = (await handshakeResponse.text()).trim();
+      sid = handshakeBody.split(':')[0];
+      if (!sid) throw new Error('Could not parse socket session ID');
 
-    // Look for project data in meta tags
-    let projectInfo: ProjectInfo | undefined;
+      // 2. Poll the socket for the project data
+      const pollUrl = `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
 
-    // Try ol-project meta tag
-    const projectMeta = $('meta[name="ol-project"]').attr('content');
-    if (projectMeta) {
-      try {
-        projectInfo = JSON.parse(projectMeta);
-      } catch (e) {
-        // Continue
-      }
-    }
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const pollResponse = await this.fetchWithTimeout(pollUrl, {
+          headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT }
+        }, 5000);
 
-    // Try to find in other meta tags
-    if (!projectInfo) {
-      const metas = $('meta[content]').toArray();
-      for (const meta of metas) {
-        const content = $(meta).attr('content') || '';
-        if (content.includes('rootFolder')) {
-          try {
-            projectInfo = JSON.parse(content);
-            break;
-          } catch (e) {
-            // Continue
+        if (!pollResponse.ok) throw new Error(`Socket poll failed: ${pollResponse.status}`);
+        this.applySetCookieHeaders(pollResponse.headers);
+
+        const payload = await pollResponse.text();
+        const packets = this.decodeSocketIoPayload(payload);
+
+        for (const packet of packets) {
+          // Look for the main event packet
+          if (packet.startsWith('5:::')) {
+            try {
+              const payloadJson = JSON.parse(packet.slice(4));
+              if (payloadJson?.name === 'joinProjectResponse') {
+                const projectData = payloadJson?.args?.[0]?.project;
+
+                if (projectData) {
+                  // Map the socket data to the strict TypeScript ProjectInfo interface
+                  return {
+                    _id: projectData._id,
+                    name: projectData.name,
+                    rootDoc_id: projectData.rootDoc_id,
+                    rootFolder: projectData.rootFolder
+                  };
+                }
+              }
+            } catch (e) { }
+          }
+
+          // Reply to heartbeat
+          if (packet.startsWith('2::')) {
+            await this.fetchWithTimeout(pollUrl, {
+              method: 'POST',
+              headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT, 'Content-Type': 'text/plain;charset=UTF-8' },
+              body: '2::'
+            }, 5000);
           }
         }
       }
+    } finally {
+      // 3. Cleanly disconnect the socket
+      if (sid) {
+        try {
+          const disconnectUrl = `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+          await this.fetchWithTimeout(disconnectUrl, {
+            method: 'POST',
+            headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT, 'Content-Type': 'text/plain;charset=UTF-8' },
+            body: '0::'
+          }, 5000);
+        } catch { /* ignore */ }
+      }
     }
 
-    if (!projectInfo) {
-      throw new Error('Could not parse project info');
-    }
-
-    return projectInfo;
+    throw new Error('Could not parse project info from WebSocket');
   }
+
 
   /**
    * Download a URL as a Buffer using Node.js http/https modules.
@@ -474,18 +432,39 @@ export class OverleafClient {
    * project names). See: https://github.com/aloth/olcli/issues/2
    */
   private async downloadBuffer(url: string): Promise<Buffer> {
-    const response = await this.httpRequest(url, {
-      headers: this.getHeaders(),
-      expect: 'buffer'
-    });
+    const { default: https } = await import('node:https');
+    const { default: http } = await import('node:http');
 
-    if (!response.ok) {
-      throw new Error(`Download failed: ${response.status}`);
-    }
+    const doRequest = (reqUrl: string): Promise<Buffer> => {
+      return new Promise((resolve, reject) => {
+        const parsedUrl = new URL(reqUrl);
+        const transport = parsedUrl.protocol === 'https:' ? https : http;
 
-    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+        const req = transport.get(reqUrl, {
+          headers: this.getHeaders(),
+        }, (res) => {
+          // Follow redirects
+          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            const redirectUrl = new URL(res.headers.location, reqUrl).toString();
+            doRequest(redirectUrl).then(resolve, reject);
+            return;
+          }
 
-    return response.body as Buffer;
+          if (res.statusCode && res.statusCode >= 400) {
+            reject(new Error(`Download failed: ${res.statusCode}`));
+            return;
+          }
+
+          const chunks: Buffer[] = [];
+          res.on('data', (chunk: Buffer) => chunks.push(chunk));
+          res.on('end', () => resolve(Buffer.concat(chunks)));
+          res.on('error', reject);
+        });
+        req.on('error', reject);
+      });
+    };
+
+    return doRequest(url);
   }
 
   /**
@@ -502,7 +481,7 @@ export class OverleafClient {
    * Compile project and get PDF
    */
   async compileProject(projectId: string): Promise<{ pdfUrl: string; logs: string[] }> {
-    const response = await this.httpRequest(this.compileUrl(projectId), {
+    const response = await fetch(this.compileUrl(projectId), {
       method: 'POST',
       headers: this.getHeaders(true),
       body: JSON.stringify({
@@ -510,17 +489,14 @@ export class OverleafClient {
         draft: false,
         check: 'silent',
         incrementalCompilesEnabled: true
-      }),
-      expect: 'json'
+      })
     });
 
     if (!response.ok) {
       throw new Error(`Failed to compile project: ${response.status}`);
     }
 
-    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
-
-    const data = response.body as any;
+    const data = await response.json() as any;
 
     if (data.status !== 'success') {
       throw new Error(`Compilation failed: ${data.status}`);
@@ -549,14 +525,13 @@ export class OverleafClient {
    * Create a folder in a project
    */
   async createFolder(projectId: string, parentFolderId: string, name: string): Promise<string> {
-    const response = await this.httpRequest(this.folderUrl(projectId), {
+    const response = await fetch(this.folderUrl(projectId), {
       method: 'POST',
       headers: this.getHeaders(true),
       body: JSON.stringify({
         parent_folder_id: parentFolderId,
         name
-      }),
-      expect: 'json'
+      })
     });
 
     if (response.status === 400) {
@@ -568,9 +543,7 @@ export class OverleafClient {
       throw new Error(`Failed to create folder: ${response.status}`);
     }
 
-    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
-
-    const data = response.body as any;
+    const data = await response.json() as any;
     return data._id;
   }
 
@@ -677,19 +650,17 @@ export class OverleafClient {
 
     try {
       const handshakeUrl = `${this.baseUrl}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
-      const handshakeResponse = await this.httpRequest(handshakeUrl, {
+      const handshakeResponse = await this.fetchWithTimeout(handshakeUrl, {
         headers: {
           'Cookie': this.getCookieHeader(),
           'User-Agent': USER_AGENT
-        },
-        expect: 'text',
-        timeoutMs: 5000
-      });
+        }
+      }, 5000);
 
       if (!handshakeResponse.ok) return null;
-      this.applySetCookieHeaders(handshakeResponse.headers['set-cookie'] as string[] | undefined);
+      this.applySetCookieHeaders(handshakeResponse.headers);
 
-      const handshakeBody = (handshakeResponse.body as string).trim();
+      const handshakeBody = (await handshakeResponse.text()).trim();
       sid = handshakeBody.split(':')[0];
       if (!sid) return null;
 
@@ -700,19 +671,17 @@ export class OverleafClient {
 
       // poll a few frames, first is usually connect ack, next includes joinProjectResponse
       for (let attempt = 0; attempt < 3; attempt++) {
-        const pollResponse = await this.httpRequest(buildPollUrl(), {
+        const pollResponse = await this.fetchWithTimeout(buildPollUrl(), {
           headers: {
             'Cookie': this.getCookieHeader(),
             'User-Agent': USER_AGENT
-          },
-          expect: 'text',
-          timeoutMs: 5000
-        });
+          }
+        }, 5000);
 
         if (!pollResponse.ok) return null;
-        this.applySetCookieHeaders(pollResponse.headers['set-cookie'] as string[] | undefined);
+        this.applySetCookieHeaders(pollResponse.headers);
 
-        const payload = pollResponse.body as string;
+        const payload = await pollResponse.text();
         const packets = this.decodeSocketIoPayload(payload);
 
         for (const packet of packets) {
@@ -724,18 +693,16 @@ export class OverleafClient {
 
           if (packet.startsWith('2::')) {
             //reply to heartbeat to keep polling transport alive
-            const heartbeatResponse = await this.httpRequest(buildPollUrl(), {
+            const heartbeatResponse = await this.fetchWithTimeout(buildPollUrl(), {
               method: 'POST',
               headers: {
                 'Cookie': this.getCookieHeader(),
                 'User-Agent': USER_AGENT,
                 'Content-Type': 'text/plain;charset=UTF-8'
               },
-              body: '2::',
-              expect: 'text',
-              timeoutMs: 5000
-            });
-            this.applySetCookieHeaders(heartbeatResponse.headers['set-cookie'] as string[] | undefined);
+              body: '2::'
+            }, 5000);
+            this.applySetCookieHeaders(heartbeatResponse.headers);
           }
         }
 
@@ -750,18 +717,16 @@ export class OverleafClient {
         try {
           const disconnectUrl =
             `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
-          const disconnectResponse = await this.httpRequest(disconnectUrl, {
+          const disconnectResponse = await this.fetchWithTimeout(disconnectUrl, {
             method: 'POST',
             headers: {
               'Cookie': this.getCookieHeader(),
               'User-Agent': USER_AGENT,
               'Content-Type': 'text/plain;charset=UTF-8'
             },
-            body: '0::',
-            expect: 'text',
-            timeoutMs: 5000
-          });
-          this.applySetCookieHeaders(disconnectResponse.headers['set-cookie'] as string[] | undefined);
+            body: '0::'
+          }, 5000);
+          this.applySetCookieHeaders(disconnectResponse.headers);
         } catch {
           // Ignore cleanup failures.
         }
@@ -780,19 +745,17 @@ export class OverleafClient {
 
     try {
       const handshakeUrl = `${this.baseUrl}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
-      const handshakeResponse = await this.httpRequest(handshakeUrl, {
+      const handshakeResponse = await this.fetchWithTimeout(handshakeUrl, {
         headers: {
           'Cookie': this.getCookieHeader(),
           'User-Agent': USER_AGENT
-        },
-        expect: 'text',
-        timeoutMs: 5000
-      });
+        }
+      }, 5000);
 
       if (!handshakeResponse.ok) return null;
-      this.applySetCookieHeaders(handshakeResponse.headers['set-cookie'] as string[] | undefined);
+      this.applySetCookieHeaders(handshakeResponse.headers);
 
-      const handshakeBody = (handshakeResponse.body as string).trim();
+      const handshakeBody = (await handshakeResponse.text()).trim();
       sid = handshakeBody.split(':')[0];
       if (!sid) return null;
 
@@ -800,19 +763,17 @@ export class OverleafClient {
       `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
 
       for (let attempt = 0; attempt < 3; attempt++) {
-        const pollResponse = await this.httpRequest(buildPollUrl(), {
+        const pollResponse = await this.fetchWithTimeout(buildPollUrl(), {
           headers: {
             'Cookie': this.getCookieHeader(),
             'User-Agent': USER_AGENT
-          },
-          expect: 'text',
-          timeoutMs: 5000
-        });
+          }
+        }, 5000);
 
         if (!pollResponse.ok) return null;
-        this.applySetCookieHeaders(pollResponse.headers['set-cookie'] as string[] | undefined);
+        this.applySetCookieHeaders(pollResponse.headers);
 
-        const payload = pollResponse.body as string;
+        const payload = await pollResponse.text();
         const packets = this.decodeSocketIoPayload(payload);
 
         for (const packet of packets) {
@@ -820,18 +781,16 @@ export class OverleafClient {
           if (folderTree) return folderTree;
 
           if (packet.startsWith('2::')) {
-            const heartbeatResponse = await this.httpRequest(buildPollUrl(), {
+            const heartbeatResponse = await this.fetchWithTimeout(buildPollUrl(), {
               method: 'POST',
               headers: {
                 'Cookie': this.getCookieHeader(),
                 'User-Agent': USER_AGENT,
                 'Content-Type': 'text/plain;charset=UTF-8'
               },
-              body: '2::',
-              expect: 'text',
-              timeoutMs: 5000
-            });
-            this.applySetCookieHeaders(heartbeatResponse.headers['set-cookie'] as string[] | undefined);
+              body: '2::'
+            }, 5000);
+            this.applySetCookieHeaders(heartbeatResponse.headers);
           }
         }
       }
@@ -842,17 +801,15 @@ export class OverleafClient {
         try {
           const disconnectUrl =
             `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
-          await this.httpRequest(disconnectUrl, {
+          await this.fetchWithTimeout(disconnectUrl, {
             method: 'POST',
             headers: {
               'Cookie': this.getCookieHeader(),
               'User-Agent': USER_AGENT,
               'Content-Type': 'text/plain;charset=UTF-8'
             },
-            body: '0::',
-            expect: 'text',
-            timeoutMs: 5000
-          });
+            body: '0::'
+          }, 5000);
         } catch {
           // Ignore cleanup failures.
         }
@@ -968,24 +925,17 @@ export class OverleafClient {
         formData.append('type', 'text/plain');
         formData.append('qqfile', new Blob(['probe']), testFileName);
 
-        const response = await this.httpRequest(`${this.uploadUrl(projectId)}?folder_id=${folderId}`, {
+        const response = await fetch(`${this.uploadUrl(projectId)}?folder_id=${folderId}`, {
           method: 'POST',
           headers: {
             'Cookie': this.getCookieHeader(),
             'User-Agent': USER_AGENT,
             'X-Csrf-Token': this.csrf
           },
-          body: formData as unknown as Buffer,
-          expect: 'json'
+          body: formData
         });
 
-        if (!response.ok) {
-          continue;
-        }
-
-        this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
-
-        const data = response.body as any;
+        const data = await response.json() as any;
         if (data.success !== false && data.entity_id) {
           // Success! Delete the probe file and return this folder ID
           try {
@@ -1052,19 +1002,18 @@ export class OverleafClient {
       formData.append('type', mimeType);
       formData.append('qqfile', new Blob([content]), baseName);
 
-      const response = await this.httpRequest(`${this.uploadUrl(projectId)}?folder_id=${encodeURIComponent(fid)}`, {
+      const response = await fetch(`${this.uploadUrl(projectId)}?folder_id=${encodeURIComponent(fid)}`, {
         method: 'POST',
         headers: {
           'Cookie': this.getCookieHeader(),
           'User-Agent': USER_AGENT,
           'X-Csrf-Token': this.csrf
         },
-        body: formData as unknown as Buffer,
-        expect: 'text'
+        body: formData
       });
 
       if (!response.ok) {
-        const text = response.body as string;
+        const text = await response.text();
         // Overleaf returns folder_not_found as HTTP 422 JSON.
         // Parse the body first so caller can trigger folder probing fallback.
         try {
@@ -1078,9 +1027,7 @@ export class OverleafClient {
         return { success: false, error: `${response.status} - ${text}` };
       }
 
-      this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
-
-      const data = JSON.parse(response.body as string) as any;
+      const data = await response.json() as any;
       if (data.success === false && data.error === 'folder_not_found') {
         return { success: false, error: 'folder_not_found' };
       }
@@ -1133,35 +1080,29 @@ export class OverleafClient {
   ): Promise<void> {
     const url = this.deleteUrl(projectId, entityType, entityId);
 
-    const response = await this.httpRequest(url, {
+    const response = await fetch(url, {
       method: 'DELETE',
-      headers: this.getHeaders(),
-      expect: 'text'
+      headers: this.getHeaders()
     });
 
     if (!response.ok) {
       throw new Error(`Failed to delete entity: ${response.status}`);
     }
-
-    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
   }
 
   /**
    * Get list of entities (files/docs) with paths
    */
   async getEntities(projectId: string): Promise<{ path: string; type: 'doc' | 'file' }[]> {
-    const response = await this.httpRequest(`${this.baseUrl}/project/${projectId}/entities`, {
-      headers: this.getHeaders(),
-      expect: 'json'
+    const response = await fetch(`${this.baseUrl}/project/${projectId}/entities`, {
+      headers: this.getHeaders()
     });
 
     if (!response.ok) {
       throw new Error(`Failed to get entities: ${response.status}`);
     }
 
-    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
-
-    const data = response.body as any;
+    const data = await response.json() as any;
     return data.entities || [];
   }
 
@@ -1217,24 +1158,22 @@ export class OverleafClient {
    */
   async downloadFile(projectId: string, fileId: string, fileType: 'doc' | 'file'): Promise<Buffer> {
     const endpoint = fileType === 'doc' ? 'doc' : 'file';
-    const response = await this.httpRequest(`${this.baseUrl}/project/${projectId}/${endpoint}/${fileId}`, {
-      headers: this.getHeaders(),
-      expect: fileType === 'doc' ? 'json' : 'buffer'
+    const response = await fetch(`${this.baseUrl}/project/${projectId}/${endpoint}/${fileId}`, {
+      headers: this.getHeaders()
     });
 
     if (!response.ok) {
       throw new Error(`Failed to download file: ${response.status}`);
     }
 
-    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
-
     if (fileType === 'doc') {
       // Docs return JSON with lines array
-      const data = response.body as any;
+      const data = await response.json() as any;
       const content = (data.lines || []).join('\n');
       return Buffer.from(content, 'utf-8');
     } else {
-      return response.body as Buffer;
+      const arrayBuffer = await response.arrayBuffer();
+      return Buffer.from(arrayBuffer);
     }
   }
 
@@ -1247,18 +1186,15 @@ export class OverleafClient {
     entityType: 'doc' | 'file' | 'folder',
     newName: string
   ): Promise<void> {
-    const response = await this.httpRequest(`${this.baseUrl}/project/${projectId}/${entityType}/${entityId}/rename`, {
+    const response = await fetch(`${this.baseUrl}/project/${projectId}/${entityType}/${entityId}/rename`, {
       method: 'POST',
       headers: this.getHeaders(true),
-      body: JSON.stringify({ name: newName }),
-      expect: 'text'
+      body: JSON.stringify({ name: newName })
     });
 
     if (!response.ok) {
       throw new Error(`Failed to rename entity: ${response.status}`);
     }
-
-    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
   }
 
   /**
@@ -1332,7 +1268,7 @@ export class OverleafClient {
     pdfUrl?: string;
     outputFiles: { path: string; type: string; url: string }[];
   }> {
-    const response = await this.httpRequest(this.compileUrl(projectId), {
+    const response = await fetch(this.compileUrl(projectId), {
       method: 'POST',
       headers: this.getHeaders(true),
       body: JSON.stringify({
@@ -1340,17 +1276,14 @@ export class OverleafClient {
         draft: false,
         check: 'silent',
         incrementalCompilesEnabled: true
-      }),
-      expect: 'json'
+      })
     });
 
     if (!response.ok) {
       throw new Error(`Failed to compile project: ${response.status}`);
     }
 
-    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
-
-    const data = response.body as any;
+    const data = await response.json() as any;
     const pdfFile = data.outputFiles?.find((f: any) => f.type === 'pdf');
 
     return {
