@@ -20,6 +20,7 @@ const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-
 const VERSION = pkg.version;
 import {
   getSessionCookie,
+  getSessionCookieWithSource,
   setSessionCookie,
   getLastProject,
   setLastProject,
@@ -1074,6 +1075,12 @@ configCmd
     console.log(getSessionCookieName());
   });
 
+const COOKIE_SOURCE_LABEL: Record<string, string> = {
+  'env': 'OVERLEAF_SESSION environment variable',
+  '.olauth': '.olauth file in current directory',
+  'config': 'Global config file'
+};
+
 program
   .command('check')
   .description('Show credential sources and config path')
@@ -1088,10 +1095,16 @@ program
     console.log('  3. Global config file');
     console.log();
 
-    const cookie = getSessionCookie();
-    if (cookie) {
+    const info = getSessionCookieWithSource();
+    if (info) {
+      // Display first 8 and last 4 characters, masking the rest
+      const v = info.value;
+      const safeValue = v.length > 12
+        ? `${v.slice(0, 8)}...${v.slice(-4)}`
+        : '*'.repeat(v.length);
       console.log(chalk.green('✓ Session cookie found'));
-      console.log(chalk.dim(`  Value: ${cookie.substring(0, 20)}...`));
+      console.log(chalk.dim(`  Source: ${COOKIE_SOURCE_LABEL[info.source] ?? info.source}`));
+      console.log(chalk.dim(`  Value:  ${safeValue}`));
     } else {
       console.log(chalk.yellow('✗ No session cookie found'));
     }

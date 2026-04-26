@@ -10,6 +10,7 @@
     "build": "tsc",
     "dev": "tsx src/cli.ts",
     "lint": "eslint src/",
+    "test": "node --test --import tsx test/multipart.test.ts && node --test test/cookie-sanitize.test.mjs",
     "prepare": "npm run build"
   },
   "keywords": [
