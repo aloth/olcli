@@ -306,11 +306,92 @@ export class OverleafClient {
       }
     }
 
+    // Fallback: Overleaf no longer ships the project tree in meta tags.
+    // Use the Socket.IO joinProjectResponse payload (same source used for
+    // root folder discovery) to retrieve the full project info.
+    if (!projectInfo) {
+      const socketProject = await this.getProjectFromSocket(projectId);
+      if (socketProject) {
+        projectInfo = socketProject as ProjectInfo;
+      }
+    }
+
     if (!projectInfo) {
       throw new Error('Could not parse project info');
     }
 
     return projectInfo;
+  }
+
+  /**
+   * Fetch the full project object via the collaboration socket.
+   * Returns the `project` field of the joinProjectResponse, which contains
+   * the rootFolder tree and other metadata that used to live in ol-project.
+   */
+  private async getProjectFromSocket(projectId: string): Promise<any | null> {
+    let sid: string | null = null;
+    try {
+      const handshakeUrl = `${BASE_URL}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+      const handshakeResponse = await this.fetchWithTimeout(handshakeUrl, {
+        headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT }
+      }, 5000);
+      if (!handshakeResponse.ok) return null;
+      this.applySetCookieHeaders(handshakeResponse.headers);
+      const handshakeBody = (await handshakeResponse.text()).trim();
+      sid = handshakeBody.split(':')[0];
+      if (!sid) return null;
+
+      const buildPollUrl = () =>
+        `${BASE_URL}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const pollResponse = await this.fetchWithTimeout(buildPollUrl(), {
+          headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT }
+        }, 5000);
+        if (!pollResponse.ok) return null;
+        this.applySetCookieHeaders(pollResponse.headers);
+        const packets = this.decodeSocketIoPayload(await pollResponse.text());
+        for (const packet of packets) {
+          if (packet.startsWith('5:::')) {
+            try {
+              const payload = JSON.parse(packet.slice(4));
+              if (payload?.name === 'joinProjectResponse' && payload?.args?.[0]?.project) {
+                return payload.args[0].project;
+              }
+            } catch { /* ignore */ }
+          }
+          if (packet.startsWith('2::')) {
+            await this.fetchWithTimeout(buildPollUrl(), {
+              method: 'POST',
+              headers: {
+                'Cookie': this.getCookieHeader(),
+                'User-Agent': USER_AGENT,
+                'Content-Type': 'text/plain;charset=UTF-8'
+              },
+              body: '2::'
+            }, 5000).then(r => this.applySetCookieHeaders(r.headers)).catch(() => {});
+          }
+        }
+      }
+    } catch {
+      // fall through
+    } finally {
+      if (sid) {
+        try {
+          const disconnectUrl = `${BASE_URL}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+          await this.fetchWithTimeout(disconnectUrl, {
+            method: 'POST',
+            headers: {
+              'Cookie': this.getCookieHeader(),
+              'User-Agent': USER_AGENT,
+              'Content-Type': 'text/plain;charset=UTF-8'
+            },
+            body: '0::'
+          }, 5000).catch(() => {});
+        } catch { /* ignore */ }
+      }
+    }
+    return null;
   }
 
   /**
