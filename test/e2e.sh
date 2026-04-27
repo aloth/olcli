@@ -590,8 +590,131 @@ sleep 2
 run_test "verify synced file exists" \
   "olcli download '${TEST_ID}_sync.txt' '$PROJECT_ID' -o '$SYNC_VERIFY'"
 
-# NOTE: delete and rename commands are disabled in olcli (require Socket.IO)
-# Delete test files manually via Overleaf web UI
+#######################################
+# Test: Delete + Rename CLI commands (re-enabled in v0.2.0)
+#######################################
+
+log_section "Delete / Rename Command Tests"
+
+DR_FILE_ORIG="$TEST_DIR/${TEST_ID}_rename_orig.txt"
+DR_FILE_NEW_NAME="${TEST_ID}_rename_new.txt"
+DR_FILE_TO_DELETE="${TEST_ID}_to_delete.txt"
+echo "rename test - $TIMESTAMP" > "$DR_FILE_ORIG"
+DR_FILE_DEL="$TEST_DIR/${TEST_ID}_to_delete.txt"
+echo "delete test - $TIMESTAMP" > "$DR_FILE_DEL"
+CLEANUP_REMOTE_FILES+=("${TEST_ID}_rename_orig.txt" "$DR_FILE_NEW_NAME" "$DR_FILE_TO_DELETE")
+
+run_test "upload file for rename test" \
+  "olcli upload '$DR_FILE_ORIG' '$PROJECT_ID'"
+
+run_test "upload file for delete test" \
+  "olcli upload '$DR_FILE_DEL' '$PROJECT_ID'"
+
+sleep 2
+run_test "rename remote file" \
+  "olcli rename '${TEST_ID}_rename_orig.txt' '$DR_FILE_NEW_NAME' '$PROJECT_ID'"
+
+sleep 2
+run_test "renamed file is downloadable under new name" \
+  "olcli download '$DR_FILE_NEW_NAME' '$PROJECT_ID' -o '$TEST_DIR/verify_rename.txt'"
+
+run_test "old name no longer exists" \
+  "olcli download '${TEST_ID}_rename_orig.txt' '$PROJECT_ID' -o '$TEST_DIR/should_not_exist.txt'" \
+  false
+
+run_test "delete remote file" \
+  "olcli delete '$DR_FILE_TO_DELETE' '$PROJECT_ID'"
+
+sleep 2
+run_test "deleted file no longer downloadable" \
+  "olcli download '$DR_FILE_TO_DELETE' '$PROJECT_ID' -o '$TEST_DIR/should_not_exist2.txt'" \
+  false
+
+#######################################
+# Test: sync propagates local deletions (issue #7)
+#######################################
+
+log_section "Sync Deletion Propagation Tests (#7)"
+
+SYNC_DEL_DIR="$TEST_DIR/sync_del_project"
+mkdir -p "$SYNC_DEL_DIR"
+SYNC_DEL_FILE_NAME="${TEST_ID}_sync_del.txt"
+SYNC_DEL_FILE="$TEST_DIR/${SYNC_DEL_FILE_NAME}"
+echo "will be deleted via sync" > "$SYNC_DEL_FILE"
+CLEANUP_REMOTE_FILES+=("$SYNC_DEL_FILE_NAME")
+
+# Seed a remote file then pull (sets up the manifest)
+run_test "upload file that will later be deleted via sync" \
+  "olcli upload '$SYNC_DEL_FILE' '$PROJECT_ID'"
+
+sleep 2
+run_test "initial pull writes manifest" \
+  "olcli pull '$PROJECT_ID' '$SYNC_DEL_DIR' --force"
+
+run_test_with_output "manifest contains the seeded file" \
+  "cat '$SYNC_DEL_DIR/.olcli.json'" \
+  "$SYNC_DEL_FILE_NAME"
+
+# Delete the file locally
+rm -f "$SYNC_DEL_DIR/$SYNC_DEL_FILE_NAME"
+
+# Dry-run sync should report the deletion without applying it
+run_test_with_output "sync --dry-run reports planned deletion" \
+  "cd '$SYNC_DEL_DIR' && olcli sync --dry-run --verbose" \
+  "deleted on remote|Deleted on remote"
+
+# Verify file still exists on remote after dry-run
+sleep 2
+run_test "file still on remote after dry-run" \
+  "olcli download '$SYNC_DEL_FILE_NAME' '$PROJECT_ID' -o '$TEST_DIR/dryrun_check.txt'"
+
+# Actual sync should propagate the deletion
+run_test "sync propagates local deletion to remote" \
+  "cd '$SYNC_DEL_DIR' && olcli sync --verbose"
+
+sleep 2
+run_test "file is gone from remote after sync" \
+  "olcli download '$SYNC_DEL_FILE_NAME' '$PROJECT_ID' -o '$TEST_DIR/post_sync_check.txt'" \
+  false
+
+# Verify the file was NOT resurrected on disk
+echo -n "  Testing: locally deleted file stays deleted ... "
+TESTS_RUN=$((TESTS_RUN + 1))
+if [ ! -f "$SYNC_DEL_DIR/$SYNC_DEL_FILE_NAME" ]; then
+  echo -e "${GREEN}✓${NC}"
+  TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+  echo -e "${RED}✗${NC}"
+  echo "    File was resurrected at: $SYNC_DEL_DIR/$SYNC_DEL_FILE_NAME"
+  TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+sleep 1
+
+# --no-delete safety flag
+SYNC_NODEL_FILE_NAME="${TEST_ID}_sync_nodel.txt"
+SYNC_NODEL_FILE="$TEST_DIR/${SYNC_NODEL_FILE_NAME}"
+echo "protected by --no-delete" > "$SYNC_NODEL_FILE"
+CLEANUP_REMOTE_FILES+=("$SYNC_NODEL_FILE_NAME")
+
+run_test "upload file for --no-delete test" \
+  "olcli upload '$SYNC_NODEL_FILE' '$PROJECT_ID'"
+
+sleep 2
+run_test "refresh manifest with new seeded file" \
+  "olcli pull '$PROJECT_ID' '$SYNC_DEL_DIR' --force"
+
+rm -f "$SYNC_DEL_DIR/$SYNC_NODEL_FILE_NAME"
+
+run_test "sync --no-delete preserves remote despite local deletion" \
+  "cd '$SYNC_DEL_DIR' && olcli sync --no-delete"
+
+sleep 2
+run_test "file still on remote after --no-delete sync" \
+  "olcli download '$SYNC_NODEL_FILE_NAME' '$PROJECT_ID' -o '$TEST_DIR/nodel_check.txt'"
+
+# Cleanup: actually delete it now via the new delete command
+run_test "cleanup: delete --no-delete test file" \
+  "olcli delete '$SYNC_NODEL_FILE_NAME' '$PROJECT_ID'"
 
 #######################################
 # Test: Error Handling

@@ -468,47 +468,49 @@ program
     }
   });
 
-// NOTE: delete and rename commands are disabled - they require entity IDs
-// which are not exposed via the current Overleaf API without Socket.IO.
-// Use the Overleaf web UI for these operations.
-//
-// program
-//   .command('delete <file> [project]')
-//   .alias('rm')
-//   .description('Delete a file from a project')
-//   .option('--cookie <session>', 'Session cookie override')
-//   .action(async (file, project, options) => {
-//     const spinner = ora('Deleting file...').start();
-//     try {
-//       const client = await getClient(options.cookie);
-//       const proj = await resolveProject(client, project);
-//       await client.deleteByPath(proj.id, file);
-//       spinner.succeed(`Deleted: ${file}`);
-//       setLastProject(proj.id);
-//     } catch (error: any) {
-//       spinner.fail(`Failed: ${error.message}`);
-//       process.exit(1);
-//     }
-//   });
-//
-// program
-//   .command('rename <oldname> <newname> [project]')
-//   .alias('mv')
-//   .description('Rename a file in a project')
-//   .option('--cookie <session>', 'Session cookie override')
-//   .action(async (oldname, newname, project, options) => {
-//     const spinner = ora('Renaming file...').start();
-//     try {
-//       const client = await getClient(options.cookie);
-//       const proj = await resolveProject(client, project);
-//       await client.renameByPath(proj.id, oldname, newname);
-//       spinner.succeed(`Renamed: ${oldname} → ${newname}`);
-//       setLastProject(proj.id);
-//     } catch (error: any) {
-//       spinner.fail(`Failed: ${error.message}`);
-//       process.exit(1);
-//     }
-//   });
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE / RENAME COMMANDS
+// ─────────────────────────────────────────────────────────────────────────────
+// Use deleteByPath / renameByPath which resolve a path to an entity id via
+// /project/<id>/entities, then call the documented delete/rename endpoints.
+
+program
+  .command('delete <file> [project]')
+  .alias('rm')
+  .description('Delete a file or folder from a project')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (file, project, options) => {
+    const spinner = ora('Deleting file...').start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      await client.deleteByPath(proj.id, file);
+      spinner.succeed(`Deleted: ${file}`);
+      setLastProject(proj.id);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('rename <oldname> <newname> [project]')
+  .alias('mv')
+  .description('Rename a file or folder in a project')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (oldname, newname, project, options) => {
+    const spinner = ora('Renaming file...').start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      await client.renameByPath(proj.id, oldname, newname);
+      spinner.succeed(`Renamed: ${oldname} → ${newname}`);
+      setLastProject(proj.id);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPILE COMMAND
@@ -640,11 +642,16 @@ program
         }
       }
 
-      // Save project metadata
+      // Save project metadata (with manifest of remote files for sync deletion tracking)
+      const remoteManifest: string[] = [];
+      for (const e of entries) {
+        if (!e.isDirectory) remoteManifest.push(e.entryName);
+      }
       writeFileSync(join(targetDir, '.olcli.json'), JSON.stringify({
         projectId,
         projectName,
-        lastPull: new Date().toISOString()
+        lastPull: new Date().toISOString(),
+        remoteManifest
       }, null, 2));
 
       if (skippedCount > 0) {
@@ -849,9 +856,11 @@ program
 
 program
   .command('sync [dir]')
-  .description('Pull then push (bidirectional sync)')
+  .description('Pull then push (bidirectional sync, propagates local deletions)')
   .option('--project <name>', 'Project name or ID')
   .option('--verbose', 'Show detailed file operations')
+  .option('--no-delete', 'Do not propagate local deletions to the remote (safer)')
+  .option('--dry-run', 'Show what would change without applying')
   .option('--cookie <session>', 'Session cookie override')
   .action(async (dir, options) => {
     const targetDir = dir || '.';
@@ -946,15 +955,57 @@ program
 
       // Merge: local changes take precedence for files modified after last pull
       let lastPull: Date | undefined;
+      let previousManifest: string[] = [];
       if (existsSync(metaPath)) {
         const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
         lastPull = meta.lastPull ? new Date(meta.lastPull) : undefined;
+        if (Array.isArray(meta.remoteManifest)) {
+          previousManifest = meta.remoteManifest as string[];
+        }
       }
 
       const filesToUpload: { path: string; content: Buffer }[] = [];
       const filesUpdatedLocally: string[] = [];
       const filesKeptLocal: string[] = [];
       const filesNewLocal: string[] = [];
+      const filesDeletedRemote: string[] = [];
+      const filesDeleteSkipped: { path: string; reason: string }[] = [];
+
+      // Detect locally-deleted files: present in previous manifest, missing locally,
+      // still present on the remote. Propagate the deletion to the remote BEFORE
+      // we write remote contents back over the working tree (otherwise the file
+      // would be silently restored — the bug reported in #7).
+      // Conflict policy: if the project has no previous manifest yet (first sync),
+      // we cannot distinguish "never existed locally" from "deleted locally", so
+      // skip deletion propagation on the very first sync.
+      if (options.delete !== false && previousManifest.length > 0 && existsSync(metaPath)) {
+        const locallyDeleted: string[] = [];
+        for (const path of previousManifest) {
+          if (path === 'output.pdf' || path.endsWith('/output.pdf')) continue;
+          if (!localFiles.has(path) && remoteFiles.has(path)) {
+            locallyDeleted.push(path);
+          }
+        }
+
+        if (locallyDeleted.length > 0) {
+          spinner.text = `Propagating ${locallyDeleted.length} local deletion(s) to remote...`;
+          for (const path of locallyDeleted) {
+            if (options.dryRun) {
+              filesDeletedRemote.push(path);
+              remoteFiles.delete(path);
+              continue;
+            }
+            try {
+              await client.deleteByPath(projectId, path);
+              filesDeletedRemote.push(path);
+              // Drop from remoteFiles so we don't re-extract it below
+              remoteFiles.delete(path);
+            } catch (err: any) {
+              filesDeleteSkipped.push({ path, reason: err.message || String(err) });
+            }
+          }
+        }
+      }
 
       spinner.text = 'Comparing files...';
 
@@ -993,28 +1044,58 @@ program
       }
 
       // Upload local changes
-      if (filesToUpload.length > 0) {
+      if (filesToUpload.length > 0 && !options.dryRun) {
         spinner.text = `Uploading ${filesToUpload.length} local change(s)...`;
         for (const file of filesToUpload) {
           await client.uploadFile(projectId, null, file.path, file.content);
         }
       }
 
-      // Update metadata
-      writeFileSync(metaPath, JSON.stringify({
-        projectId,
-        projectName,
-        lastPull: new Date().toISOString(),
-        lastSync: new Date().toISOString()
-      }, null, 2));
+      // Refresh manifest of remote files post-sync (deletions out, new uploads in)
+      const newManifest = new Set<string>(remoteFiles.keys());
+      for (const f of filesToUpload) newManifest.add(f.path);
+      for (const p of filesDeletedRemote) newManifest.delete(p);
 
-      spinner.succeed(`Synced "${projectName}"`);
+      // Update metadata
+      if (!options.dryRun) {
+        writeFileSync(metaPath, JSON.stringify({
+          projectId,
+          projectName,
+          lastPull: new Date().toISOString(),
+          lastSync: new Date().toISOString(),
+          remoteManifest: Array.from(newManifest).sort()
+        }, null, 2));
+      }
+
+      if (options.dryRun) {
+        spinner.succeed(`Dry-run sync "${projectName}" (no changes applied)`);
+      } else {
+        spinner.succeed(`Synced "${projectName}"`);
+      }
 
       // Summary
       console.log(chalk.dim(`  ↓ ${filesUpdatedLocally.length} pulled from remote`));
       console.log(chalk.dim(`  ↑ ${filesToUpload.length} pushed to remote`));
+      if (filesDeletedRemote.length > 0) {
+        console.log(chalk.dim(`  ✖ ${filesDeletedRemote.length} deleted on remote`));
+      }
+      if (filesDeleteSkipped.length > 0) {
+        console.log(chalk.yellow(`  ⚠ ${filesDeleteSkipped.length} deletion(s) failed (kept remote)`));
+      }
 
       if (options.verbose) {
+        if (filesDeletedRemote.length > 0) {
+          console.log(chalk.red('\n  Deleted on remote (matched local deletion):'));
+          for (const f of filesDeletedRemote) {
+            console.log(chalk.dim(`    ${f}`));
+          }
+        }
+        if (filesDeleteSkipped.length > 0) {
+          console.log(chalk.yellow('\n  Deletion skipped (will retry on next sync):'));
+          for (const { path, reason } of filesDeleteSkipped) {
+            console.log(chalk.dim(`    ${path}  —  ${reason}`));
+          }
+        }
         if (filesKeptLocal.length > 0) {
           console.log(chalk.yellow('\n  Local changes pushed (local was newer):'));
           for (const f of filesKeptLocal) {

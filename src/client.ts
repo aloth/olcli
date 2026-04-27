@@ -200,7 +200,7 @@ export class OverleafClient {
   private async httpRequest(url: string, options: {
     method?: string;
     headers?: Record<string, string>;
-    body?: string | Buffer;
+    body?: string | Buffer | FormData;
     timeoutMs?: number;
     maxRedirects?: number;
     expect?: 'text' | 'json' | 'buffer';
@@ -210,11 +210,27 @@ export class OverleafClient {
     const maxRedirects = options.maxRedirects ?? 5;
     const expect = options.expect ?? 'text';
 
+    // Normalize FormData bodies into a multipart Buffer + headers using Node's
+    // built-in Web Fetch primitives. Keeps every code path on httpRequest
+    // (no fetch() reintroduction) while properly serializing multipart uploads.
+    let bodyBuffer: string | Buffer | undefined;
+    let extraHeaders: Record<string, string> = {};
+    if (options.body instanceof FormData) {
+      const req = new Request('http://x/', { method: 'POST', body: options.body });
+      const arrayBuf = await req.arrayBuffer();
+      bodyBuffer = Buffer.from(arrayBuf);
+      const ct = req.headers.get('content-type');
+      if (ct) extraHeaders['Content-Type'] = ct;
+      extraHeaders['Content-Length'] = String(bodyBuffer.length);
+    } else if (options.body !== undefined) {
+      bodyBuffer = options.body as string | Buffer;
+    }
+
     const doRequest = (reqUrl: string, redirectsLeft: number): Promise<{ status: number; ok: boolean; headers: Record<string, string | string[]>; body: string | Buffer | any }> => {
       return new Promise((resolve, reject) => {
         const parsedUrl = new URL(reqUrl);
         const transport = parsedUrl.protocol === 'https:' ? https : http;
-        const headers = this.normalizeHeaders(options.headers);
+        const headers = this.normalizeHeaders({ ...extraHeaders, ...options.headers });
 
         const req = transport.request(reqUrl, { method, headers }, (res) => {
           const status = res.statusCode || 0;
@@ -254,8 +270,8 @@ export class OverleafClient {
           });
         }
 
-        if (options.body) {
-          req.write(options.body);
+        if (bodyBuffer !== undefined) {
+          req.write(bodyBuffer);
         }
 
         req.end();
@@ -405,11 +421,102 @@ export class OverleafClient {
       }
     }
 
+    // Fallback: Overleaf no longer ships the project tree in meta tags.
+    // Use the Socket.IO joinProjectResponse payload (same source used for
+    // root folder discovery) to retrieve the full project info.
+    if (!projectInfo) {
+      const socketProject = await this.getProjectFromSocket(projectId);
+      if (socketProject) {
+        projectInfo = socketProject as ProjectInfo;
+      }
+    }
+
     if (!projectInfo) {
       throw new Error('Could not parse project info');
     }
 
     return projectInfo;
+  }
+
+  /**
+   * Fetch the full project object via the collaboration socket.
+   * Returns the `project` field of the joinProjectResponse, which contains
+   * the rootFolder tree and other metadata that used to live in ol-project.
+   */
+  private async getProjectFromSocket(projectId: string): Promise<any | null> {
+    let sid: string | null = null;
+    try {
+      const handshakeUrl = `${this.baseUrl}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+      const handshakeResponse = await this.httpRequest(handshakeUrl, {
+        headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT },
+        expect: 'text',
+        timeoutMs: 5000
+      });
+      if (!handshakeResponse.ok) return null;
+      this.applySetCookieHeaders(handshakeResponse.headers['set-cookie'] as string[] | undefined);
+      const handshakeBody = (handshakeResponse.body as string).trim();
+      sid = handshakeBody.split(':')[0];
+      if (!sid) return null;
+
+      const buildPollUrl = () =>
+        `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const pollResponse = await this.httpRequest(buildPollUrl(), {
+          headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT },
+          expect: 'text',
+          timeoutMs: 5000
+        });
+        if (!pollResponse.ok) return null;
+        this.applySetCookieHeaders(pollResponse.headers['set-cookie'] as string[] | undefined);
+        const packets = this.decodeSocketIoPayload(pollResponse.body as string);
+        for (const packet of packets) {
+          if (packet.startsWith('5:::')) {
+            try {
+              const payload = JSON.parse(packet.slice(4));
+              if (payload?.name === 'joinProjectResponse' && payload?.args?.[0]?.project) {
+                return payload.args[0].project;
+              }
+            } catch { /* ignore */ }
+          }
+          if (packet.startsWith('2::')) {
+            const heartbeatResponse = await this.httpRequest(buildPollUrl(), {
+              method: 'POST',
+              headers: {
+                'Cookie': this.getCookieHeader(),
+                'User-Agent': USER_AGENT,
+                'Content-Type': 'text/plain;charset=UTF-8'
+              },
+              body: '2::',
+              expect: 'text',
+              timeoutMs: 5000
+            });
+            this.applySetCookieHeaders(heartbeatResponse.headers['set-cookie'] as string[] | undefined);
+          }
+        }
+      }
+    } catch {
+      // fall through
+    } finally {
+      if (sid) {
+        try {
+          const disconnectUrl = `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+          const disconnectResponse = await this.httpRequest(disconnectUrl, {
+            method: 'POST',
+            headers: {
+              'Cookie': this.getCookieHeader(),
+              'User-Agent': USER_AGENT,
+              'Content-Type': 'text/plain;charset=UTF-8'
+            },
+            body: '0::',
+            expect: 'text',
+            timeoutMs: 5000
+          });
+          this.applySetCookieHeaders(disconnectResponse.headers['set-cookie'] as string[] | undefined);
+        } catch { /* ignore */ }
+      }
+    }
+    return null;
   }
 
   /**
