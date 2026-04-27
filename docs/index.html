@@ -125,7 +125,7 @@ footer a{color:var(--muted);text-decoration:none}
 <body>
 
 <section class="hero">
-  <div class="hero-badge">v0.1.6 · <code>MIT Licensed</code> · Node.js</div>
+  <div class="hero-badge">v0.3.0 · <code>MIT Licensed</code> · Node.js</div>
   <h1>Overleaf,<br>from your <span class="accent">terminal.</span></h1>
   <p>Pull, push, sync, and compile LaTeX projects without leaving your editor. Works with Git, CI/CD, and AI agents.</p>
 
@@ -176,7 +176,12 @@ footer a{color:var(--muted);text-decoration:none}
     <div class="feature-card">
       <div class="feature-icon">🔄</div>
       <h3>Bidirectional Sync</h3>
-      <p>Smart conflict detection. Local wins if newer, remote changes pulled automatically.</p>
+      <p>Smart conflict detection. Local wins if newer, remote changes pulled automatically. Local deletions propagate to Overleaf.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🚫</div>
+      <h3>Smart Ignore</h3>
+      <p>LaTeX build artifacts (.aux, .bbl, .log, .synctex.gz) filtered automatically. Customize with <code>.olignore</code> (gitignore-style).</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">📄</div>

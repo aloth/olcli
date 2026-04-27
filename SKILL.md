@@ -4,7 +4,7 @@ description: Sync and manage Overleaf LaTeX projects from the command line. Pull
 license: MIT
 metadata:
   author: aloth
-  version: "1.1"
+  version: "1.2"
   cli: olcli
   install: brew tap aloth/tap && brew install olcli
 ---
@@ -64,7 +64,25 @@ cd My_Paper/
 ```bash
 # After editing files locally
 olcli push              # Upload changes only
-olcli sync              # Bidirectional sync (pull + push)
+olcli sync              # Bidirectional sync (pull + push, propagates local deletions)
+olcli sync --no-delete  # Sync without propagating local deletions to remote
+```
+
+### Delete or rename remote files
+
+```bash
+olcli delete chapters/old.tex          # remove a file from the project
+olcli rm figures/old.pdf               # alias
+olcli rename old.tex new.tex           # rename a file
+olcli mv chapters/draft.tex chapters/intro.tex   # alias
+```
+
+### Inspect ignore rules
+
+```bash
+olcli ignored              # list active patterns (built-ins + .olignore + .olignore.local)
+olcli push --show-ignored  # see what was filtered on this run
+olcli sync --no-ignore     # escape hatch: upload everything
 ```
 
 ### Compile and download PDF
@@ -137,6 +155,9 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 | `olcli sync [dir]` | Bidirectional sync |
 | `olcli upload <file> [project]` | Upload a single file |
 | `olcli download <file> [project]` | Download a single file |
+| `olcli delete <file> [project]` | Delete a remote file or folder by path (alias: `rm`) |
+| `olcli rename <old> <new> [project]` | Rename a remote file or folder (alias: `mv`) |
+| `olcli ignored [dir]` | List active ignore patterns |
 | `olcli zip [project]` | Download as zip archive |
 | `olcli compile [project]` | Trigger compilation |
 | `olcli pdf [project]` | Compile and download PDF |
@@ -145,7 +166,10 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 ## Tips
 
 - **Auto-detect project**: Run commands from a synced directory (contains `.olcli.json`) to skip the project argument
-- **Dry run**: Use `olcli push --dry-run` to preview changes before uploading
+- **Dry run**: Use `olcli push --dry-run` or `olcli sync --dry-run` to preview before applying
 - **Force overwrite**: Use `olcli pull --force` to overwrite local changes
+- **Two-way deletes**: `olcli sync` propagates *local* deletions to the remote; use `--no-delete` to opt out per run
+- **Build artifacts**: `.aux`, `.bbl`, `.log`, `.synctex.gz` etc. are filtered by default. Add custom patterns to a `.olignore` file (gitignore-style)
+- **PDF rule**: `thesis.pdf` next to `thesis.tex` is auto-ignored; standalone `figures/diagram.pdf` is preserved
 - **Project ID**: You can use project ID instead of name (24-char hex from URL)
 - **Debug auth**: Run `olcli check` to see where credentials are loaded from

@@ -21,11 +21,13 @@ Work with Overleaf projects directly from your command line. Edit locally with y
 - ⬇️ **Pull** project files to local directory for offline editing
 - ⬆️ **Push** local changes back to Overleaf
 - 🔄 **Sync** bidirectionally with smart conflict detection
+- ✌️ **Two-way deletions** — files removed locally are deleted on Overleaf on the next sync (opt out with `--no-delete`)
+- 🗑️ **Delete** and ✏️ **rename** remote files by path
+- 🚫 **Smart ignore** — LaTeX build artifacts (`.aux`, `.bbl`, `.log`, `.synctex.gz`, …) and OS noise are filtered out automatically; extend with `.olignore` (gitignore-style)
 - 📄 **Compile** PDFs using Overleaf's remote compiler
 - 📦 **Download** individual files or full project archives
 - 📤 **Upload** files to projects
 - 🗂️ **Preserve folder structure** when pushing nested files
-- 🧹 **Skip generated `output.pdf`** during push/sync so compiled artifacts are not uploaded back to Overleaf
 - ⚙️ **Support self-hosted Overleaf/ShareLaTeX instances** via configurable base URL and session cookie name
 - 📊 **Output** compile artifacts (`.bbl`, `.log`, `.aux` for arXiv submissions)
 
@@ -165,8 +167,9 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli sync [dir]` | Bidirectional sync (pull + push) |
 | `olcli upload <file> [project]` | Upload a single file |
 | `olcli download <file> [project]` | Download a single file |
-| `olcli delete <file> [project]` | Delete a remote file by path |
-| `olcli rename <oldname> <newname> [project]` | Rename a remote file by path |
+| `olcli delete <file> [project]` | Delete a remote file or folder by path (alias: `rm`) |
+| `olcli rename <oldname> <newname> [project]` | Rename a remote file or folder by path (alias: `mv`) |
+| `olcli ignored [dir]` | List ignore patterns currently in effect |
 | `olcli zip [project]` | Download project as zip archive |
 | `olcli compile [project]` | Trigger PDF compilation |
 | `olcli pdf [project]` | Compile and download PDF |
@@ -252,16 +255,69 @@ olcli output --list
 ### Push
 - Uploads files modified after last pull
 - Preserves nested folder structure when uploading
-- Skips generated `output.pdf`
+- Filters out LaTeX build artifacts and OS noise (see [Ignoring files](#ignoring-files))
 - Use `--all` to upload all files
 - Use `--dry-run` to preview changes
+- Use `--show-ignored` to see what was filtered out
 
 ### Sync
 - Pulls remote changes
 - Preserves local modifications (local wins if newer)
 - Pushes local changes to remote
-- Skips generated `output.pdf` during upload phase
+- **Propagates local deletions to the remote** — if you delete a file locally, it's deleted on Overleaf on the next sync. Use `--no-delete` to opt out.
+- Filters out LaTeX build artifacts and OS noise
 - Use `--verbose` to see detailed file operations
+- Use `--dry-run` to preview without applying
+
+#### How deletion propagation works
+
+On every sync, `olcli` records a manifest of remote files in `.olcli.json`. The next sync compares the manifest against your local working tree:
+
+- File missing locally **and** still present on remote → deleted on Overleaf
+- File new locally → uploaded
+- File modified locally after last pull → uploaded (local wins)
+- File only on remote → downloaded
+
+First-time syncs skip the deletion phase (no manifest exists yet to distinguish "never had it" from "deleted it").
+
+## Ignoring files
+
+`olcli` automatically filters local files through a layered ignore list before uploading. This keeps LaTeX build artifacts (from local `pdflatex`/`latexmk` runs) and OS noise out of your Overleaf project.
+
+### Three layers
+
+| Layer | File | Purpose |
+|---|---|---|
+| 1 | (built-in) | LaTeX intermediates (`.aux`, `.bbl`, `.log`, `.fls`, `.synctex.gz`, beamer/biber/glossaries/minted), OS noise (`.DS_Store`, `Thumbs.db`, `*.swp`), common build dirs (`build/`, `out/`, `_minted-*/`). Always on; opt out with `--no-default-ignore`. |
+| 2 | `.olignore` | Project-level patterns, gitignore syntax. Commit alongside your `.tex` sources. |
+| 3 | `.olignore.local` | Machine-specific patterns. Add to `.gitignore`. |
+
+Later layers override earlier ones, just like git. Negation (`!important.aux`) is supported.
+
+### Special PDF rule
+
+`X.pdf` is ignored only if a same-named `X.tex` (or `.ltx`) exists in the same folder. So `thesis.pdf` next to `thesis.tex` is filtered, but a hand-uploaded `figures/diagram.pdf` still syncs.
+
+### Example `.olignore`
+
+```gitignore
+# Drafts that should never reach Overleaf
+*.draft.tex
+notes/
+chapters/scratch/
+
+# But keep this one auxiliary file
+!important.aux
+```
+
+### Inspecting and overriding
+
+```bash
+olcli ignored                  # list patterns currently in effect
+olcli push --show-ignored      # see what was skipped on this run
+olcli sync --no-default-ignore # only .olignore applies
+olcli sync --no-ignore         # escape hatch — upload everything
+```
 
 ## Configuration
 
