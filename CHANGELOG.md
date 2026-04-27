@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-04-27
+
+### ⚠ Behavior change
+- `push` and `sync` now **filter local files through a built-in ignore list** before uploading to Overleaf. LaTeX build artifacts (`.aux`, `.bbl`, `.log`, `.out`, `.fls`, `.fdb_latexmk`, `.synctex.gz`, beamer/biber/glossaries/minted intermediates, etc.) and OS noise (`.DS_Store`, `Thumbs.db`, `*.swp`) are no longer uploaded.
+  - Previously, locally compiling a project (e.g. with `pdflatex` or `latexmk`) would upload dozens of build artifacts to Overleaf, which could break Overleaf's own compile (stale `.aux` / `.bbl`) or pollute the remote project.
+  - **PDF special rule:** `X.pdf` is ignored only if a same-named `X.tex` (or `.ltx`) exists in the same folder. Hand-uploaded `figures/diagram.pdf` is still synced.
+  - To restore the old behavior on a per-run basis, use `--no-default-ignore` (only respects `.olignore`) or `--no-ignore` (uploads everything).
+
+### Added
+- **`.olignore` file support** — gitignore-style syntax for project-level ignore patterns. Negation (`!important.aux`) is supported.
+- **`.olignore.local` file support** — machine-specific patterns that should not be committed to version control.
+- **`olcli ignored [dir]`** command — lists all ignore patterns currently in effect for a project, grouped by source.
+- `push --no-default-ignore` / `sync --no-default-ignore` — disable built-in defaults (only `.olignore` applies).
+- `push --no-ignore` / `sync --no-ignore` — disable all ignore filtering (escape hatch).
+- `push --show-ignored` / `sync --show-ignored` — print files that were skipped by ignore rules.
+- New dependency: [`ignore`](https://www.npmjs.com/package/ignore) (~30KB, zero deps, gitignore-compatible matcher used by ESLint/Prettier).
+
+### Fixed
+- **#19** — `sync` no longer uploads LaTeX build artifacts, breaking Overleaf compile.
+
+### Internal
+- New module `src/ignore.ts` with `DEFAULT_IGNORE_PATTERNS`, `loadIgnore()`, `shouldIgnore()`, and `buildTexSiblingSet()`.
+- New e2e test `test/e2e-ignore.sh` covering defaults, `.olignore`, `.olignore.local`, negation, the PDF sibling rule, and the `--no-*` escape hatches.
+
+
 ## [0.2.0] - 2026-04-27
 
 ### ⚠ Behavior change

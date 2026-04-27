@@ -13,6 +13,13 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OverleafClient } from './client.js';
+import {
+  loadIgnore,
+  shouldIgnore,
+  buildTexSiblingSet,
+  DEFAULT_IGNORE_PATTERNS,
+  type IgnoreContext,
+} from './ignore.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -682,6 +689,9 @@ program
   .option('--all', 'Upload all files (not just changed)')
   .option('--dry-run', 'Show what would be uploaded without uploading')
   .option('--probe-folder', 'Probe for correct folder ID (use if uploads fail with folder_not_found)')
+  .option('--no-default-ignore', 'Disable built-in LaTeX artifact ignore list (only .olignore applies)')
+  .option('--no-ignore', 'Disable all ignore filtering (escape hatch — uploads everything)')
+  .option('--show-ignored', 'Print files skipped by ignore rules')
   .option('--cookie <session>', 'Session cookie override')
   .action(async (dir, options) => {
     const targetDir = dir || '.';
@@ -733,25 +743,43 @@ program
 
       spinner.text = 'Scanning files...';
 
+      // Build ignore context (defaults + .olignore + .olignore.local)
+      const ignoreCtx = loadIgnore(targetDir, {
+        noDefaults: options.defaultIgnore === false,
+        disableAll: options.ignore === false,
+      });
+
       // Get list of files to upload
       const { readdirSync, statSync } = await import('node:fs');
 
       const filesToUpload: { path: string; relativePath: string }[] = [];
+      const filesIgnored: string[] = [];
 
       function scanDir(currentDir: string, relativeBase: string = '') {
         const entries = readdirSync(currentDir, { withFileTypes: true });
+        // Pre-compute sibling .tex set for the PDF special rule.
+        const texSiblings = buildTexSiblingSet(
+          entries.filter((e) => !e.isDirectory()).map((e) => e.name),
+        );
         for (const entry of entries) {
-          // Skip hidden files and .olcli.json
+          // Skip hidden files and .olcli.json (always — predates ignore subsystem)
           if (entry.name.startsWith('.')) continue;
 
           const fullPath = join(currentDir, entry.name);
           const relativePath = relativeBase ? `${relativeBase}/${entry.name}` : entry.name;
 
-          if (!entry.isDirectory() && entry.name === 'output.pdf') continue;
-
           if (entry.isDirectory()) {
+            // Test directory ignore (gitignore semantics: trailing slash matches dir)
+            if (shouldIgnore(`${relativePath}/`, ignoreCtx)) {
+              filesIgnored.push(`${relativePath}/`);
+              continue;
+            }
             scanDir(fullPath, relativePath);
           } else {
+            if (shouldIgnore(relativePath, ignoreCtx, texSiblings)) {
+              filesIgnored.push(relativePath);
+              continue;
+            }
             // Check if file is newer than last pull (unless --all)
             if (options.all || !lastPull) {
               filesToUpload.push({ path: fullPath, relativePath });
@@ -766,6 +794,15 @@ program
       }
 
       scanDir(targetDir);
+
+      if (options.showIgnored && filesIgnored.length > 0) {
+        spinner.stop();
+        console.log(chalk.bold(chalk.dim(`Ignored ${filesIgnored.length} file(s)/dir(s):`)));
+        for (const p of filesIgnored) {
+          console.log(chalk.dim(`  ${p}`));
+        }
+        spinner.start('Scanning files...');
+      }
 
       if (filesToUpload.length === 0) {
         spinner.info('No files to upload');
@@ -861,6 +898,9 @@ program
   .option('--verbose', 'Show detailed file operations')
   .option('--no-delete', 'Do not propagate local deletions to the remote (safer)')
   .option('--dry-run', 'Show what would change without applying')
+  .option('--no-default-ignore', 'Disable built-in LaTeX artifact ignore list (only .olignore applies)')
+  .option('--no-ignore', 'Disable all ignore filtering (escape hatch — uploads everything)')
+  .option('--show-ignored', 'Print files skipped by ignore rules')
   .option('--cookie <session>', 'Session cookie override')
   .action(async (dir, options) => {
     const targetDir = dir || '.';
@@ -917,20 +957,38 @@ program
         mkdirSync(targetDir, { recursive: true });
       }
 
+      // Build ignore context (defaults + .olignore + .olignore.local)
+      const ignoreCtx = loadIgnore(targetDir, {
+        noDefaults: options.defaultIgnore === false,
+        disableAll: options.ignore === false,
+      });
+
       // Track local modifications
       const localFiles = new Map<string, { mtime: Date; content: Buffer }>();
+      const filesIgnored: string[] = [];
       const { readdirSync, statSync } = await import('node:fs');
 
       function scanLocalFiles(currentDir: string, relativeBase: string = '') {
         if (!existsSync(currentDir)) return;
         const entries = readdirSync(currentDir, { withFileTypes: true });
+        const texSiblings = buildTexSiblingSet(
+          entries.filter((e) => !e.isDirectory()).map((e) => e.name),
+        );
         for (const entry of entries) {
           if (entry.name.startsWith('.')) continue;
           const fullPath = join(currentDir, entry.name);
           const relativePath = relativeBase ? `${relativeBase}/${entry.name}` : entry.name;
           if (entry.isDirectory()) {
+            if (shouldIgnore(`${relativePath}/`, ignoreCtx)) {
+              filesIgnored.push(`${relativePath}/`);
+              continue;
+            }
             scanLocalFiles(fullPath, relativePath);
           } else {
+            if (shouldIgnore(relativePath, ignoreCtx, texSiblings)) {
+              filesIgnored.push(relativePath);
+              continue;
+            }
             const stats = statSync(fullPath);
             localFiles.set(relativePath, {
               mtime: stats.mtime,
@@ -943,6 +1001,15 @@ program
       // Read local files before overwriting
       if (existsSync(metaPath)) {
         scanLocalFiles(targetDir);
+      }
+
+      if (options.showIgnored && filesIgnored.length > 0) {
+        spinner.stop();
+        console.log(chalk.bold(chalk.dim(`Ignored ${filesIgnored.length} local file(s)/dir(s):`)));
+        for (const p of filesIgnored) {
+          console.log(chalk.dim(`  ${p}`));
+        }
+        spinner.start();
       }
 
       // Extract remote files
@@ -1153,6 +1220,43 @@ configCmd
   .description('Get the current session cookie name')
   .action(() => {
     console.log(getSessionCookieName());
+  });
+
+program
+  .command('ignored [dir]')
+  .description('Show ignore patterns currently in effect for a project directory')
+  .option('--no-default-ignore', 'Exclude built-in defaults from the listing')
+  .option('--no-ignore', 'Show what --no-ignore would do (lists nothing)')
+  .action((dir, options) => {
+    const targetDir = dir || '.';
+    const ctx = loadIgnore(targetDir, {
+      noDefaults: options.defaultIgnore === false,
+      disableAll: options.ignore === false,
+    });
+    if (!ctx.enabled) {
+      console.log(chalk.yellow('Ignore filtering is disabled (--no-ignore).'));
+      console.log(chalk.dim('Every local file would be uploaded.'));
+      return;
+    }
+    if (ctx.sources.length === 0) {
+      console.log(chalk.yellow('No ignore patterns active.'));
+      console.log(chalk.dim('Built-in defaults are disabled and no .olignore file was found.'));
+      return;
+    }
+    console.log(chalk.bold(`Ignore patterns in effect for ${targetDir}:`));
+    console.log(chalk.dim('(later sources override earlier ones; ! prefix negates)'));
+    for (const src of ctx.sources) {
+      console.log();
+      console.log(chalk.cyan(`── ${src.label} (${src.patterns.length}) ──`));
+      for (const p of src.patterns) {
+        console.log(`  ${p}`);
+      }
+    }
+    console.log();
+    console.log(chalk.dim(`Total: ${ctx.patterns.length} pattern(s)`));
+    if (ctx.defaultsEnabled) {
+      console.log(chalk.dim('Note: *.pdf is also ignored when a same-named *.tex/.ltx exists in the same folder.'));
+    }
   });
 
 program
