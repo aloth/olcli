@@ -389,6 +389,43 @@ export class OverleafClient {
   }
 
   /**
+   * Fetch the all the version changes from history for a project
+   */
+  async getUpdates(projectId: string): Promise<any[]> {
+    const url = `${this.baseUrl}/project/${projectId}/updates`;
+    const response = await fetch(url, { headers: this.getHeaders(true) });
+    if (!response.ok) return[];
+
+    const data = await response.json() as any;
+    return data.updates ||[];
+  }
+
+  /**
+   * Fetch the history labels (Saved Versions) for a project
+   */
+  async getLabels(projectId: string): Promise<any[]> {
+    const url = `${this.baseUrl}/project/${projectId}/labels`;
+    const response = await fetch(url, {
+      headers: this.getHeaders(true)
+    });
+
+    if (!response.ok) {
+      return[]; // Return empty array if no labels exist or endpoint fails
+    }
+
+    const data = await response.json() as any;
+    return data ||[];
+  }
+
+  /**
+   * Download the project ZIP at a specific historical version
+   */
+  async downloadHistoricalZip(projectId: string, version: number): Promise<Buffer> {
+    const url = `${this.baseUrl}/project/${projectId}/version/${version}/zip`;
+    return this.downloadBuffer(url);
+  }
+
+  /**
    * Apply a Label to the current overleaf state
    */
   async applyOverleafLabel(projectId: string, message: string, version: number): Promise<void> {
