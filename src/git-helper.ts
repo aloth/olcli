@@ -164,10 +164,9 @@ class GitRemoteHelper {
 
       const overleafTime = Math.floor(new Date(project.lastUpdated).getTime() / 1000);
       const lastSyncTime = this.getLastSyncTime();
-      console.error(overleafTime, lastSyncTime);
 
       if (lastSyncTime > 0 && overleafTime > lastSyncTime) {
-        console.log(`error ${remoteRef} Remote has newer changes. Please pull first.`);
+        console.log(`error ${remoteRef} fetch first`);
         console.log('');
         return;
       }

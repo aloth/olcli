@@ -36,8 +36,8 @@ export interface Project {
   id: string;
   name: string;
   lastUpdated: string;
-  lastUpdatedBy?: string;
-  owner?: { email: string; firstName?: string; lastName?: string };
+  lastUpdatedBy?: {id?:string; email: string; firstName?: string; lastName?: string };
+  owner?: {id?:string; email: string; firstName?: string; lastName?: string };
   archived?: boolean;
   trashed?: boolean;
 }
