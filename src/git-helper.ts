@@ -11,8 +11,6 @@ const remote = process.argv[2] || 'origin';
 const url = process.argv[3];
 
 
-const { getClient } = await import('./client.js');
-
 class GitRemoteHelper {
   private remote: string;
   private projectId: string;
@@ -28,9 +26,9 @@ class GitRemoteHelper {
     this.baseUrl = urlT[0] + "//" + urlT[2];
   }
 
-  public async initClient() {
+  public async initClient(): Promise<OverleafClient> {
     if (!this.client) {
-      this.client = await getClient();
+      this.client = await OverleafClient.fromUrl(this.baseUrl);
     }
     return this.client;
   }

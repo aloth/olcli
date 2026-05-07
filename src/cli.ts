@@ -12,15 +12,15 @@ import ora from 'ora';
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { OverleafClient, getClient } from './client.js';
+import { OverleafClient } from './client.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
 const VERSION = pkg.version;
 import {
-  getSessionCookie,
-  setSessionCookie,
+  getSession,
+  setSession,
   getLastProject,
   setLastProject,
   getConfigPath,
@@ -33,6 +33,24 @@ import {
 } from './config.js';
 
 const program = new Command();
+
+/**
+ * Helper to get authenticated client
+ */
+async function getClient(baseUrlOpt?: string): Promise<OverleafClient> {
+  const baseUrl = baseUrlOpt || getBaseUrl();
+  const cookie = getSession(baseUrl);
+  if (!cookie) {
+    console.error('No session cookie found.');
+    console.error('Set one with: olcli auth --cookie <session_cookie>');
+    console.error('Or set OVERLEAF_SESSION environment variable');
+    console.error('Or create .olauth file in current directory');
+    process.exit(1);
+  }
+  const cookieName = getSessionCookieName();
+  return OverleafClient.fromSessionCookie(cookie, baseUrl, cookieName);
+}
+
 
 program
 .name('olcli')
@@ -115,7 +133,7 @@ program
     const client = await OverleafClient.fromSessionCookie(options.cookie, baseUrl, cookieName);
     const projects = await client.listProjects();
 
-    setSessionCookie(options.cookie);
+    setSession(baseUrl, options.cookie);
 
     if (options.saveLocal) {
       saveOlAuth(options.cookie);
@@ -135,7 +153,8 @@ program
 .command('whoami')
 .description('Show current authentication status')
 .action(async () => {
-  const cookie = getSessionCookie();
+  const baseUrl = (program.opts().baseUrl as string | undefined) || getBaseUrl();
+  const cookie = getSession(baseUrl);
   if (!cookie) {
     console.log(chalk.yellow('Not authenticated'));
     return;
@@ -1113,7 +1132,8 @@ program
   console.log('  3. Global config file');
   console.log();
 
-  const cookie = getSessionCookie();
+  const baseUrl = (program.opts().baseUrl as string | undefined) || getBaseUrl();
+  const cookie = getSession(baseUrl);
   if (cookie) {
     console.log(chalk.green('✓ Session cookie found'));
     console.log(chalk.dim(`  Value: ${cookie.substring(0, 20)}...`));

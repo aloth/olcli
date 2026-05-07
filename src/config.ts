@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 
 interface OlcliConfig {
+  sessions?: Record<string, string>;
   sessionCookie?: string;
   csrf?: string;
   lastProject?: string;
@@ -18,6 +19,7 @@ interface OlcliConfig {
 const config = new Conf<OlcliConfig>({
   projectName: 'olcli',
   schema: {
+    sessions: {},
     sessionCookie: { type: 'string' },
     csrf: { type: 'string' },
     lastProject: { type: 'string' },
@@ -42,7 +44,7 @@ export function setSessionCookieName(name: string): void {
   config.set('sessionCookieName', name);
 }
 
-export function getSessionCookie(): string | undefined {
+export function getSession(baseUrl: string): string | undefined {
   // Check environment variable first
   if (process.env.OVERLEAF_SESSION) {
     return process.env.OVERLEAF_SESSION;
@@ -69,10 +71,17 @@ export function getSessionCookie(): string | undefined {
   }
 
   // Check global config
-  return config.get('sessionCookie');
+  //const normalizedUrl = baseUrl.replace(/\/$/, '');
+  const sessions = config.get('sessions') || {};
+  return sessions[baseUrl || 'https://www.overleaf.com'];
+  //return config.get('sessionCookie');
 }
 
-export function setSessionCookie(cookie: string): void {
+export function setSession(baseUrl:string, cookie: string): void {
+  const sessions = config.get('sessions') || {};
+
+  sessions[baseUrl] = cookie;
+  config.set('sessions', sessions);
   config.set('sessionCookie', cookie);
 }
 

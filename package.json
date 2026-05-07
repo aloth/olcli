@@ -51,6 +51,7 @@
     "commander": "^12.1.0",
     "conf": "^13.0.0",
     "ora": "^8.0.1",
+    "puppeteer": "^24.42.0",
     "tough-cookie": "^4.1.4"
   },
   "devDependencies": {

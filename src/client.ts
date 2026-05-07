@@ -12,8 +12,8 @@ import { fileURLToPath } from 'node:url';
 import * as https from 'node:https';
 import * as http from 'node:http';
 import {
-  getSessionCookie,
-  setSessionCookie,
+  getSession,
+  setSession,
   getLastProject,
   setLastProject,
   getConfigPath,
@@ -24,6 +24,7 @@ import {
   getSessionCookieName,
   setSessionCookieName
 } from './config.js';
+import puppeteer from 'puppeteer';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -73,23 +74,6 @@ export interface Credentials {
   baseUrl?: string;
 }
 
-/**
- * Helper to get authenticated client
- */
-export async function getClient(cookieOpt?: string, baseUrlOpt?: string): Promise<OverleafClient> {
-  const cookie = cookieOpt || getSessionCookie();
-  if (!cookie) {
-    console.error('No session cookie found.');
-    console.error('Set one with: olcli auth --cookie <session_cookie>');
-    console.error('Or set OVERLEAF_SESSION environment variable');
-    console.error('Or create .olauth file in current directory');
-    process.exit(1);
-  }
-  const baseUrl = baseUrlOpt || getBaseUrl();
-  const cookieName = getSessionCookieName();
-  return OverleafClient.fromSessionCookie(cookie, baseUrl, cookieName);
-}
-
 export class OverleafClient {
   private cookies: Record<string, string>;
   private csrf: string;
@@ -123,6 +107,24 @@ export class OverleafClient {
 
   private compileUrl(projectId: string): string {
     return `${this.baseUrl}/project/${projectId}/compile?enable_pdf_caching=true`;
+  }
+
+  /**
+   * Create client with a url
+   */
+  static async fromUrl(baseUrl: string): Promise<OverleafClient> {
+    let cookie = getSession(baseUrl);
+    if(!cookie){
+      cookie = await OverleafClient.loginViaBrowser(baseUrl);
+      setSession(baseUrl, cookie);
+    }
+
+    if(!cookie){
+      process.exit(1);
+    }
+
+    const cookieName = getSessionCookieName();
+    return OverleafClient.fromSessionCookie(cookie, baseUrl, cookieName);
   }
 
   /**
@@ -187,7 +189,19 @@ export class OverleafClient {
 
     // Update cookies if the bootstrap request added anything
     const updatedCookies = bootstrapClient.cookies;
-    return new OverleafClient({ cookies: updatedCookies, csrf, baseUrl });
+    const client = new OverleafClient({ cookies: updatedCookies, csrf, baseUrl });
+    if(await client.verifySession()){
+      return client;
+    }else{
+      console.error("Cookie out of date, updating...");
+      const newCookie = await OverleafClient.loginViaBrowser(baseUrl);
+      setSession(baseUrl, newCookie);
+
+      if(!newCookie){
+        process.exit(1);
+      }
+      return OverleafClient.fromSessionCookie(newCookie, baseUrl, cookieName);
+    }
   }
 
   private getCookieHeader(): string {
@@ -312,6 +326,28 @@ export class OverleafClient {
   }
 
   /**
+   * Checks if the current session cookie is still valid
+   */
+  async verifySession(): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.baseUrl}/project`, {
+        headers: this.getHeaders(),
+        redirect: 'follow' // Automatically follow redirects
+      });
+
+      // If Overleaf redirected us to the login page, the cookie is expired!
+      if (response.url.includes('/login')) {
+        return false;
+      }
+
+      return response.ok;
+    } catch (error) {
+      // If the network fails entirely, assume the session check failed
+      return false;
+    }
+  }
+
+  /**
    * Get all projects (not archived, not trashed)
    */
   async listProjects(): Promise<Project[]> {
@@ -386,6 +422,53 @@ export class OverleafClient {
       archived: p.archived,
       trashed: p.trashed
     }));
+  }
+
+  static async loginViaBrowser(baseUrl: string): Promise<string> {
+    console.error(`\n🌐 Opening browser to log into ${baseUrl}...`);
+    console.error(`Please log in. The window will close automatically when finished.\n`);
+
+    // 1. Launch a visible browser window
+    const browser = await puppeteer.launch({
+      headless: false,
+      defaultViewport: null,
+      args:[
+        `--app=${baseUrl}/login`, // Opens directly to the login page without tabs!
+          '--window-size=800,800'
+      ]
+    });
+
+    // 2. Use the single existing page instead of creating a new one
+    const page = (await browser.pages())[0];
+
+    try {
+      // 1. Wait for the user to reach the dashboard
+      await page.waitForFunction(
+        "window.location.pathname.startsWith('/project')",
+        { timeout: 300000 }
+      );
+
+      // 2. Poll the Cookie Jar until the REAL authenticated cookie arrives!
+      let sessionCookie;
+
+      // Check every 500ms for up to 10 seconds
+      while (!sessionCookie) {
+        //for (let i = 0; i < 20; i++) {
+        const cookies = await page.cookies(baseUrl);
+
+        sessionCookie = cookies.find(c => (c.name === 'overleaf_session2' || c.name === 'sharelatex_session') && !c.value.startsWith('s%3Ac%3A1%3A'));
+
+        // Wait half a second before checking again
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      await browser.close();
+      return sessionCookie.value;
+
+
+    } catch (err: any) {
+      await browser.close().catch(() => {}); // Ensure browser closes
+      throw new Error(`Login aborted or timed out: ${err.message}`);
+    }
   }
 
   /**
