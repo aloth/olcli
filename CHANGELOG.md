@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+- **Review comment management** — new `olcli comments` commands to list Overleaf review comments with source locations and optional context, add comments to selected document text, resolve/reopen comment threads, and permanently delete comment threads.
+
 ## [0.3.1] - 2026-05-18
 
 ### Fixed

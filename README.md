@@ -27,6 +27,7 @@ Work with Overleaf projects directly from your command line. Edit locally with y
 - 📄 **Compile** PDFs using Overleaf's remote compiler
 - 📦 **Download** individual files or full project archives
 - 📤 **Upload** files to projects
+- 💬 **Review comments** — list comments with source locations, add, resolve, reopen, and delete threads
 - 🗂️ **Preserve folder structure** when pushing nested files
 - ⚙️ **Support self-hosted Overleaf/ShareLaTeX instances** via configurable base URL and session cookie name
 - 📊 **Output** compile artifacts (`.bbl`, `.log`, `.aux` for arXiv submissions)
@@ -167,6 +168,11 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli sync [dir]` | Bidirectional sync (pull + push) |
 | `olcli upload <file> [project]` | Upload a single file |
 | `olcli download <file> [project]` | Download a single file |
+| `olcli comments list [project]` | List comments with source text and file locations (`--status`, `--context`) |
+| `olcli comments add <file> <message> [project]` | Add a comment to selected text |
+| `olcli comments resolve <threadId> [project]` | Resolve a comment thread |
+| `olcli comments reopen <threadId> [project]` | Reopen a resolved comment thread |
+| `olcli comments delete <threadId> [project]` | Permanently delete a comment thread |
 | `olcli delete <file> [project]` | Delete a remote file or folder by path (alias: `rm`) |
 | `olcli rename <oldname> <newname> [project]` | Rename a remote file or folder by path (alias: `mv`) |
 | `olcli ignored [dir]` | List ignore patterns currently in effect |
@@ -177,6 +183,18 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli config set-url <url>` | Set a self-hosted Overleaf base URL |
 | `olcli config set-cookie-name <name>` | Set the session cookie name |
 | `olcli check` | Show config paths and credential sources |
+
+### Review comments
+
+```bash
+olcli comments list "My Paper" --status open --context 2
+olcli comments list "My Paper" --status resolved --json
+olcli comments add main.tex "Please clarify this definition" "My Paper" --text "A Skill is"
+olcli comments add main.tex "Check this sentence" "My Paper" --line 42 --column 1 --length 20 --json
+olcli comments resolve 6a1a5fedbf90b811e1000001 "My Paper" --json
+olcli comments reopen 6a1a5fedbf90b811e1000001 "My Paper"
+olcli comments delete 6a1a5fedbf90b811e1000001 "My Paper" --json
+```
 
 ### Global options
 

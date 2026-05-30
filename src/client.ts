@@ -54,10 +54,78 @@ export interface FileEntry {
   name: string;
 }
 
+export interface CommentMessage {
+  id: string;
+  content: string;
+  timestamp?: string | number;
+  user_id?: string;
+  user?: { email?: string; first_name?: string; last_name?: string; name?: string };
+  edited_at?: string | number;
+}
+
+export interface ProjectComment {
+  threadId: string;
+  docId: string;
+  path: string;
+  position: number;
+  line: number;
+  column: number;
+  selectedText: string;
+  resolved: boolean;
+  messages: CommentMessage[];
+  context?: CommentContext;
+}
+
+export interface CommentContext {
+  startLine: number;
+  endLine: number;
+  before: string[];
+  line: string;
+  after: string[];
+}
+
+export type CommentStatus = 'all' | 'open' | 'resolved';
+
+export interface ListCommentsOptions {
+  status?: CommentStatus;
+  contextLines?: number;
+}
+
+export interface AddCommentOptions {
+  filePath: string;
+  content: string;
+  selectedText?: string;
+  position?: number;
+  line?: number;
+  column?: number;
+  length?: number;
+  occurrence?: number;
+}
+
 export interface Credentials {
   cookies: Record<string, string>;
   csrf: string;
   baseUrl?: string;
+}
+
+interface ProjectDoc {
+  id: string;
+  path: string;
+}
+
+interface JoinedDocument {
+  docId: string;
+  lines: string[];
+  content: string;
+  version: number;
+  ranges: any;
+  type: 'sharejs-text-ot' | 'history-ot';
+}
+
+interface ProjectSocketSession {
+  sid: string;
+  projectId: string;
+  pollUrl: () => string;
 }
 
 export class OverleafClient {
@@ -724,6 +792,258 @@ export class OverleafClient {
     }
 
     return packets;
+  }
+
+  private encodeSocketIoEvent(id: number, name: string, args: any[]): string {
+    return `5:${id}+::${JSON.stringify({ name, args })}`;
+  }
+
+  private parseSocketIoAck(packet: string, id: number): any[] | null {
+    const match = packet.match(/^6:::(\d+)(.*)$/);
+    if (!match || Number.parseInt(match[1], 10) !== id) {
+      return null;
+    }
+
+    let payload = match[2] || '';
+    if (payload.startsWith('+')) {
+      payload = payload.slice(1);
+    }
+    if (!payload) return [];
+
+    const args = JSON.parse(payload);
+    return Array.isArray(args) ? args : [args];
+  }
+
+  private decodeOverleafUtf8(text: string): string {
+    return Buffer.from(text, 'binary').toString('utf-8');
+  }
+
+  private generateCommentThreadId(): string {
+    const timestamp = Math.floor(Date.now() / 1000).toString(16).padStart(8, '0');
+    const machine = Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
+    const pid = Math.floor(Math.random() * 0x7fff).toString(16).padStart(4, '0');
+    return `${timestamp}${machine}${pid}000001`;
+  }
+
+  private positionToLineColumn(content: string, position: number): { line: number; column: number } {
+    const prefix = content.slice(0, position);
+    const lines = prefix.split('\n');
+    return {
+      line: lines.length,
+      column: lines[lines.length - 1].length + 1
+    };
+  }
+
+  private buildCommentContext(content: string, line: number, contextLines = 0): CommentContext | undefined {
+    if (contextLines <= 0) return undefined;
+
+    const lines = content.split('\n');
+    const lineIndex = line - 1;
+    const beforeStart = Math.max(0, lineIndex - contextLines);
+    const afterEnd = Math.min(lines.length, lineIndex + contextLines + 1);
+
+    return {
+      startLine: beforeStart + 1,
+      endLine: afterEnd,
+      before: lines.slice(beforeStart, lineIndex),
+      line: lines[lineIndex] || '',
+      after: lines.slice(lineIndex + 1, afterEnd)
+    };
+  }
+
+  private collectProjectDocs(projectInfo: ProjectInfo): ProjectDoc[] {
+    const docs: ProjectDoc[] = [];
+
+    function walk(folder: FolderEntry, folderPath: string): void {
+      for (const doc of folder.docs || []) {
+        docs.push({
+          id: doc._id,
+          path: folderPath ? `${folderPath}/${doc.name}` : doc.name
+        });
+      }
+      for (const child of folder.folders || []) {
+        const childPath = folderPath ? `${folderPath}/${child.name}` : child.name;
+        walk(child, childPath);
+      }
+    }
+
+    for (const folder of projectInfo.rootFolder || []) {
+      walk(folder, '');
+    }
+
+    return docs;
+  }
+
+  private async openProjectSocket(projectId: string): Promise<ProjectSocketSession> {
+    const handshakeUrl = `${this.baseUrl}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+    const handshakeResponse = await this.httpRequest(handshakeUrl, {
+      headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT },
+      expect: 'text',
+      timeoutMs: 5000
+    });
+
+    if (!handshakeResponse.ok) {
+      throw new Error(`Failed to open project socket: ${handshakeResponse.status}`);
+    }
+
+    this.applySetCookieHeaders(handshakeResponse.headers['set-cookie'] as string[] | undefined);
+    const sid = (handshakeResponse.body as string).trim().split(':')[0];
+    if (!sid) {
+      throw new Error('Failed to open project socket: missing session id');
+    }
+
+    const session: ProjectSocketSession = {
+      sid,
+      projectId,
+      pollUrl: () => `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`
+    };
+
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const packets = await this.pollProjectSocket(session);
+      if (packets.some(packet => {
+        if (!packet.startsWith('5:::')) return false;
+        try {
+          return JSON.parse(packet.slice(4))?.name === 'joinProjectResponse';
+        } catch {
+          return false;
+        }
+      })) {
+        return session;
+      }
+    }
+
+    throw new Error('Project socket did not return joinProjectResponse');
+  }
+
+  private async pollProjectSocket(session: ProjectSocketSession): Promise<string[]> {
+    const response = await this.httpRequest(session.pollUrl(), {
+      headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT },
+      expect: 'text',
+      timeoutMs: 7000
+    });
+
+    if (!response.ok) {
+      throw new Error(`Socket poll failed: ${response.status}`);
+    }
+
+    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+    const packets = this.decodeSocketIoPayload(response.body as string);
+
+    for (const packet of packets) {
+      if (packet.startsWith('2::')) {
+        const heartbeatResponse = await this.httpRequest(session.pollUrl(), {
+          method: 'POST',
+          headers: {
+            'Cookie': this.getCookieHeader(),
+            'User-Agent': USER_AGENT,
+            'Content-Type': 'text/plain;charset=UTF-8'
+          },
+          body: '2::',
+          expect: 'text',
+          timeoutMs: 5000
+        });
+        this.applySetCookieHeaders(heartbeatResponse.headers['set-cookie'] as string[] | undefined);
+      }
+    }
+
+    return packets;
+  }
+
+  private async postProjectSocketPacket(session: ProjectSocketSession, packet: string): Promise<void> {
+    const response = await this.httpRequest(session.pollUrl(), {
+      method: 'POST',
+      headers: {
+        'Cookie': this.getCookieHeader(),
+        'User-Agent': USER_AGENT,
+        'Content-Type': 'text/plain;charset=UTF-8'
+      },
+      body: packet,
+      expect: 'text',
+      timeoutMs: 5000
+    });
+
+    if (!response.ok) {
+      throw new Error(`Socket post failed: ${response.status}`);
+    }
+
+    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+  }
+
+  private async socketRpc(session: ProjectSocketSession, name: string, args: any[]): Promise<any[]> {
+    const id = Math.floor(Math.random() * 0x7fffffff);
+    await this.postProjectSocketPacket(session, this.encodeSocketIoEvent(id, name, args));
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const packets = await this.pollProjectSocket(session);
+      for (const packet of packets) {
+        const ackArgs = this.parseSocketIoAck(packet, id);
+        if (ackArgs) {
+          const [error, ...result] = ackArgs;
+          if (error) {
+            const message = typeof error === 'string' ? error : error.message || JSON.stringify(error);
+            throw new Error(`${name} failed: ${message}`);
+          }
+          return result;
+        }
+      }
+    }
+
+    throw new Error(`${name} did not return an acknowledgement`);
+  }
+
+  private async closeProjectSocket(session: ProjectSocketSession): Promise<void> {
+    try {
+      await this.postProjectSocketPacket(session, '0::');
+    } catch {
+      // Best-effort socket cleanup only.
+    }
+  }
+
+  private normalizeJoinedDocument(docId: string, args: any[]): JoinedDocument {
+    const [lines, version, _updates, ranges, type = 'sharejs-text-ot'] = args;
+
+    if (type === 'history-ot') {
+      const content = typeof lines?.content === 'string' ? lines.content : '';
+      return {
+        docId,
+        lines: content.split('\n'),
+        content,
+        version,
+        ranges: lines,
+        type
+      };
+    }
+
+    const decodedLines = Array.isArray(lines)
+      ? lines.map((line: string) => this.decodeOverleafUtf8(line))
+      : [];
+    const decodedRanges = ranges || {};
+    for (const comment of decodedRanges.comments || []) {
+      if (comment?.op?.c) {
+        comment.op.c = this.decodeOverleafUtf8(comment.op.c);
+      }
+    }
+
+    return {
+      docId,
+      lines: decodedLines,
+      content: decodedLines.join('\n'),
+      version,
+      ranges: decodedRanges,
+      type
+    };
+  }
+
+  private async joinDocument(session: ProjectSocketSession, docId: string): Promise<JoinedDocument> {
+    const args = await this.socketRpc(session, 'joinDoc', [
+      docId,
+      {
+        encodeRanges: true,
+        supportsHistoryOT: true
+      }
+    ]);
+
+    return this.normalizeJoinedDocument(docId, args);
   }
 
   /**
@@ -1432,6 +1752,284 @@ export class OverleafClient {
     }
 
     throw new Error(`File not found in archive: ${path}`);
+  }
+
+  async getCommentThreads(projectId: string): Promise<Record<string, { messages: CommentMessage[]; resolved?: boolean; resolved_at?: string; resolved_by_user_id?: string }>> {
+    const response = await this.httpRequest(`${this.baseUrl}/project/${projectId}/threads`, {
+      headers: this.getHeaders(),
+      expect: 'json'
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch comment threads: ${response.status}`);
+    }
+
+    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+    return response.body as Record<string, { messages: CommentMessage[]; resolved?: boolean; resolved_at?: string; resolved_by_user_id?: string }>;
+  }
+
+  async listComments(projectId: string, options: ListCommentsOptions = {}): Promise<ProjectComment[]> {
+    const status = options.status || 'all';
+    const contextLines = options.contextLines || 0;
+    const projectInfo = await this.getProjectInfo(projectId);
+    const docs = this.collectProjectDocs(projectInfo);
+    const threads = await this.getCommentThreads(projectId);
+    const comments: ProjectComment[] = [];
+    const session = await this.openProjectSocket(projectId);
+
+    try {
+      for (const doc of docs) {
+        const joinedDoc = await this.joinDocument(session, doc.id);
+
+        if (joinedDoc.type === 'history-ot') {
+          for (const comment of joinedDoc.ranges.comments || []) {
+            const ranges = comment.ranges || [];
+            const firstRange = ranges[0];
+            if (!firstRange) continue;
+            const selectedText = ranges
+              .map((range: any) => joinedDoc.content.slice(range.pos, range.pos + range.length))
+              .join('');
+            const location = this.positionToLineColumn(joinedDoc.content, firstRange.pos);
+            const thread = threads[comment.id] || { messages: [] };
+            const resolved = Boolean(comment.resolved || thread.resolved);
+            comments.push({
+              threadId: comment.id,
+              docId: doc.id,
+              path: doc.path,
+              position: firstRange.pos,
+              line: location.line,
+              column: location.column,
+              selectedText,
+              resolved,
+              messages: thread.messages || [],
+              context: this.buildCommentContext(joinedDoc.content, location.line, contextLines)
+            });
+          }
+          continue;
+        }
+
+        for (const comment of joinedDoc.ranges.comments || []) {
+          const op = comment.op || {};
+          const threadId = op.t || comment.id;
+          if (!threadId || typeof op.p !== 'number') continue;
+          const selectedText = typeof op.c === 'string'
+            ? op.c
+            : joinedDoc.content.slice(op.p, op.p + (op.c?.length || 0));
+          const location = this.positionToLineColumn(joinedDoc.content, op.p);
+          const thread = threads[threadId] || { messages: [] };
+          const resolved = Boolean(comment.resolved || op.resolved || thread.resolved);
+          comments.push({
+            threadId,
+            docId: doc.id,
+            path: doc.path,
+            position: op.p,
+            line: location.line,
+            column: location.column,
+            selectedText,
+            resolved,
+            messages: thread.messages || [],
+            context: this.buildCommentContext(joinedDoc.content, location.line, contextLines)
+          });
+        }
+      }
+    } finally {
+      await this.closeProjectSocket(session);
+    }
+
+    return comments
+      .filter(comment => {
+        if (status === 'all') return true;
+        return status === 'resolved' ? comment.resolved : !comment.resolved;
+      })
+      .sort((a, b) => a.path.localeCompare(b.path) || a.position - b.position);
+  }
+
+  async resolveComment(projectId: string, threadId: string): Promise<ProjectComment> {
+    const comment = await this.findComment(projectId, threadId);
+
+    const response = await this.httpRequest(
+      `${this.baseUrl}/project/${projectId}/doc/${comment.docId}/thread/${threadId}/resolve`,
+      {
+        method: 'POST',
+        headers: this.getHeaders(true),
+        body: '',
+        expect: 'text'
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Failed to resolve comment: ${response.status}`);
+    }
+
+    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+    return comment;
+  }
+
+  async reopenComment(projectId: string, threadId: string): Promise<ProjectComment> {
+    const comment = await this.findComment(projectId, threadId);
+
+    const response = await this.httpRequest(
+      `${this.baseUrl}/project/${projectId}/doc/${comment.docId}/thread/${threadId}/reopen`,
+      {
+        method: 'POST',
+        headers: this.getHeaders(true),
+        body: '',
+        expect: 'text'
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Failed to reopen comment: ${response.status}`);
+    }
+
+    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+    return comment;
+  }
+
+  async deleteComment(projectId: string, threadId: string): Promise<ProjectComment> {
+    const comment = await this.findComment(projectId, threadId);
+
+    const response = await this.httpRequest(
+      `${this.baseUrl}/project/${projectId}/doc/${comment.docId}/thread/${threadId}`,
+      {
+        method: 'DELETE',
+        headers: this.getHeaders(true),
+        body: '',
+        expect: 'text'
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Failed to delete comment: ${response.status}`);
+    }
+
+    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+    return comment;
+  }
+
+  private async findComment(projectId: string, threadId: string): Promise<ProjectComment> {
+    const comments = await this.listComments(projectId);
+    const comment = comments.find(item => item.threadId === threadId);
+    if (!comment) {
+      throw new Error(`Comment thread not found: ${threadId}`);
+    }
+    return comment;
+  }
+
+  private resolveCommentSelection(doc: JoinedDocument, options: AddCommentOptions): { position: number; selectedText: string } {
+    if (options.selectedText) {
+      const occurrence = options.occurrence || 1;
+      let fromIndex = 0;
+      let position = -1;
+      for (let index = 0; index < occurrence; index++) {
+        position = doc.content.indexOf(options.selectedText, fromIndex);
+        if (position === -1) break;
+        fromIndex = position + options.selectedText.length;
+      }
+      if (position === -1) {
+        throw new Error(`Selected text not found in ${options.filePath}`);
+      }
+      return { position, selectedText: options.selectedText };
+    }
+
+    let position = options.position;
+    if (position == null) {
+      if (options.line == null || options.column == null) {
+        throw new Error('Add comment requires either --text, --position, or both --line and --column');
+      }
+
+      const lines = doc.content.split('\n');
+      if (options.line < 1 || options.line > lines.length) {
+        throw new Error(`Line out of range: ${options.line}`);
+      }
+      if (options.column < 1 || options.column > lines[options.line - 1].length + 1) {
+        throw new Error(`Column out of range: ${options.column}`);
+      }
+
+      position = lines.slice(0, options.line - 1).reduce((sum, line) => sum + line.length + 1, 0) + options.column - 1;
+    }
+
+    const length = options.length || 1;
+    if (position < 0 || position + length > doc.content.length) {
+      throw new Error('Comment selection is outside the document');
+    }
+
+    return {
+      position,
+      selectedText: doc.content.slice(position, position + length)
+    };
+  }
+
+  async addComment(projectId: string, options: AddCommentOptions): Promise<ProjectComment> {
+    const projectInfo = await this.getProjectInfo(projectId);
+    const docs = this.collectProjectDocs(projectInfo);
+    const normalizedPath = options.filePath.replace(/^\//, '');
+    const doc = docs.find(item => item.path === normalizedPath || item.path.replace(/^\//, '') === normalizedPath);
+    if (!doc) {
+      throw new Error(`Doc not found: ${options.filePath}`);
+    }
+
+    const session = await this.openProjectSocket(projectId);
+    try {
+      const joinedDoc = await this.joinDocument(session, doc.id);
+      const selection = this.resolveCommentSelection(joinedDoc, options);
+      const threadId = this.generateCommentThreadId();
+
+      await this.postCommentMessage(projectId, threadId, options.content);
+
+      const op = joinedDoc.type === 'history-ot'
+        ? {
+            commentId: threadId,
+            ranges: [{ pos: selection.position, length: selection.selectedText.length }]
+          }
+        : {
+            c: selection.selectedText,
+            p: selection.position,
+            t: threadId
+          };
+
+      await this.socketRpc(session, 'applyOtUpdate', [doc.id, {
+        doc: doc.id,
+        op: [op],
+        v: joinedDoc.version
+      }]);
+
+      const location = this.positionToLineColumn(joinedDoc.content, selection.position);
+      return {
+        threadId,
+        docId: doc.id,
+        path: doc.path,
+        position: selection.position,
+        line: location.line,
+        column: location.column,
+        selectedText: selection.selectedText,
+        resolved: false,
+        messages: []
+      };
+    } finally {
+      await this.closeProjectSocket(session);
+    }
+  }
+
+  async postCommentMessage(projectId: string, threadId: string, content: string): Promise<CommentMessage | null> {
+    const response = await this.httpRequest(`${this.baseUrl}/project/${projectId}/thread/${threadId}/messages`, {
+      method: 'POST',
+      headers: this.getHeaders(true),
+      body: JSON.stringify({ content }),
+      expect: 'text'
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to post comment message: ${response.status}`);
+    }
+
+    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+    if (!response.body) return null;
+    try {
+      return JSON.parse(response.body as string) as CommentMessage;
+    } catch {
+      return null;
+    }
   }
 
   /**

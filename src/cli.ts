@@ -292,6 +292,195 @@ function printFolder(folder: any, indent: string): void {
   }
 }
 
+const commentsCmd = program
+  .command('comments')
+  .description('View and manage Overleaf comments');
+
+function printCommentContext(comment: any): void {
+  if (!comment.context) return;
+
+  const ctx = comment.context;
+  let lineNumber = ctx.startLine;
+  for (const line of ctx.before) {
+    console.log(`  ${chalk.dim(String(lineNumber).padStart(4))}  ${chalk.dim(line)}`);
+    lineNumber += 1;
+  }
+  console.log(`  ${chalk.yellow(String(lineNumber).padStart(4))}  ${ctx.line}`);
+  lineNumber += 1;
+  for (const line of ctx.after) {
+    console.log(`  ${chalk.dim(String(lineNumber).padStart(4))}  ${chalk.dim(line)}`);
+    lineNumber += 1;
+  }
+}
+
+commentsCmd
+  .command('list [project]')
+  .description('List project comments with selected source text and location')
+  .option('--status <status>', 'Filter by status: open, resolved, or all (default: all)', 'all')
+  .option('--context <n>', 'Include N lines of source context around each comment', parseInt)
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (project, options) => {
+    const spinner = ora('Fetching comments...').start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      const status = String(options.status || 'all');
+      if (!['all', 'open', 'resolved'].includes(status)) {
+        throw new Error('--status must be one of: all, open, resolved');
+      }
+      const contextLines = options.context == null ? 0 : options.context;
+      if (!Number.isInteger(contextLines) || contextLines < 0) {
+        throw new Error('--context must be a non-negative integer');
+      }
+      const comments = await client.listComments(proj.id, {
+        status: status as 'all' | 'open' | 'resolved',
+        contextLines
+      });
+      spinner.stop();
+
+      if (options.json) {
+        console.log(JSON.stringify(comments, null, 2));
+        return;
+      }
+
+      if (comments.length === 0) {
+        console.log(chalk.yellow('No comments found'));
+        return;
+      }
+
+      console.log(chalk.bold(`Found ${comments.length} comment(s):\n`));
+      for (const comment of comments) {
+        const status = comment.resolved ? chalk.green('resolved') : chalk.yellow('open');
+        console.log(`${chalk.cyan(comment.threadId)} ${status}`);
+        console.log(`  ${comment.path}:${comment.line}:${comment.column}`);
+        console.log(`  ${chalk.dim('Selected:')} ${comment.selectedText.replace(/\s+/g, ' ').trim()}`);
+        printCommentContext(comment);
+        for (const message of comment.messages) {
+          const author = message.user?.email || message.user?.name || message.user_id || 'unknown';
+          console.log(`  ${chalk.dim(author)}: ${message.content}`);
+        }
+        console.log();
+      }
+
+      setLastProject(proj.id);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+commentsCmd
+  .command('resolve <threadId> [project]')
+  .description('Resolve a comment thread')
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (threadId, project, options) => {
+    const spinner = ora('Resolving comment...').start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      const comment = await client.resolveComment(proj.id, threadId);
+      if (options.json) {
+        spinner.stop();
+        console.log(JSON.stringify({ resolved: true, comment: { ...comment, resolved: true } }, null, 2));
+        return;
+      }
+      spinner.succeed(`Resolved ${threadId} at ${comment.path}:${comment.line}:${comment.column}`);
+      setLastProject(proj.id);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+commentsCmd
+  .command('reopen <threadId> [project]')
+  .description('Reopen a resolved comment thread')
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (threadId, project, options) => {
+    const spinner = ora('Reopening comment...').start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      const comment = await client.reopenComment(proj.id, threadId);
+      if (options.json) {
+        spinner.stop();
+        console.log(JSON.stringify({ reopened: true, comment: { ...comment, resolved: false } }, null, 2));
+        return;
+      }
+      spinner.succeed(`Reopened ${threadId} at ${comment.path}:${comment.line}:${comment.column}`);
+      setLastProject(proj.id);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+commentsCmd
+  .command('delete <threadId> [project]')
+  .description('Permanently delete a comment thread')
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (threadId, project, options) => {
+    const spinner = ora('Deleting comment...').start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      const comment = await client.deleteComment(proj.id, threadId);
+      if (options.json) {
+        spinner.stop();
+        console.log(JSON.stringify({ deleted: true, comment }, null, 2));
+        return;
+      }
+      spinner.succeed(`Deleted ${threadId} from ${comment.path}:${comment.line}:${comment.column}`);
+      setLastProject(proj.id);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+commentsCmd
+  .command('add <file> <message> [project]')
+  .description('Add a comment to selected text in a doc')
+  .option('--text <text>', 'Selected source text; the first match is used by default')
+  .option('--occurrence <n>', 'Use the nth match for --text', parseInt)
+  .option('--position <n>', 'Zero-based character offset in the doc', parseInt)
+  .option('--line <n>', 'One-based line number', parseInt)
+  .option('--column <n>', 'One-based column number', parseInt)
+  .option('--length <n>', 'Selection length when using --position or --line/--column', parseInt)
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (file, message, project, options) => {
+    const spinner = ora('Adding comment...').start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      const comment = await client.addComment(proj.id, {
+        filePath: file,
+        content: message,
+        selectedText: options.text,
+        position: options.position,
+        line: options.line,
+        column: options.column,
+        length: options.length,
+        occurrence: options.occurrence
+      });
+      if (options.json) {
+        spinner.stop();
+        console.log(JSON.stringify({ added: true, comment }, null, 2));
+        return;
+      }
+      spinner.succeed(`Added ${comment.threadId} at ${comment.path}:${comment.line}:${comment.column}`);
+      setLastProject(proj.id);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
 // ─────────────────────────────────────────────────────────────────────────────
 // DOWNLOAD COMMANDS
 // ─────────────────────────────────────────────────────────────────────────────
