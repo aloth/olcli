@@ -438,6 +438,192 @@ olcli output bbl -o main.bbl
 olcli zip -o arxiv-submission.zip
 ```
 
+## Programmatic Usage (Library API)
+
+`@aloth/olcli` exposes `OverleafClient` and all public interfaces as a proper library so you can use it in your own scripts, tools, and AI agents.
+
+### Install
+
+```bash
+npm install @aloth/olcli
+```
+
+### Basic example
+
+```ts
+import { OverleafClient } from '@aloth/olcli';
+
+// Create a client from an Overleaf session cookie
+const client = await OverleafClient.fromSessionCookie(cookie);
+
+// List all projects
+const projects = await client.listProjects();
+console.log(projects);
+
+// Get detailed info (file tree) for a project
+const info = await client.getProjectInfo(projectId);
+
+// Download project as a zip buffer
+const zipBuf = await client.downloadProject(projectId);
+
+// Compile and download PDF
+const pdfBuf = await client.downloadPdf(projectId);
+
+// Upload a file
+import { readFileSync } from 'node:fs';
+await client.uploadFile(projectId, null, 'main.tex', readFileSync('main.tex'));
+
+// List review comments
+const comments = await client.listComments(projectId, { status: 'open' });
+```
+
+### Available exports
+
+```ts
+import {
+  // Core client
+  OverleafClient,
+
+  // Types / interfaces
+  Project, ProjectInfo, FolderEntry, DocEntry, FileEntry,
+  CommentMessage, ProjectComment, CommentContext, CommentStatus,
+  ListCommentsOptions, AddCommentOptions, Credentials,
+
+  // Configuration utilities
+  getBaseUrl, setBaseUrl, getSessionCookie, setSessionCookie,
+  getSessionCookieName, setSessionCookieName, getCsrf, setCsrf,
+  getLastProject, setLastProject, clearConfig, getConfigPath, saveOlAuth,
+
+  // Ignore utilities
+  DEFAULT_IGNORE_PATTERNS, loadIgnore, shouldIgnore, buildTexSiblingSet,
+  IgnoreContext, LoadIgnoreOptions,
+} from '@aloth/olcli';
+```
+
+---
+
+## MCP Server
+
+`@aloth/olcli` ships an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server so AI assistants like **Claude Desktop**, **Cursor**, and **Windsurf** can interact with your Overleaf projects directly.
+
+### MCP tools
+
+| Tool | Description |
+|------|-------------|
+| `list_projects` | List all Overleaf projects |
+| `get_project_info` | Get file tree and metadata for a project |
+| `pull_project` | Download and extract a project to a local directory |
+| `push_file` | Upload a local file to a project |
+| `compile` | Compile a project and get the PDF URL |
+| `download_pdf` | Compile a project and save the PDF locally |
+| `list_comments` | List review comments (filter: all / open / resolved) |
+| `get_entities` | Get a flat list of all files in a project |
+| `download_file` | Download a specific file by its remote path |
+| `add_comment` | Add a review comment to a document |
+| `resolve_comment` | Mark a comment thread as resolved |
+| `delete_entity` | Delete a file or document by path |
+| `rename_entity` | Rename a file or document |
+| `compile_with_outputs` | Compile and return all output files (PDF, BBL, logs…) |
+
+### Authentication
+
+The MCP server reads your session cookie in this order:
+
+1. **`OVERLEAF_SESSION` environment variable** — set in your MCP config (recommended)
+2. **`.olauth` file in cwd** — written by `olcli auth`
+3. **Stored config** — written by `olcli auth`
+
+### Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "overleaf": {
+      "command": "npx",
+      "args": ["-y", "@aloth/olcli-mcp"],
+      "env": {
+        "OVERLEAF_SESSION": "<your-overleaf-session-cookie>"
+      }
+    }
+  }
+}
+```
+
+Or if you have olcli installed globally (`npm install -g @aloth/olcli`):
+
+```json
+{
+  "mcpServers": {
+    "overleaf": {
+      "command": "olcli-mcp",
+      "env": {
+        "OVERLEAF_SESSION": "<your-overleaf-session-cookie>"
+      }
+    }
+  }
+}
+```
+
+### Cursor
+
+Add to your Cursor MCP settings (`~/.cursor/mcp.json` or project `.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "overleaf": {
+      "command": "npx",
+      "args": ["-y", "@aloth/olcli-mcp"],
+      "env": {
+        "OVERLEAF_SESSION": "<your-overleaf-session-cookie>"
+      }
+    }
+  }
+}
+```
+
+### Windsurf
+
+Add to `~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "overleaf": {
+      "command": "npx",
+      "args": ["-y", "@aloth/olcli-mcp"],
+      "env": {
+        "OVERLEAF_SESSION": "<your-overleaf-session-cookie>"
+      }
+    }
+  }
+}
+```
+
+### Getting your session cookie
+
+1. Open Overleaf in your browser and log in
+2. Open DevTools → Application (Chrome) or Storage (Firefox) → Cookies
+3. Find `overleaf_session2` (or `sharelatex.sid` for self-hosted)
+4. Copy the value — that's your `OVERLEAF_SESSION`
+
+Or run `olcli auth` and then the MCP server will pick it up automatically.
+
+### Self-hosted Overleaf
+
+Set `OVERLEAF_BASE_URL` in your MCP env:
+
+```json
+"env": {
+  "OVERLEAF_SESSION": "<cookie>",
+  "OVERLEAF_BASE_URL": "https://overleaf.yourcompany.com"
+}
+```
+
+---
+
 ## Troubleshooting
 
 ### Session expired

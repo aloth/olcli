@@ -1,13 +1,24 @@
 {
   "name": "@aloth/olcli",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Command-line interface for Overleaf — Sync, manage, and compile LaTeX projects from your terminal",
   "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./cli": "./dist/cli.js"
+  },
   "bin": {
-    "olcli": "dist/cli.js"
+    "olcli": "dist/cli.js",
+    "olcli-mcp": "dist/mcp.js"
   },
   "scripts": {
     "build": "tsc",
+    "mcp": "node dist/mcp.js",
     "dev": "tsx src/cli.ts",
     "lint": "eslint src/",
     "prepare": "npm run build"
@@ -44,6 +55,7 @@
   },
   "homepage": "https://github.com/aloth/olcli#readme",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "adm-zip": "^0.5.16",
     "chalk": "^5.3.0",
     "cheerio": "^1.0.0",
@@ -51,7 +63,8 @@
     "conf": "^13.0.0",
     "ignore": "^7.0.5",
     "ora": "^8.0.1",
-    "tough-cookie": "^4.1.4"
+    "tough-cookie": "^4.1.4",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",
