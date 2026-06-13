@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/aloth-olcli-badge.png)](https://mseep.ai/app/aloth-olcli)
+
 # olcli — Overleaf CLI
 
 **Command-line interface for Overleaf** — Sync, manage, and compile LaTeX projects from your terminal.
