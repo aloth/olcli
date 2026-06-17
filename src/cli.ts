@@ -144,7 +144,7 @@ program
       setSessionCookie(options.cookie);
 
       if (options.saveLocal) {
-        saveOlAuth(options.cookie);
+        saveOlAuth(options.cookie, undefined, baseUrl, cookieName);
         spinner.succeed(`Authenticated! Found ${projects.length} projects. Saved to .olauth`);
       } else {
         spinner.succeed(`Authenticated! Found ${projects.length} projects.`);

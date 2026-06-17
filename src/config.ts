@@ -27,7 +27,28 @@ const config = new Conf<OlcliConfig>({
 });
 
 export function getBaseUrl(): string {
-  return process.env.OVERLEAF_BASE_URL || config.get('baseUrl') || 'https://www.overleaf.com';
+  if (process.env.OVERLEAF_BASE_URL) {
+    return process.env.OVERLEAF_BASE_URL;
+  }
+
+  // Check .olauth file in current directory
+  const olAuthPath = join(process.cwd(), '.olauth');
+  if (existsSync(olAuthPath)) {
+    try {
+      const content = readFileSync(olAuthPath, 'utf-8').trim();
+      if (content.includes('=')) {
+        const parts = content.split(';').map(c => c.trim());
+        const baseUrlPart = parts.find(c => c.startsWith('baseUrl='));
+        if (baseUrlPart) {
+          return baseUrlPart.substring('baseUrl='.length);
+        }
+      }
+    } catch {
+      // Ignore errors
+    }
+  }
+
+  return config.get('baseUrl') || 'https://www.overleaf.com';
 }
 
 export function setBaseUrl(url: string): void {
@@ -35,7 +56,30 @@ export function setBaseUrl(url: string): void {
 }
 
 export function getSessionCookieName(): string {
-  return process.env.OVERLEAF_COOKIE_NAME || config.get('sessionCookieName') || 'overleaf_session2';
+  if (process.env.OVERLEAF_COOKIE_NAME) {
+    return process.env.OVERLEAF_COOKIE_NAME;
+  }
+
+  // Infer from .olauth file in current directory
+  const olAuthPath = join(process.cwd(), '.olauth');
+  if (existsSync(olAuthPath)) {
+    try {
+      const content = readFileSync(olAuthPath, 'utf-8').trim();
+      if (content.includes('=')) {
+        const parts = content.split(';').map(c => c.trim());
+        for (const part of parts) {
+          const [key] = part.split('=');
+          if (key && key !== 'baseUrl') {
+            return key;
+          }
+        }
+      }
+    } catch {
+      // Ignore errors
+    }
+  }
+
+  return config.get('sessionCookieName') || 'overleaf_session2';
 }
 
 export function setSessionCookieName(name: string): void {
@@ -59,7 +103,7 @@ export function getSessionCookie(): string | undefined {
         const cookieName = getSessionCookieName();
         const sessionCookie = cookies.find(c => c.startsWith(`${cookieName}=`));
         if (sessionCookie) {
-          return sessionCookie.split('=')[1];
+          return sessionCookie.substring(`${cookieName}=`.length);
         }
       }
       return content;
@@ -103,7 +147,15 @@ export function getConfigPath(): string {
 /**
  * Save session cookie in .olauth format for compatibility
  */
-export function saveOlAuth(cookie: string, path?: string): void {
+export function saveOlAuth(cookie: string, path?: string, customBaseUrl?: string, customCookieName?: string): void {
   const authPath = path || join(process.cwd(), '.olauth');
-  writeFileSync(authPath, `${getSessionCookieName()}=${cookie}`, 'utf-8');
+  const baseUrl = customBaseUrl || getBaseUrl();
+  const cookieName = customCookieName || getSessionCookieName();
+  
+  let content = `${cookieName}=${cookie}`;
+  if (baseUrl && baseUrl !== 'https://www.overleaf.com') {
+    content += `; baseUrl=${baseUrl}`;
+  }
+  
+  writeFileSync(authPath, content, 'utf-8');
 }
