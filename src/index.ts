@@ -28,6 +28,7 @@ export {
   type ListCommentsOptions,
   type AddCommentOptions,
   type Credentials,
+  type SessionCookiePair,
   // Type aliases
   type CommentStatus,
 } from './client.js';
@@ -40,6 +41,10 @@ export {
   setSessionCookieName,
   getSessionCookie,
   setSessionCookie,
+  getPasswordCredentials,
+  setPasswordCredentials,
+  clearPasswordCredentials,
+  type PasswordCredentials,
   getCsrf,
   setCsrf,
   getLastProject,

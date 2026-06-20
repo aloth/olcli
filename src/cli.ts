@@ -36,7 +36,10 @@ import {
   getBaseUrl,
   setBaseUrl,
   getSessionCookieName,
-  setSessionCookieName
+  setSessionCookieName,
+  getPasswordCredentials,
+  setPasswordCredentials,
+  type PasswordCredentials
 } from './config.js';
 
 const program = new Command();
@@ -53,19 +56,51 @@ program
  * Helper to get authenticated client
  */
 async function getClient(cookieOpt?: string, baseUrlOpt?: string): Promise<OverleafClient> {
-  const cookie = cookieOpt || getSessionCookie();
-  if (!cookie) {
-    console.error(chalk.red('No session cookie found.'));
-    console.error('Set one with: olcli auth --cookie <session_cookie>');
-    console.error('Or set OVERLEAF_SESSION environment variable');
-    console.error('Or create .olauth file in current directory');
-    process.exit(1);
-  }
   const baseUrl = baseUrlOpt || (program.opts().baseUrl as string | undefined) || getBaseUrl();
   const cookieName = (program.opts().cookieName as string | undefined) || getSessionCookieName();
-  const client = await OverleafClient.fromSessionCookie(cookie, baseUrl, cookieName);
+  const cookie = cookieOpt || getSessionCookie();
+  const passwordCredentials = cookieOpt ? undefined : getPasswordCredentials();
+
+  if (cookie) {
+    try {
+      const client = await OverleafClient.fromSessionCookie(cookie, baseUrl, cookieName);
+      if (program.opts().verbose) client.setVerbose(true);
+      return client;
+    } catch (error) {
+      if (!passwordCredentials) throw error;
+    }
+  }
+
+  if (passwordCredentials) {
+    return loginWithSavedPassword(passwordCredentials, baseUrl, cookieName);
+  }
+
+  console.error(chalk.red('No session cookie or password credentials found.'));
+  console.error('Set one with: olcli auth --cookie <session_cookie>');
+  console.error('Or use: olcli auth --email <email> --password <password>');
+  console.error('Or set OVERLEAF_SESSION environment variable');
+  console.error('Or create .olauth file in current directory');
+  process.exit(1);
+}
+
+async function loginWithSavedPassword(
+  credentials: PasswordCredentials,
+  baseUrl: string,
+  cookieName: string
+): Promise<OverleafClient> {
+  const client = await OverleafClient.fromPasswordLogin(credentials.email, credentials.password, baseUrl);
+  persistClientSession(client, cookieName);
   if (program.opts().verbose) client.setVerbose(true);
   return client;
+}
+
+function persistClientSession(client: OverleafClient, preferredCookieName: string): void {
+  const sessionCookie = client.getSessionCookiePair(preferredCookieName);
+  if (!sessionCookie) {
+    throw new Error('Password login succeeded, but no session cookie was returned.');
+  }
+  setSessionCookieName(sessionCookie.name);
+  setSessionCookie(sessionCookie.value);
 }
 
 /**
@@ -116,12 +151,15 @@ async function resolveProject(
 
 program
   .command('auth')
-  .description('Authenticate with Overleaf using session cookie')
+  .description('Authenticate with Overleaf using a session cookie or email/password')
   .option('--cookie <session>', 'Session cookie (overleaf_session2 value)')
+  .option('--email <email>', 'Account email for password login')
+  .option('--password <password>', 'Account password for password login')
+  .option('--no-save-password', 'Do not persist email/password credentials')
   .option('--save-local', 'Save to .olauth in current directory')
   .action(async (options) => {
-    if (!options.cookie) {
-      console.log(chalk.yellow('To authenticate, provide your session cookie:'));
+    if (!options.cookie && !options.email && !options.password) {
+      console.log(chalk.yellow('To authenticate, provide a session cookie:'));
       console.log();
       console.log('1. Log into overleaf.com in your browser');
       console.log('2. Open Developer Tools (F12) → Application → Cookies');
@@ -130,24 +168,51 @@ program
       console.log();
       console.log(chalk.cyan('  olcli auth --cookie "your_session_cookie_value"'));
       console.log();
+      console.log('Or log in with email/password:');
+      console.log(chalk.cyan('  olcli auth --email "you@example.com" --password "your_password"'));
+      console.log();
       console.log('Or set OVERLEAF_SESSION environment variable');
       return;
+    }
+
+    if (options.cookie && (options.email || options.password)) {
+      console.error(chalk.red('Use either --cookie or --email/--password, not both.'));
+      process.exit(1);
+    }
+
+    if (!options.cookie && (!options.email || !options.password)) {
+      console.error(chalk.red('Both --email and --password are required for password login.'));
+      process.exit(1);
     }
 
     const spinner = ora('Verifying session...').start();
     try {
       const baseUrl = (program.opts().baseUrl as string | undefined) || getBaseUrl();
       const cookieName = (program.opts().cookieName as string | undefined) || getSessionCookieName();
-      const client = await OverleafClient.fromSessionCookie(options.cookie, baseUrl, cookieName);
-      const projects = await client.listProjects();
 
-      setSessionCookie(options.cookie);
+      if (options.cookie) {
+        const client = await OverleafClient.fromSessionCookie(options.cookie, baseUrl, cookieName);
+        const projects = await client.listProjects();
 
-      if (options.saveLocal) {
-        saveOlAuth(options.cookie);
-        spinner.succeed(`Authenticated! Found ${projects.length} projects. Saved to .olauth`);
+        setSessionCookie(options.cookie);
+
+        if (options.saveLocal) {
+          saveOlAuth(options.cookie);
+          spinner.succeed(`Authenticated! Found ${projects.length} projects. Saved to .olauth`);
+        } else {
+          spinner.succeed(`Authenticated! Found ${projects.length} projects.`);
+        }
       } else {
-        spinner.succeed(`Authenticated! Found ${projects.length} projects.`);
+        spinner.text = 'Logging in with email/password...';
+        const client = await OverleafClient.fromPasswordLogin(options.email, options.password, baseUrl);
+        const projects = await client.listProjects();
+        persistClientSession(client, cookieName);
+        setBaseUrl(baseUrl);
+        if (options.savePassword !== false) {
+          setPasswordCredentials(options.email, options.password);
+        }
+
+        spinner.succeed(`Authenticated! Found ${projects.length} projects. Password login saved.`);
       }
 
       console.log(chalk.dim(`Config saved to: ${getConfigPath()}`));
@@ -162,16 +227,15 @@ program
   .description('Show current authentication status')
   .action(async () => {
     const cookie = getSessionCookie();
-    if (!cookie) {
+    const passwordCredentials = getPasswordCredentials();
+    if (!cookie && !passwordCredentials) {
       console.log(chalk.yellow('Not authenticated'));
       return;
     }
 
     const spinner = ora('Checking session...').start();
     try {
-      const baseUrl = (program.opts().baseUrl as string | undefined) || getBaseUrl();
-      const cookieName = (program.opts().cookieName as string | undefined) || getSessionCookieName();
-      const client = await OverleafClient.fromSessionCookie(cookie, baseUrl, cookieName);
+      const client = await getClient();
       const projects = await client.listProjects();
       spinner.succeed(`Authenticated with access to ${projects.length} projects`);
     } catch (error: any) {
@@ -1467,6 +1531,7 @@ program
     console.log('  1. OVERLEAF_SESSION environment variable');
     console.log('  2. .olauth file in current directory');
     console.log('  3. Global config file');
+    console.log('  4. Password login credentials in global config');
     console.log();
 
     const cookie = getSessionCookie();
@@ -1475,6 +1540,15 @@ program
       console.log(chalk.dim(`  Value: ${cookie.substring(0, 20)}...`));
     } else {
       console.log(chalk.yellow('✗ No session cookie found'));
+    }
+
+    const passwordCredentials = getPasswordCredentials();
+    if (passwordCredentials) {
+      console.log(chalk.green('✓ Password login credentials found'));
+      console.log(chalk.dim(`  Email: ${passwordCredentials.email}`));
+      console.log(chalk.dim('  Password: [stored]'));
+    } else {
+      console.log(chalk.yellow('✗ No password login credentials found'));
     }
   });
 

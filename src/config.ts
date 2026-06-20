@@ -13,6 +13,13 @@ interface OlcliConfig {
   lastProject?: string;
   baseUrl?: string;
   sessionCookieName?: string;
+  loginEmail?: string;
+  loginPassword?: string;
+}
+
+export interface PasswordCredentials {
+  email: string;
+  password: string;
 }
 
 const config = new Conf<OlcliConfig>({
@@ -22,7 +29,9 @@ const config = new Conf<OlcliConfig>({
     csrf: { type: 'string' },
     lastProject: { type: 'string' },
     baseUrl: { type: 'string' },
-    sessionCookieName: { type: 'string' }
+    sessionCookieName: { type: 'string' },
+    loginEmail: { type: 'string' },
+    loginPassword: { type: 'string' }
   }
 });
 
@@ -40,6 +49,23 @@ export function getSessionCookieName(): string {
 
 export function setSessionCookieName(name: string): void {
   config.set('sessionCookieName', name);
+}
+
+export function getPasswordCredentials(): PasswordCredentials | undefined {
+  const email = process.env.OVERLEAF_EMAIL || config.get('loginEmail');
+  const password = process.env.OVERLEAF_PASSWORD || config.get('loginPassword');
+  if (!email || !password) return undefined;
+  return { email, password };
+}
+
+export function setPasswordCredentials(email: string, password: string): void {
+  config.set('loginEmail', email);
+  config.set('loginPassword', password);
+}
+
+export function clearPasswordCredentials(): void {
+  config.delete('loginEmail');
+  config.delete('loginPassword');
 }
 
 export function getSessionCookie(): string | undefined {

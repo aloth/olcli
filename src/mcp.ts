@@ -27,6 +27,10 @@ import { OverleafClient } from './client.js';
 import {
   getSessionCookie,
   getBaseUrl,
+  getSessionCookieName,
+  setSessionCookie,
+  setSessionCookieName,
+  getPasswordCredentials,
 } from './config.js';
 
 // ---------------------------------------------------------------------------
@@ -59,7 +63,7 @@ function resolveSessionCookie(): string {
 
   throw new Error(
     'No Overleaf session cookie found.\n' +
-    'Set OVERLEAF_SESSION=<cookie> or run `olcli auth` first.'
+    'Set OVERLEAF_SESSION=<cookie>, run `olcli auth`, or save password login credentials with `olcli auth --email <email> --password <password>`.'
   );
 }
 
@@ -71,9 +75,24 @@ let _client: OverleafClient | null = null;
 
 async function getClient(): Promise<OverleafClient> {
   if (_client) return _client;
-  const cookie = resolveSessionCookie();
   const baseUrl = process.env.OVERLEAF_BASE_URL ?? getBaseUrl();
-  _client = await OverleafClient.fromSessionCookie(cookie, baseUrl);
+  const cookieName = getSessionCookieName();
+
+  try {
+    const cookie = resolveSessionCookie();
+    _client = await OverleafClient.fromSessionCookie(cookie, baseUrl, cookieName);
+  } catch (error) {
+    const credentials = getPasswordCredentials();
+    if (!credentials) throw error;
+
+    _client = await OverleafClient.fromPasswordLogin(credentials.email, credentials.password, baseUrl);
+    const sessionCookie = _client.getSessionCookiePair(cookieName);
+    if (sessionCookie) {
+      setSessionCookieName(sessionCookie.name);
+      setSessionCookie(sessionCookie.value);
+    }
+  }
+
   return _client;
 }
 

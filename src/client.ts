@@ -108,6 +108,11 @@ export interface Credentials {
   baseUrl?: string;
 }
 
+export interface SessionCookiePair {
+  name: string;
+  value: string;
+}
+
 interface ProjectDoc {
   id: string;
   path: string;
@@ -146,6 +151,34 @@ export class OverleafClient {
   /** Enable or disable verbose request/response logging to stderr. */
   setVerbose(v: boolean): void {
     this.verbose = v;
+  }
+
+  getCookie(name: string): string | undefined {
+    return this.cookies[name];
+  }
+
+  getSessionCookiePair(preferredCookieName: string = 'overleaf_session2'): SessionCookiePair | undefined {
+    const preferredNames = [
+      preferredCookieName,
+      'overleaf_session2',
+      'overleaf.sid',
+      'sharelatex.sid'
+    ];
+    const seen = new Set<string>();
+    for (const name of preferredNames) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const value = this.cookies[name];
+      if (value) return { name, value };
+    }
+
+    const fallback = Object.entries(this.cookies).find(([name]) => (
+      name.toLowerCase().includes('session') || name.toLowerCase().endsWith('.sid')
+    ));
+    if (fallback) return { name: fallback[0], value: fallback[1] };
+
+    const first = Object.entries(this.cookies)[0];
+    return first ? { name: first[0], value: first[1] } : undefined;
   }
 
   /**
@@ -226,29 +259,11 @@ export class OverleafClient {
     const html = response.body as string;
     const $ = cheerio.load(html);
 
-    // Try multiple methods to find CSRF token (based on PR #66, #82)
-    let csrf: string | undefined;
-
-    // Method 1: ol-csrfToken meta tag
-    csrf = $('meta[name="ol-csrfToken"]').attr('content');
-
-    // Method 2: hidden input field
-    if (!csrf) {
-      csrf = $('input[name="_csrf"]').attr('value');
+    if (OverleafClient.isLoginPage($)) {
+      throw new Error('Authentication required. Session may have expired.');
     }
 
-    // Method 3: Look in script tags for csrfToken
-    if (!csrf) {
-      const scripts = $('script').toArray();
-      for (const script of scripts) {
-        const content = $(script).html() || '';
-        const match = content.match(/csrfToken["']?\s*[:=]\s*["']([^"']+)["']/);
-        if (match) {
-          csrf = match[1];
-          break;
-        }
-      }
-    }
+    const csrf = OverleafClient.extractCsrfToken($);
 
     if (!csrf) {
       throw new Error('Could not find CSRF token. Session may have expired.');
@@ -257,6 +272,89 @@ export class OverleafClient {
     // Update cookies if the bootstrap request added anything
     const updatedCookies = bootstrapClient.cookies;
     return new OverleafClient({ cookies: updatedCookies, csrf, baseUrl });
+  }
+
+  /**
+   * Create client by submitting Overleaf's email/password login form.
+   */
+  static async fromPasswordLogin(
+    email: string,
+    password: string,
+    baseUrl: string = DEFAULT_BASE_URL
+  ): Promise<OverleafClient> {
+    const bootstrapClient = new OverleafClient({ cookies: {}, csrf: 'bootstrap', baseUrl });
+
+    const loginPage = await bootstrapClient.httpRequest(`${baseUrl}/login`, {
+      headers: { 'User-Agent': USER_AGENT },
+      expect: 'text'
+    });
+    if (!loginPage.ok) {
+      throw new Error(`Failed to fetch login page: ${loginPage.status}`);
+    }
+    bootstrapClient.applySetCookieHeaders(loginPage.headers['set-cookie'] as string[] | undefined);
+
+    const loginHtml = loginPage.body as string;
+    const $login = cheerio.load(loginHtml);
+    const csrf = OverleafClient.extractCsrfToken($login);
+    if (!csrf) {
+      throw new Error('Could not find CSRF token on login page.');
+    }
+
+    const form = new URLSearchParams();
+    form.set('_csrf', csrf);
+    form.set('email', email);
+    form.set('password', password);
+    const body = form.toString();
+
+    const loginResponse = await bootstrapClient.httpRequest(`${baseUrl}/login`, {
+      method: 'POST',
+      headers: {
+        'Cookie': bootstrapClient.getCookieHeader(),
+        'User-Agent': USER_AGENT,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': String(Buffer.byteLength(body))
+      },
+      body,
+      expect: 'text',
+      maxRedirects: 0
+    });
+    bootstrapClient.applySetCookieHeaders(loginResponse.headers['set-cookie'] as string[] | undefined);
+
+    if (![302, 303].includes(loginResponse.status)) {
+      const loginFailure = typeof loginResponse.body === 'string'
+        ? OverleafClient.isLoginPage(cheerio.load(loginResponse.body))
+        : false;
+      if (loginFailure) {
+        throw new Error('Password login failed. Email or password may be incorrect.');
+      }
+      throw new Error(`Password login failed: ${loginResponse.status}`);
+    }
+
+    const projectUrl = new URL((loginResponse.headers.location as string | undefined) || '/project', baseUrl).toString();
+    const projectPage = await bootstrapClient.httpRequest(projectUrl, {
+      headers: {
+        'Cookie': bootstrapClient.getCookieHeader(),
+        'User-Agent': USER_AGENT
+      },
+      expect: 'text'
+    });
+    if (!projectPage.ok) {
+      throw new Error(`Failed to fetch projects page after login: ${projectPage.status}`);
+    }
+    bootstrapClient.applySetCookieHeaders(projectPage.headers['set-cookie'] as string[] | undefined);
+
+    const projectHtml = projectPage.body as string;
+    const $project = cheerio.load(projectHtml);
+    if (OverleafClient.isLoginPage($project)) {
+      throw new Error('Password login failed. Still on login page after submitting credentials.');
+    }
+
+    const projectCsrf = OverleafClient.extractCsrfToken($project);
+    if (!projectCsrf) {
+      throw new Error('Could not find CSRF token after password login.');
+    }
+
+    return new OverleafClient({ cookies: bootstrapClient.cookies, csrf: projectCsrf, baseUrl });
   }
 
   private getCookieHeader(): string {
@@ -294,6 +392,32 @@ export class OverleafClient {
         this.cookies[match[1]] = match[2];
       }
     }
+  }
+
+  private static extractCsrfToken($: cheerio.CheerioAPI): string | undefined {
+    let csrf = $('meta[name="ol-csrfToken"]').attr('content');
+
+    if (!csrf) {
+      csrf = $('input[name="_csrf"]').attr('value');
+    }
+
+    if (!csrf) {
+      const scripts = $('script').toArray();
+      for (const script of scripts) {
+        const content = $(script).html() || '';
+        const match = content.match(/csrfToken["']?\s*[:=]\s*["']([^"']+)["']/);
+        if (match) {
+          csrf = match[1];
+          break;
+        }
+      }
+    }
+
+    return csrf;
+  }
+
+  private static isLoginPage($: cheerio.CheerioAPI): boolean {
+    return $('form[name="loginForm"]').length > 0 || $('input[name="password"]').length > 0;
   }
 
   private logVerbose(...args: any[]): void {
@@ -416,6 +540,9 @@ export class OverleafClient {
 
     const html = response.body as string;
     const $ = cheerio.load(html);
+    if (OverleafClient.isLoginPage($)) {
+      throw new Error('Authentication required. Session may have expired.');
+    }
 
     // Try new Overleaf structure first (PR #82)
     let projectsData: any[] = [];

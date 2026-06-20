@@ -94,7 +94,7 @@ makepkg -si
 
 ### 1. Authenticate with Overleaf
 
-Get your session cookie from Overleaf.com:
+Use a session cookie from Overleaf.com:
 
 1. Log into [overleaf.com](https://www.overleaf.com)
 2. Open Developer Tools (F12 or Cmd+Option+I) → Application/Storage → Cookies
@@ -106,7 +106,13 @@ Store it with olcli:
 olcli auth --cookie "your_session_cookie_value"
 ```
 
-**Tip:** The cookie stays valid for weeks. Just refresh it when authentication fails.
+Or use email/password login on instances that support the standard Overleaf login form:
+
+```bash
+olcli auth --email "you@example.com" --password "your_password"
+```
+
+Password login stores the account credentials in the local `olcli` config and refreshes the session cookie automatically when it expires.
 
 ### 2. List Your Projects
 
@@ -158,7 +164,7 @@ All commands auto-detect the project when run from a synced directory (contains 
 
 | Command | Description |
 |---------|-------------|
-| `olcli auth` | Set session cookie |
+| `olcli auth` | Set session cookie or password login credentials |
 | `olcli whoami` | Check authentication status |
 | `olcli logout` | Clear stored credentials |
 | `olcli list` | List all projects |
@@ -363,6 +369,7 @@ Credentials are stored in (checked in order):
 1. `OVERLEAF_SESSION` environment variable
 2. `.olauth` file in current directory
 3. Global config: `~/.config/olcli-nodejs/config.json` (macOS/Linux)
+4. Password login credentials in global config (`loginEmail` / `loginPassword`) for automatic session refresh
 
 ### .olauth File
 
@@ -386,6 +393,12 @@ Persist these settings in `olcli` config so you don't have to repeat them:
 ```bash
 olcli config set-url https://latex.example.org
 olcli config set-cookie-name overleaf.sid
+```
+
+For self-hosted instances with the standard `/login` form, password login can persist the base URL and refresh future sessions:
+
+```bash
+olcli --base-url https://latex.example.org auth --email "you@example.com" --password "your_password"
 ```
 
 ## Examples
@@ -456,6 +469,13 @@ import { OverleafClient } from '@aloth/olcli';
 // Create a client from an Overleaf session cookie
 const client = await OverleafClient.fromSessionCookie(cookie);
 
+// Or log in with email/password
+const passwordClient = await OverleafClient.fromPasswordLogin(
+  'you@example.com',
+  'your_password',
+  'https://latex.example.org'
+);
+
 // List all projects
 const projects = await client.listProjects();
 console.log(projects);
@@ -487,11 +507,13 @@ import {
   // Types / interfaces
   Project, ProjectInfo, FolderEntry, DocEntry, FileEntry,
   CommentMessage, ProjectComment, CommentContext, CommentStatus,
-  ListCommentsOptions, AddCommentOptions, Credentials,
+  ListCommentsOptions, AddCommentOptions, Credentials, SessionCookiePair,
 
   // Configuration utilities
   getBaseUrl, setBaseUrl, getSessionCookie, setSessionCookie,
-  getSessionCookieName, setSessionCookieName, getCsrf, setCsrf,
+  getSessionCookieName, setSessionCookieName,
+  getPasswordCredentials, setPasswordCredentials, clearPasswordCredentials,
+  getCsrf, setCsrf,
   getLastProject, setLastProject, clearConfig, getConfigPath, saveOlAuth,
 
   // Ignore utilities
@@ -527,11 +549,12 @@ import {
 
 ### Authentication
 
-The MCP server reads your session cookie in this order:
+The MCP server reads credentials in this order:
 
 1. **`OVERLEAF_SESSION` environment variable** — set in your MCP config (recommended)
 2. **`.olauth` file in cwd** — written by `olcli auth`
 3. **Stored config** — written by `olcli auth`
+4. **Stored password login credentials** — written by `olcli auth --email <email> --password <password>`
 
 ### Claude Desktop
 
@@ -611,6 +634,8 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 
 Or run `olcli auth` and then the MCP server will pick it up automatically.
 
+If you used password login, the MCP server will reuse the stored session cookie first and refresh it with the saved password when needed.
+
 ### Self-hosted Overleaf
 
 Set `OVERLEAF_BASE_URL` in your MCP env:
@@ -628,7 +653,7 @@ Set `OVERLEAF_BASE_URL` in your MCP env:
 
 ### Session expired
 
-If you get authentication errors, your session cookie may have expired. Get a fresh one from the browser and run `olcli auth` again.
+If you get authentication errors, your session cookie may have expired. Get a fresh one from the browser and run `olcli auth` again, or use password login so `olcli` can refresh the session automatically.
 
 ### Compilation fails
 
