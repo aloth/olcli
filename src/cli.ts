@@ -371,6 +371,30 @@ commentsCmd
   });
 
 commentsCmd
+  .command('reply <threadId> <body> [project]')
+  .description('Reply to a comment thread with a message')
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (threadId, body, project, options) => {
+    const spinner = ora('Posting reply...').start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      const message = await client.postCommentMessage(proj.id, threadId, body);
+      if (options.json) {
+        spinner.stop();
+        console.log(JSON.stringify({ replied: true, message }, null, 2));
+        return;
+      }
+      spinner.succeed(`Replied to ${threadId}`);
+      setLastProject(proj.id);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+commentsCmd
   .command('resolve <threadId> [project]')
   .description('Resolve a comment thread')
   .option('--json', 'Output as JSON')

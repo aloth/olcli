@@ -122,6 +122,26 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
+// Tool: reply_to_comment
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'reply_to_comment',
+  'Add a reply to an existing comment thread on an Overleaf project.',
+  {
+    project_id: z.string().describe('The Overleaf project ID'),
+    thread_id: z.string().describe('The comment thread ID (from list_comments)'),
+    content: z.string().describe('The reply message text'),
+  },
+  async ({ project_id, thread_id, content }) =>
+    wrapTool(async () => {
+      const client = await getClient();
+      const message = await client.postCommentMessage(project_id, thread_id, content);
+      return { replied: true, thread_id, message };
+    })
+);
+
+// ---------------------------------------------------------------------------
 // Tool: get_project_info
 // ---------------------------------------------------------------------------
 

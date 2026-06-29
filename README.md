@@ -170,6 +170,7 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli download <file> [project]` | Download a single file |
 | `olcli comments list [project]` | List comments with source text and file locations (`--status`, `--context`) |
 | `olcli comments add <file> <message> [project]` | Add a comment to selected text |
+| `olcli comments reply <threadId> <body> [project]` | Reply to a comment thread |
 | `olcli comments resolve <threadId> [project]` | Resolve a comment thread |
 | `olcli comments reopen <threadId> [project]` | Reopen a resolved comment thread |
 | `olcli comments delete <threadId> [project]` | Permanently delete a comment thread |
@@ -190,6 +191,7 @@ All commands auto-detect the project when run from a synced directory (contains 
 olcli comments list "My Paper" --status open --context 2
 olcli comments list "My Paper" --status resolved --json
 olcli comments add main.tex "Please clarify this definition" "My Paper" --text "A Skill is"
+olcli comments reply 6a1a5fedbf90b811e1000001 "I have updated the definition" "My Paper"
 olcli comments add main.tex "Check this sentence" "My Paper" --line 42 --column 1 --length 20 --json
 olcli comments resolve 6a1a5fedbf90b811e1000001 "My Paper" --json
 olcli comments reopen 6a1a5fedbf90b811e1000001 "My Paper"
@@ -520,6 +522,7 @@ import {
 | `get_entities` | Get a flat list of all files in a project |
 | `download_file` | Download a specific file by its remote path |
 | `add_comment` | Add a review comment to a document |
+| `reply_to_comment` | Add a reply to an existing comment thread |
 | `resolve_comment` | Mark a comment thread as resolved |
 | `delete_entity` | Delete a file or document by path |
 | `rename_entity` | Rename a file or document |
