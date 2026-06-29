@@ -13,6 +13,7 @@ interface OlcliConfig {
   lastProject?: string;
   baseUrl?: string;
   sessionCookieName?: string;
+  timeout?: number;
 }
 
 const config = new Conf<OlcliConfig>({
@@ -22,7 +23,8 @@ const config = new Conf<OlcliConfig>({
     csrf: { type: 'string' },
     lastProject: { type: 'string' },
     baseUrl: { type: 'string' },
-    sessionCookieName: { type: 'string' }
+    sessionCookieName: { type: 'string' },
+    timeout: { type: 'number' }
   }
 });
 
@@ -32,6 +34,14 @@ export function getBaseUrl(): string {
 
 export function setBaseUrl(url: string): void {
   config.set('baseUrl', url);
+}
+
+export function getTimeout(): number {
+  return Number.parseInt(process.env.OVERLEAF_TIMEOUT || '') || config.get('timeout') || 10000;
+}
+
+export function setTimeout(ms: number): void {
+  config.set('timeout', ms);
 }
 
 export function getSessionCookieName(): string {

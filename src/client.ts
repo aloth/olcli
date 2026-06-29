@@ -133,6 +133,7 @@ export class OverleafClient {
   private csrf: string;
   private baseUrl: string;
   private verbose: boolean = false;
+  private timeoutMs: number = 10000;
   // Cache per-project folder trees so repeated uploads in sync/upload calls
   // don't re-fetch the tree via Socket.IO on every file.
   private folderTreeCache: Map<string, Record<string, string>> = new Map();
@@ -146,6 +147,11 @@ export class OverleafClient {
   /** Enable or disable verbose request/response logging to stderr. */
   setVerbose(v: boolean): void {
     this.verbose = v;
+  }
+
+  /** Set the global HTTP request timeout in milliseconds. */
+  setGlobalTimeout(ms: number): void {
+    this.timeoutMs = ms;
   }
 
   /**
@@ -312,7 +318,7 @@ export class OverleafClient {
     expect?: 'text' | 'json' | 'buffer';
   } = {}): Promise<{ status: number; ok: boolean; headers: Record<string, string | string[]>; body: string | Buffer | any }> {
     const method = options.method || 'GET';
-    const timeoutMs = options.timeoutMs ?? 10000;
+    const timeoutMs = options.timeoutMs ?? this.timeoutMs;
     const maxRedirects = options.maxRedirects ?? 5;
     const expect = options.expect ?? 'text';
 
@@ -644,10 +650,11 @@ export class OverleafClient {
    * characters in response headers (e.g. Content-Disposition with Unicode
    * project names). See: https://github.com/aloth/olcli/issues/2
    */
-  private async downloadBuffer(url: string): Promise<Buffer> {
+  private async downloadBuffer(url: string, timeoutMs?: number): Promise<Buffer> {
     const response = await this.httpRequest(url, {
       headers: this.getHeaders(),
-      expect: 'buffer'
+      expect: 'buffer',
+      timeoutMs
     });
 
     if (!response.ok) {
@@ -665,8 +672,8 @@ export class OverleafClient {
    * Uses downloadBuffer to avoid ByteString errors from non-Latin1
    * Content-Disposition headers. See: https://github.com/aloth/olcli/issues/2
    */
-  async downloadProject(projectId: string): Promise<Buffer> {
-    return this.downloadBuffer(this.downloadUrl(projectId));
+  async downloadProject(projectId: string, timeoutMs?: number): Promise<Buffer> {
+    return this.downloadBuffer(this.downloadUrl(projectId), timeoutMs);
   }
 
   /**
@@ -718,9 +725,9 @@ export class OverleafClient {
   /**
    * Download compiled PDF
    */
-  async downloadPdf(projectId: string): Promise<Buffer> {
+  async downloadPdf(projectId: string, timeoutMs?: number): Promise<Buffer> {
     const { pdfUrl } = await this.compileProject(projectId);
-    return this.downloadBuffer(pdfUrl);
+    return this.downloadBuffer(pdfUrl, timeoutMs);
   }
 
   /**
@@ -2085,7 +2092,7 @@ export class OverleafClient {
   /**
    * Download a compile output file (logs, bbl, aux, etc.)
    */
-  async downloadOutputFile(url: string): Promise<Buffer> {
-    return this.downloadBuffer(url);
+  async downloadOutputFile(url: string, timeoutMs?: number): Promise<Buffer> {
+    return this.downloadBuffer(url, timeoutMs);
   }
 }

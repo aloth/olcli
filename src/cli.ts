@@ -36,7 +36,9 @@ import {
   getBaseUrl,
   setBaseUrl,
   getSessionCookieName,
-  setSessionCookieName
+  setSessionCookieName,
+  getTimeout,
+  setTimeout
 } from './config.js';
 
 const program = new Command();
@@ -47,6 +49,7 @@ program
   .version(VERSION)
   .option('--base-url <url>', 'Overleaf instance base URL (overrides OVERLEAF_BASE_URL and config)')
   .option('--cookie-name <name>', 'Session cookie name (default: overleaf_session2, use overleaf.sid for older instances)')
+  .option('--timeout <ms>', 'HTTP request timeout in milliseconds', parseInt)
   .option('--verbose', 'Print every HTTP request, status, and error response body to stderr');
 
 /**
@@ -65,6 +68,10 @@ async function getClient(cookieOpt?: string, baseUrlOpt?: string): Promise<Overl
   const cookieName = (program.opts().cookieName as string | undefined) || getSessionCookieName();
   const client = await OverleafClient.fromSessionCookie(cookie, baseUrl, cookieName);
   if (program.opts().verbose) client.setVerbose(true);
+
+  const timeout = (program.opts().timeout as number | undefined) || getTimeout();
+  client.setGlobalTimeout(timeout);
+
   return client;
 }
 
@@ -1416,6 +1423,26 @@ configCmd
   .description('Get the current session cookie name')
   .action(() => {
     console.log(getSessionCookieName());
+  });
+
+configCmd
+  .command('set-timeout <ms>')
+  .description('Set the default HTTP request timeout in milliseconds')
+  .action((ms: string) => {
+    const timeout = parseInt(ms, 10);
+    if (isNaN(timeout)) {
+      console.error(chalk.red('Invalid timeout value. Must be a number.'));
+      process.exit(1);
+    }
+    setTimeout(timeout);
+    console.log(chalk.green(`Default timeout set to: ${timeout}ms`));
+  });
+
+configCmd
+  .command('get-timeout')
+  .description('Get the current default HTTP request timeout')
+  .action(() => {
+    console.log(`${getTimeout()}ms`);
   });
 
 program
