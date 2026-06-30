@@ -103,7 +103,7 @@ async function getClient(): Promise<OverleafClient> {
 const server = new McpServer(
   {
     name: 'olcli',
-    version: '0.5.0',
+    version: '0.6.0',
   },
   {
     capabilities: { tools: {} },

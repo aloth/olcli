@@ -27,8 +27,10 @@ Work with Overleaf projects directly from your command line. Edit locally with y
 - 📄 **Compile** PDFs using Overleaf's remote compiler
 - 📦 **Download** individual files or full project archives
 - 📤 **Upload** files to projects
-- 💬 **Review comments** — list comments with source locations, add, resolve, reopen, and delete threads
+- 💬 **Review comments** — list comments with source locations, add, resolve, reopen, delete threads, and **reply** to existing threads
 - 🗂️ **Preserve folder structure** when pushing nested files
+- ⏱️ **Configurable timeout** — global `--timeout <ms>` flag, `OVERLEAF_TIMEOUT` env var, or `config set-timeout` for slow connections
+- 🔑 **Password login** — `olcli auth --email --password` for self-hosted instances (no browser required)
 - ⚙️ **Support self-hosted Overleaf/ShareLaTeX instances** via configurable base URL and session cookie name
 - 📊 **Output** compile artifacts (`.bbl`, `.log`, `.aux` for arXiv submissions)
 
@@ -94,17 +96,23 @@ makepkg -si
 
 ### 1. Authenticate with Overleaf
 
-Get your session cookie from Overleaf.com:
+**Option A: Session cookie** (overleaf.com and self-hosted)
 
 1. Log into [overleaf.com](https://www.overleaf.com)
 2. Open Developer Tools (F12 or Cmd+Option+I) → Application/Storage → Cookies
 3. Copy the value of `overleaf_session2`
 
-Store it with olcli:
-
 ```bash
 olcli auth --cookie "your_session_cookie_value"
 ```
+
+**Option B: Email/password** (self-hosted instances without reCAPTCHA)
+
+```bash
+olcli auth --email "you@example.com" --password "your_password"
+```
+
+Credentials are stored securely and the session auto-refreshes on expiry.
 
 **Tip:** The cookie stays valid for weeks. Just refresh it when authentication fails.
 
@@ -158,7 +166,7 @@ All commands auto-detect the project when run from a synced directory (contains 
 
 | Command | Description |
 |---------|-------------|
-| `olcli auth` | Set session cookie |
+| `olcli auth` | Set session cookie or login with email/password |
 | `olcli whoami` | Check authentication status |
 | `olcli logout` | Clear stored credentials |
 | `olcli list` | List all projects |
@@ -171,6 +179,7 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli comments list [project]` | List comments with source text and file locations (`--status`, `--context`) |
 | `olcli comments add <file> <message> [project]` | Add a comment to selected text |
 | `olcli comments resolve <threadId> [project]` | Resolve a comment thread |
+| `olcli comments reply <threadId> <body> [project]` | Reply to a comment thread |
 | `olcli comments reopen <threadId> [project]` | Reopen a resolved comment thread |
 | `olcli comments delete <threadId> [project]` | Permanently delete a comment thread |
 | `olcli delete <file> [project]` | Delete a remote file or folder by path (alias: `rm`) |
@@ -182,6 +191,8 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli output [type]` | Download compile output files |
 | `olcli config set-url <url>` | Set a self-hosted Overleaf base URL |
 | `olcli config set-cookie-name <name>` | Set the session cookie name |
+| `olcli config set-timeout <ms>` | Set default HTTP request timeout |
+| `olcli config get-timeout` | Show current timeout setting |
 | `olcli check` | Show config paths and credential sources |
 
 ### Review comments
@@ -191,6 +202,7 @@ olcli comments list "My Paper" --status open --context 2
 olcli comments list "My Paper" --status resolved --json
 olcli comments add main.tex "Please clarify this definition" "My Paper" --text "A Skill is"
 olcli comments add main.tex "Check this sentence" "My Paper" --line 42 --column 1 --length 20 --json
+olcli comments reply 6a1a5fedbf90b811e1000001 "Good point, I'll fix this" "My Paper"
 olcli comments resolve 6a1a5fedbf90b811e1000001 "My Paper" --json
 olcli comments reopen 6a1a5fedbf90b811e1000001 "My Paper"
 olcli comments delete 6a1a5fedbf90b811e1000001 "My Paper" --json
@@ -205,6 +217,7 @@ These flags work with **every** command and may be placed before or after the co
 | `--verbose` | Print every HTTP request, status, content-type, and (on errors) a response-body snippet to stderr. Useful for debugging failed compiles, 404s on `pdf`/`output`, auth issues, or unexpected upload behavior. |
 | `--base-url <url>` | Override the Overleaf instance base URL (also `OVERLEAF_BASE_URL` env var or `olcli config set-url`). |
 | `--cookie-name <name>` | Override the session cookie name (default `overleaf_session2`; older instances use `overleaf.sid`). |
+| `--timeout <ms>` | Override the HTTP request timeout in milliseconds (also `OVERLEAF_TIMEOUT` env var or `olcli config set-timeout`). Default: 10000. |
 
 Examples:
 
@@ -388,6 +401,24 @@ olcli config set-url https://latex.example.org
 olcli config set-cookie-name overleaf.sid
 ```
 
+### Timeout configuration
+
+For slow connections or large projects, increase the HTTP request timeout:
+
+```bash
+# One-off: pass as a flag
+olcli --timeout 60000 pull "Large Thesis"
+
+# Persist as default
+olcli config set-timeout 60000
+
+# Or use environment variable
+export OVERLEAF_TIMEOUT=60000
+olcli pull "Large Thesis"
+```
+
+Precedence: `--timeout` flag > `OVERLEAF_TIMEOUT` env > `config set-timeout` > default (10000ms).
+
 ## Examples
 
 ### Work on a thesis
@@ -487,12 +518,14 @@ import {
   // Types / interfaces
   Project, ProjectInfo, FolderEntry, DocEntry, FileEntry,
   CommentMessage, ProjectComment, CommentContext, CommentStatus,
-  ListCommentsOptions, AddCommentOptions, Credentials,
+  ListCommentsOptions, AddCommentOptions, Credentials, SessionCookiePair,
 
   // Configuration utilities
   getBaseUrl, setBaseUrl, getSessionCookie, setSessionCookie,
   getSessionCookieName, setSessionCookieName, getCsrf, setCsrf,
   getLastProject, setLastProject, clearConfig, getConfigPath, saveOlAuth,
+  getTimeout, setTimeout, getPasswordCredentials, setPasswordCredentials,
+  clearPasswordCredentials, type PasswordCredentials,
 
   // Ignore utilities
   DEFAULT_IGNORE_PATTERNS, loadIgnore, shouldIgnore, buildTexSiblingSet,
@@ -520,6 +553,7 @@ import {
 | `get_entities` | Get a flat list of all files in a project |
 | `download_file` | Download a specific file by its remote path |
 | `add_comment` | Add a review comment to a document |
+| `reply_to_comment` | Reply to an existing comment thread |
 | `resolve_comment` | Mark a comment thread as resolved |
 | `delete_entity` | Delete a file or document by path |
 | `rename_entity` | Rename a file or document |
@@ -527,11 +561,14 @@ import {
 
 ### Authentication
 
-The MCP server reads your session cookie in this order:
+The MCP server reads credentials in this order:
 
 1. **`OVERLEAF_SESSION` environment variable** — set in your MCP config (recommended)
-2. **`.olauth` file in cwd** — written by `olcli auth`
-3. **Stored config** — written by `olcli auth`
+2. **`OVERLEAF_EMAIL` + `OVERLEAF_PASSWORD` environment variables** — for password login (self-hosted)
+3. **`.olauth` file in cwd** — written by `olcli auth`
+4. **Stored config** — written by `olcli auth` (including saved password credentials)
+
+When a session cookie expires and password credentials are available, the MCP server automatically re-authenticates.
 
 ### Claude Desktop
 
