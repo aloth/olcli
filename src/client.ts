@@ -128,11 +128,17 @@ interface ProjectSocketSession {
   pollUrl: () => string;
 }
 
+export interface SessionCookiePair {
+  name: string;
+  value: string;
+}
+
 export class OverleafClient {
   private cookies: Record<string, string>;
   private csrf: string;
   private baseUrl: string;
   private verbose: boolean = false;
+  private timeoutMs: number = 10000;
   // Cache per-project folder trees so repeated uploads in sync/upload calls
   // don't re-fetch the tree via Socket.IO on every file.
   private folderTreeCache: Map<string, Record<string, string>> = new Map();
@@ -146,6 +152,39 @@ export class OverleafClient {
   /** Enable or disable verbose request/response logging to stderr. */
   setVerbose(v: boolean): void {
     this.verbose = v;
+  }
+
+  /** Set the global HTTP request timeout in milliseconds. */
+  setGlobalTimeout(ms: number): void {
+    this.timeoutMs = ms;
+  }
+
+  getCookie(name: string): string | undefined {
+    return this.cookies[name];
+  }
+
+  getSessionCookiePair(preferredCookieName: string = 'overleaf_session2'): SessionCookiePair | undefined {
+    const preferredNames = [
+      preferredCookieName,
+      'overleaf_session2',
+      'overleaf.sid',
+      'sharelatex.sid'
+    ];
+    const seen = new Set<string>();
+    for (const name of preferredNames) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const value = this.cookies[name];
+      if (value) return { name, value };
+    }
+
+    const fallback = Object.entries(this.cookies).find(([name]) => (
+      name.toLowerCase().includes('session') || name.toLowerCase().endsWith('.sid')
+    ));
+    if (fallback) return { name: fallback[0], value: fallback[1] };
+
+    const first = Object.entries(this.cookies)[0];
+    return first ? { name: first[0], value: first[1] } : undefined;
   }
 
   /**
@@ -226,18 +265,109 @@ export class OverleafClient {
     const html = response.body as string;
     const $ = cheerio.load(html);
 
-    // Try multiple methods to find CSRF token (based on PR #66, #82)
-    let csrf: string | undefined;
+    if (OverleafClient.isLoginPage($)) {
+      throw new Error('Authentication required. Session may have expired.');
+    }
 
-    // Method 1: ol-csrfToken meta tag
-    csrf = $('meta[name="ol-csrfToken"]').attr('content');
+    const csrf = OverleafClient.extractCsrfToken($);
 
-    // Method 2: hidden input field
+    if (!csrf) {
+      throw new Error('Could not find CSRF token. Session may have expired.');
+    }
+
+    // Update cookies if the bootstrap request added anything
+    const updatedCookies = bootstrapClient.cookies;
+    return new OverleafClient({ cookies: updatedCookies, csrf, baseUrl });
+  }
+
+  /**
+   * Create client by submitting Overleaf's email/password login form.
+   */
+  static async fromPasswordLogin(
+    email: string,
+    password: string,
+    baseUrl: string = DEFAULT_BASE_URL
+  ): Promise<OverleafClient> {
+    const bootstrapClient = new OverleafClient({ cookies: {}, csrf: 'bootstrap', baseUrl });
+
+    const loginPage = await bootstrapClient.httpRequest(`${baseUrl}/login`, {
+      headers: { 'User-Agent': USER_AGENT },
+      expect: 'text'
+    });
+    if (!loginPage.ok) {
+      throw new Error(`Failed to fetch login page: ${loginPage.status}`);
+    }
+    bootstrapClient.applySetCookieHeaders(loginPage.headers['set-cookie'] as string[] | undefined);
+
+    const loginHtml = loginPage.body as string;
+    const $login = cheerio.load(loginHtml);
+    const csrf = OverleafClient.extractCsrfToken($login);
+    if (!csrf) {
+      throw new Error('Could not find CSRF token on login page.');
+    }
+
+    const form = new URLSearchParams();
+    form.set('_csrf', csrf);
+    form.set('email', email);
+    form.set('password', password);
+    const body = form.toString();
+
+    const loginResponse = await bootstrapClient.httpRequest(`${baseUrl}/login`, {
+      method: 'POST',
+      headers: {
+        'Cookie': bootstrapClient.getCookieHeader(),
+        'User-Agent': USER_AGENT,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': String(Buffer.byteLength(body))
+      },
+      body,
+      expect: 'text',
+      maxRedirects: 0
+    });
+    bootstrapClient.applySetCookieHeaders(loginResponse.headers['set-cookie'] as string[] | undefined);
+
+    if (![302, 303].includes(loginResponse.status)) {
+      const loginFailure = typeof loginResponse.body === 'string'
+        ? OverleafClient.isLoginPage(cheerio.load(loginResponse.body))
+        : false;
+      if (loginFailure) {
+        throw new Error('Password login failed. Email or password may be incorrect.');
+      }
+      throw new Error(`Password login failed: ${loginResponse.status}`);
+    }
+
+    const projectUrl = new URL((loginResponse.headers.location as string | undefined) || '/project', baseUrl).toString();
+    const projectPage = await bootstrapClient.httpRequest(projectUrl, {
+      headers: {
+        'Cookie': bootstrapClient.getCookieHeader(),
+        'User-Agent': USER_AGENT
+      },
+      expect: 'text'
+    });
+    if (!projectPage.ok) {
+      throw new Error(`Failed to fetch projects page after login: ${projectPage.status}`);
+    }
+    bootstrapClient.applySetCookieHeaders(projectPage.headers['set-cookie'] as string[] | undefined);
+
+    const projectHtml = projectPage.body as string;
+    const $project = cheerio.load(projectHtml);
+    if (OverleafClient.isLoginPage($project)) {
+      throw new Error('Password login failed. Still on login page after submitting credentials.');
+    }
+
+    const projectCsrf = OverleafClient.extractCsrfToken($project);
+    if (!projectCsrf) {
+      throw new Error('Could not find CSRF token after password login.');
+    }
+
+    return new OverleafClient({ cookies: bootstrapClient.cookies, csrf: projectCsrf, baseUrl });
+  }
+
+  private static extractCsrfToken($: cheerio.CheerioAPI): string | undefined {
+    let csrf = $('meta[name="ol-csrfToken"]').attr('content');
     if (!csrf) {
       csrf = $('input[name="_csrf"]').attr('value');
     }
-
-    // Method 3: Look in script tags for csrfToken
     if (!csrf) {
       const scripts = $('script').toArray();
       for (const script of scripts) {
@@ -249,14 +379,11 @@ export class OverleafClient {
         }
       }
     }
+    return csrf;
+  }
 
-    if (!csrf) {
-      throw new Error('Could not find CSRF token. Session may have expired.');
-    }
-
-    // Update cookies if the bootstrap request added anything
-    const updatedCookies = bootstrapClient.cookies;
-    return new OverleafClient({ cookies: updatedCookies, csrf, baseUrl });
+  private static isLoginPage($: cheerio.CheerioAPI): boolean {
+    return $('form[name="loginForm"]').length > 0 || $('input[name="password"]').length > 0;
   }
 
   private getCookieHeader(): string {
@@ -312,7 +439,7 @@ export class OverleafClient {
     expect?: 'text' | 'json' | 'buffer';
   } = {}): Promise<{ status: number; ok: boolean; headers: Record<string, string | string[]>; body: string | Buffer | any }> {
     const method = options.method || 'GET';
-    const timeoutMs = options.timeoutMs ?? 10000;
+    const timeoutMs = options.timeoutMs ?? this.timeoutMs;
     const maxRedirects = options.maxRedirects ?? 5;
     const expect = options.expect ?? 'text';
 
@@ -644,10 +771,11 @@ export class OverleafClient {
    * characters in response headers (e.g. Content-Disposition with Unicode
    * project names). See: https://github.com/aloth/olcli/issues/2
    */
-  private async downloadBuffer(url: string): Promise<Buffer> {
+  private async downloadBuffer(url: string, timeoutMs?: number): Promise<Buffer> {
     const response = await this.httpRequest(url, {
       headers: this.getHeaders(),
-      expect: 'buffer'
+      expect: 'buffer',
+      timeoutMs
     });
 
     if (!response.ok) {
@@ -665,8 +793,8 @@ export class OverleafClient {
    * Uses downloadBuffer to avoid ByteString errors from non-Latin1
    * Content-Disposition headers. See: https://github.com/aloth/olcli/issues/2
    */
-  async downloadProject(projectId: string): Promise<Buffer> {
-    return this.downloadBuffer(this.downloadUrl(projectId));
+  async downloadProject(projectId: string, timeoutMs?: number): Promise<Buffer> {
+    return this.downloadBuffer(this.downloadUrl(projectId), timeoutMs);
   }
 
   /**
@@ -718,9 +846,9 @@ export class OverleafClient {
   /**
    * Download compiled PDF
    */
-  async downloadPdf(projectId: string): Promise<Buffer> {
+  async downloadPdf(projectId: string, timeoutMs?: number): Promise<Buffer> {
     const { pdfUrl } = await this.compileProject(projectId);
-    return this.downloadBuffer(pdfUrl);
+    return this.downloadBuffer(pdfUrl, timeoutMs);
   }
 
   /**
@@ -2085,7 +2213,7 @@ export class OverleafClient {
   /**
    * Download a compile output file (logs, bbl, aux, etc.)
    */
-  async downloadOutputFile(url: string): Promise<Buffer> {
-    return this.downloadBuffer(url);
+  async downloadOutputFile(url: string, timeoutMs?: number): Promise<Buffer> {
+    return this.downloadBuffer(url, timeoutMs);
   }
 }
