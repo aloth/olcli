@@ -21,3 +21,20 @@ jobs:
       - run: npm run build --if-present
       - run: npm test --if-present
       - run: npm publish --access public
+
+  bump-homebrew:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Bump Homebrew formula
+        uses: mislav/bump-homebrew-formula-action@v3
+        with:
+          formula-name: olcli
+          homebrew-tap: aloth/homebrew-tap
+          tag-name: ${{ github.ref_name }}
+          download-url: https://github.com/aloth/olcli/archive/refs/tags/${{ github.ref_name }}.tar.gz
+          create-pullrequest: false
+          commit-message: |
+            olcli: bump to {{version}}
+        env:
+          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
