@@ -3,7 +3,8 @@
 **Command-line interface for Overleaf** — Sync, manage, and compile LaTeX projects from your terminal.
 
 [![npm version](https://img.shields.io/npm/v/@aloth/olcli.svg)](https://www.npmjs.com/package/@aloth/olcli)
-[![AUR Package](https://img.shields.io/aur/version/olcli)](https://aur.archlinux.org/packages/olcli)
+[![npm downloads](https://img.shields.io/npm/dm/@aloth/olcli.svg)](https://www.npmjs.com/package/@aloth/olcli)
+[![GitHub stars](https://img.shields.io/github/stars/aloth/olcli)](https://github.com/aloth/olcli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![AgentSkills](https://img.shields.io/badge/AgentSkills-compatible-blue)](https://agentskills.io)
 
@@ -15,31 +16,30 @@ Work with Overleaf projects directly from your command line. Edit locally with y
 
 ## Features
 
-**Full Overleaf command-line access:**
-
 - 📋 **List** all your Overleaf projects
 - ⬇️ **Pull** project files to local directory for offline editing
 - ⬆️ **Push** local changes back to Overleaf
 - 🔄 **Sync** bidirectionally with smart conflict detection
-- ✌️ **Two-way deletions** — files removed locally are deleted on Overleaf on the next sync (opt out with `--no-delete`)
+- 🔀 **Git remote** — use Overleaf as a native git remote ([docs](docs/GIT-REMOTE.md))
+- ✌️ **Two-way deletions** — files removed locally are deleted on Overleaf on next sync
 - 🗑️ **Delete** and ✏️ **rename** remote files by path
-- 🚫 **Smart ignore** — LaTeX build artifacts (`.aux`, `.bbl`, `.log`, `.synctex.gz`, …) and OS noise are filtered out automatically; extend with `.olignore` (gitignore-style)
+- 🚫 **Smart ignore** — LaTeX build artifacts and OS noise filtered automatically; extend with `.olignore`
 - 📄 **Compile** PDFs using Overleaf's remote compiler
 - 📦 **Download** individual files or full project archives
 - 📤 **Upload** files to projects
-- 💬 **Review comments** — list comments with source locations, add, resolve, reopen, delete threads, and **reply** to existing threads
+- 💬 **Review comments** — list, add, resolve, reopen, delete, and reply to threads
 - 🗂️ **Preserve folder structure** when pushing nested files
-- ⏱️ **Configurable timeout** — global `--timeout <ms>` flag, `OVERLEAF_TIMEOUT` env var, or `config set-timeout` for slow connections
-- 🔑 **Password login** — `olcli auth --email --password` for self-hosted instances (no browser required)
-- ⚙️ **Support self-hosted Overleaf/ShareLaTeX instances** via configurable base URL and session cookie name
+- ⏱️ **Configurable timeout** for slow connections
+- 🔑 **Password login** for self-hosted instances (no browser required)
+- ⚙️ **Self-hosted Overleaf/ShareLaTeX** support
 - 📊 **Output** compile artifacts (`.bbl`, `.log`, `.aux` for arXiv submissions)
+- 🤖 **MCP server** for AI assistants ([docs](docs/MCP.md))
 
 **Perfect for:**
 - Editing LaTeX in your preferred text editor (Vim, VS Code, Emacs, etc.)
 - Version control with Git while using Overleaf's compiler
 - Automating workflows and CI/CD pipelines
 - Offline work with periodic sync
-- Collaborative projects where some prefer CLI, others prefer web
 
 ## Installation
 
@@ -51,8 +51,6 @@ brew install olcli
 ```
 
 ### npm (all platforms)
-
-Install globally to use the `olcli` command anywhere:
 
 ```bash
 npm install -g @aloth/olcli
@@ -70,95 +68,53 @@ npx @aloth/olcli list
 npx skills add aloth/olcli
 ```
 
-### Arch Linux
-
-The package is available on the [Arch User Repository (AUR)](https://aur.archlinux.org/packages/olcli). 
-
-You can install it using your preferred AUR helper (such as `yay` or `paru`):
-
-```bash
-yay -S olcli
-# or
-paru -S olcli
-```
-
-#### Manual Installation:
-If you prefer not to use an AUR helper, you can build and install the package manually using makepkg:
-code Bash
-
-```bash
-git clone https://aur.archlinux.org/olcli.git
-cd olcli
-makepkg -si
-```
-
 ## Quick Start
 
-### 1. Authenticate with Overleaf
+### 1. Authenticate
 
-**Option A: Session cookie** (overleaf.com and self-hosted)
-
-1. Log into [overleaf.com](https://www.overleaf.com)
-2. Open Developer Tools (F12 or Cmd+Option+I) → Application/Storage → Cookies
-3. Copy the value of `overleaf_session2`
+**Session cookie** (overleaf.com and self-hosted):
 
 ```bash
 olcli auth --cookie "your_session_cookie_value"
 ```
 
-**Option B: Email/password** (self-hosted instances without reCAPTCHA)
+**Email/password** (self-hosted without reCAPTCHA):
 
 ```bash
 olcli auth --email "you@example.com" --password "your_password"
 ```
 
-Credentials are stored securely and the session auto-refreshes on expiry.
-
-**Tip:** The cookie stays valid for weeks. Just refresh it when authentication fails.
-
-### 2. List Your Projects
+### 2. List Projects
 
 ```bash
 olcli list
 ```
 
-See all your Overleaf projects with IDs and last modified dates.
-
-### 3. Pull a Project Locally
-
-Download any project to work on it locally:
+### 3. Pull, Edit, Push
 
 ```bash
 olcli pull "My Thesis"
 cd My_Thesis/
-```
-
-Now you can edit `.tex` files with your preferred editor (Vim, VS Code, Emacs, etc.).
-
-### 4. Edit Locally, Sync to Overleaf
-
-```bash
-# Edit files locally with your favorite editor
 vim main.tex
-
-# Push changes back to Overleaf
 olcli push
-
-# Or sync bidirectionally (pull + push in one command)
-olcli sync
 ```
 
-Your collaborators can continue using the Overleaf web editor — changes sync seamlessly.
-
-### 5. Compile and Download PDF
-
-Use Overleaf's remote compiler from the command line:
+### 4. Compile PDF
 
 ```bash
 olcli pdf
 ```
 
-The compiled PDF downloads automatically to your current directory.
+### 5. Or use native git commands
+
+```bash
+git clone overleaf::https://www.overleaf.com/project/<id>
+cd <project>
+# edit, commit, push — standard git workflow
+git push
+```
+
+See [Git Remote Helper docs](docs/GIT-REMOTE.md) for details.
 
 ## Commands
 
@@ -176,302 +132,142 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli sync [dir]` | Bidirectional sync (pull + push) |
 | `olcli upload <file> [project]` | Upload a single file |
 | `olcli download <file> [project]` | Download a single file |
-| `olcli comments list [project]` | List comments with source text and file locations (`--status`, `--context`) |
-| `olcli comments add <file> <message> [project]` | Add a comment to selected text |
-| `olcli comments resolve <threadId> [project]` | Resolve a comment thread |
-| `olcli comments reply <threadId> <body> [project]` | Reply to a comment thread |
-| `olcli comments reopen <threadId> [project]` | Reopen a resolved comment thread |
-| `olcli comments delete <threadId> [project]` | Permanently delete a comment thread |
-| `olcli delete <file> [project]` | Delete a remote file or folder by path (alias: `rm`) |
-| `olcli rename <oldname> <newname> [project]` | Rename a remote file or folder by path (alias: `mv`) |
-| `olcli ignored [dir]` | List ignore patterns currently in effect |
-| `olcli zip [project]` | Download project as zip archive |
+| `olcli delete <file> [project]` | Delete a remote file or folder (alias: `rm`) |
+| `olcli rename <old> <new> [project]` | Rename a remote file or folder (alias: `mv`) |
 | `olcli compile [project]` | Trigger PDF compilation |
 | `olcli pdf [project]` | Compile and download PDF |
 | `olcli output [type]` | Download compile output files |
-| `olcli config set-url <url>` | Set a self-hosted Overleaf base URL |
-| `olcli config set-cookie-name <name>` | Set the session cookie name |
-| `olcli config set-timeout <ms>` | Set default HTTP request timeout |
-| `olcli config get-timeout` | Show current timeout setting |
+| `olcli zip [project]` | Download project as zip archive |
+| `olcli comments list [project]` | List comments (`--status`, `--context`) |
+| `olcli comments add <file> <msg>` | Add a comment to selected text |
+| `olcli comments reply <id> <body>` | Reply to a comment thread |
+| `olcli comments resolve <id>` | Resolve a comment thread |
+| `olcli comments reopen <id>` | Reopen a resolved thread |
+| `olcli comments delete <id>` | Delete a comment thread |
+| `olcli ignored [dir]` | List ignore patterns in effect |
+| `olcli config set-url <url>` | Set self-hosted base URL |
+| `olcli config set-cookie-name <name>` | Set session cookie name |
+| `olcli config set-timeout <ms>` | Set default HTTP timeout |
 | `olcli check` | Show config paths and credential sources |
 
-### Review comments
-
-```bash
-olcli comments list "My Paper" --status open --context 2
-olcli comments list "My Paper" --status resolved --json
-olcli comments add main.tex "Please clarify this definition" "My Paper" --text "A Skill is"
-olcli comments add main.tex "Check this sentence" "My Paper" --line 42 --column 1 --length 20 --json
-olcli comments reply 6a1a5fedbf90b811e1000001 "Good point, I'll fix this" "My Paper"
-olcli comments resolve 6a1a5fedbf90b811e1000001 "My Paper" --json
-olcli comments reopen 6a1a5fedbf90b811e1000001 "My Paper"
-olcli comments delete 6a1a5fedbf90b811e1000001 "My Paper" --json
-```
-
-### Global options
-
-These flags work with **every** command and may be placed before or after the command name:
+### Global Options
 
 | Flag | Description |
 |------|-------------|
-| `--verbose` | Print every HTTP request, status, content-type, and (on errors) a response-body snippet to stderr. Useful for debugging failed compiles, 404s on `pdf`/`output`, auth issues, or unexpected upload behavior. |
-| `--base-url <url>` | Override the Overleaf instance base URL (also `OVERLEAF_BASE_URL` env var or `olcli config set-url`). |
-| `--cookie-name <name>` | Override the session cookie name (default `overleaf_session2`; older instances use `overleaf.sid`). |
-| `--timeout <ms>` | Override the HTTP request timeout in milliseconds (also `OVERLEAF_TIMEOUT` env var or `olcli config set-timeout`). Default: 10000. |
-
-Examples:
-
-```bash
-olcli --verbose pdf                    # see every request the compile makes
-olcli pdf --verbose                    # same thing, flag after command
-olcli --verbose sync                   # debug a sync that's misbehaving
-olcli --verbose upload figures/a.png   # confirm the file is placed in figures/
-```
-
-## Use Cases
-
-### Local Editing with Overleaf Compilation
-
-Work offline in your favorite editor, push when ready, compile remotely:
-
-```bash
-olcli pull "Research Paper"
-cd Research_Paper
-vim introduction.tex
-git commit -am "Update intro"
-olcli push
-olcli pdf
-```
-
-### Git Version Control + Overleaf
-
-Keep your LaTeX project in Git while using Overleaf's compiler:
-
-```bash
-olcli pull "My Thesis" thesis
-cd thesis
-git init
-git add .
-git commit -m "Initial import from Overleaf"
-
-# Daily workflow
-vim chapters/methods.tex
-git commit -am "Draft methods section"
-olcli sync  # Sync with Overleaf
-olcli pdf
-```
-
-### Automated Workflows
-
-Integrate Overleaf compilation into CI/CD:
-
-```bash
-#!/bin/bash
-olcli auth --cookie "$OVERLEAF_SESSION"
-olcli pull "Automated Report"
-./generate-data.py > tables/results.tex
-olcli push
-olcli pdf -o report-$(date +%Y-%m-%d).pdf
-```
-
-### arXiv Submissions
-
-Download the `.bbl` file for arXiv submissions:
-
-```bash
-olcli output bbl --project "My Paper"
-# Downloads: bbl
-```
-
-List all available compile output files:
-
-```bash
-olcli output --list
-# Available output files:
-#   aux          output.aux
-#   bbl          output.bbl
-#   blg          output.blg
-#   log          output.log
-#   ...
-```
+| `--verbose` | Print HTTP requests and responses to stderr |
+| `--base-url <url>` | Override Overleaf instance URL |
+| `--cookie-name <name>` | Override session cookie name |
+| `--timeout <ms>` | Override HTTP timeout (default: 10000) |
 
 ## Sync Behavior
 
 ### Pull
 - Downloads all files from Overleaf
-- **Skips** local files modified after last pull (won't overwrite your changes)
+- Skips local files modified after last pull (won't overwrite your changes)
 - Use `--force` to overwrite local changes
 
 ### Push
 - Uploads files modified after last pull
-- Preserves nested folder structure when uploading
-- Filters out LaTeX build artifacts and OS noise (see [Ignoring files](#ignoring-files))
-- Use `--all` to upload all files
-- Use `--dry-run` to preview changes
-- Use `--show-ignored` to see what was filtered out
+- Preserves nested folder structure
+- Filters out LaTeX build artifacts and OS noise
+- Use `--all` to upload all files, `--dry-run` to preview
 
 ### Sync
-- Pulls remote changes
-- Preserves local modifications (local wins if newer)
-- Pushes local changes to remote
-- **Propagates local deletions to the remote** — if you delete a file locally, it's deleted on Overleaf on the next sync. Use `--no-delete` to opt out.
-- Filters out LaTeX build artifacts and OS noise
-- Use `--verbose` to see detailed file operations (see [Global options](#global-options))
+- Pulls remote changes, then pushes local changes
+- Local modifications win if newer
+- **Propagates local deletions** — use `--no-delete` to opt out
 - Use `--dry-run` to preview without applying
 
 #### How deletion propagation works
 
-On every sync, `olcli` records a manifest of remote files in `.olcli.json`. The next sync compares the manifest against your local working tree:
+`olcli` records a manifest of remote files in `.olcli.json`. On next sync:
 
-- File missing locally **and** still present on remote → deleted on Overleaf
+- File missing locally + still on remote → deleted on Overleaf
 - File new locally → uploaded
-- File modified locally after last pull → uploaded (local wins)
+- File modified locally → uploaded (local wins)
 - File only on remote → downloaded
 
-First-time syncs skip the deletion phase (no manifest exists yet to distinguish "never had it" from "deleted it").
+First-time syncs skip the deletion phase (no prior manifest to compare).
 
-## Ignoring files
-
-`olcli` automatically filters local files through a layered ignore list before uploading. This keeps LaTeX build artifacts (from local `pdflatex`/`latexmk` runs) and OS noise out of your Overleaf project.
+## Ignoring Files
 
 ### Three layers
 
-| Layer | File | Purpose |
+| Layer | Source | Purpose |
 |---|---|---|
-| 1 | (built-in) | LaTeX intermediates (`.aux`, `.bbl`, `.log`, `.fls`, `.synctex.gz`, beamer/biber/glossaries/minted), OS noise (`.DS_Store`, `Thumbs.db`, `*.swp`), common build dirs (`build/`, `out/`, `_minted-*/`). Always on; opt out with `--no-default-ignore`. |
-| 2 | `.olignore` | Project-level patterns, gitignore syntax. Commit alongside your `.tex` sources. |
-| 3 | `.olignore.local` | Machine-specific patterns. Add to `.gitignore`. |
+| 1 | Built-in | LaTeX intermediates, OS noise, build dirs. Always on. |
+| 2 | `.olignore` | Project-level patterns (gitignore syntax). |
+| 3 | `.olignore.local` | Machine-specific patterns. |
 
-Later layers override earlier ones, just like git. Negation (`!important.aux`) is supported.
+Later layers override earlier ones. Negation (`!important.aux`) is supported.
 
 ### Special PDF rule
 
-`X.pdf` is ignored only if a same-named `X.tex` (or `.ltx`) exists in the same folder. So `thesis.pdf` next to `thesis.tex` is filtered, but a hand-uploaded `figures/diagram.pdf` still syncs.
-
-### Example `.olignore`
-
-```gitignore
-# Drafts that should never reach Overleaf
-*.draft.tex
-notes/
-chapters/scratch/
-
-# But keep this one auxiliary file
-!important.aux
-```
+`X.pdf` is ignored only if `X.tex` (or `.ltx`) exists in the same folder.
 
 ### Inspecting and overriding
 
 ```bash
-olcli ignored                  # list patterns currently in effect
-olcli push --show-ignored      # see what was skipped on this run
+olcli ignored                  # list patterns in effect
+olcli push --show-ignored      # see what was skipped
 olcli sync --no-default-ignore # only .olignore applies
-olcli sync --no-ignore         # escape hatch — upload everything
+olcli sync --no-ignore         # upload everything
 ```
 
 ## Configuration
 
-Credentials are stored in (checked in order):
+Credentials are checked in order:
 
 1. `OVERLEAF_SESSION` environment variable
 2. `.olauth` file in current directory
-3. Global config: `~/.config/olcli-nodejs/config.json` (macOS/Linux)
+3. Global config: `~/.config/olcli-nodejs/config.json`
 
-### .olauth File
-
-For project-specific credentials, create `.olauth` in your project directory:
-
-```
-s%3AyourSessionCookieValue...
-```
-
-### Self-hosted Overleaf / ShareLaTeX
-
-You can point `olcli` at a self-hosted instance and override the session cookie name. Both flags are documented under [Global options](#global-options) and can be combined with any command.
-
-```bash
-olcli --base-url https://latex.example.org list
-olcli --base-url https://latex.example.org --cookie-name overleaf.sid whoami
-```
-
-Persist these settings in `olcli` config so you don't have to repeat them:
+### Self-hosted Overleaf
 
 ```bash
 olcli config set-url https://latex.example.org
 olcli config set-cookie-name overleaf.sid
 ```
 
-### Timeout configuration
+Or pass per-command: `olcli --base-url https://latex.example.org list`
 
-For slow connections or large projects, increase the HTTP request timeout:
+### Timeout
 
 ```bash
-# One-off: pass as a flag
-olcli --timeout 60000 pull "Large Thesis"
-
-# Persist as default
-olcli config set-timeout 60000
-
-# Or use environment variable
-export OVERLEAF_TIMEOUT=60000
-olcli pull "Large Thesis"
+olcli config set-timeout 60000          # persist
+olcli --timeout 60000 pull "Big Thesis" # one-off
+export OVERLEAF_TIMEOUT=60000           # env var
 ```
 
-Precedence: `--timeout` flag > `OVERLEAF_TIMEOUT` env > `config set-timeout` > default (10000ms).
+Precedence: `--timeout` > `OVERLEAF_TIMEOUT` > config > default (10000ms).
 
 ## Examples
 
-### Work on a thesis
-
 ```bash
-# Initial setup
-olcli pull "PhD Thesis" thesis
-cd thesis
+# Daily thesis workflow
+olcli pull "PhD Thesis" thesis && cd thesis
+vim chapters/methods.tex
+olcli sync && olcli pdf -o draft.pdf
 
-# Daily workflow
-vim chapters/introduction.tex
-olcli sync
-olcli pdf -o draft.pdf
-```
-
-### Quick PDF download
-
-```bash
+# Quick PDF download
 olcli pdf "Conference Paper" -o paper.pdf
-```
 
-### Download a single file
-
-```bash
-olcli download main.tex "My Project"
-```
-
-### Upload figures
-
-```bash
-cd my-project
+# Upload figures
 olcli upload figures/diagram.png
-```
 
-### Backup all projects
+# arXiv submission prep
+olcli output bbl -o main.bbl
+olcli zip -o arxiv-submission.zip
 
-```bash
+# Backup all projects
 for proj in $(olcli list --json | jq -r '.[].name'); do
   olcli zip "$proj" -o "backups/${proj}.zip"
 done
 ```
 
-### Prepare for arXiv
-
-```bash
-cd my-paper
-olcli output bbl -o main.bbl
-olcli zip -o arxiv-submission.zip
-```
-
 ## Programmatic Usage (Library API)
 
-`@aloth/olcli` exposes `OverleafClient` and all public interfaces as a proper library so you can use it in your own scripts, tools, and AI agents.
+`@aloth/olcli` exposes `OverleafClient` and all public interfaces as a library.
 
 ### Install
 
@@ -484,27 +280,15 @@ npm install @aloth/olcli
 ```ts
 import { OverleafClient } from '@aloth/olcli';
 
-// Create a client from an Overleaf session cookie
 const client = await OverleafClient.fromSessionCookie(cookie);
 
-// List all projects
 const projects = await client.listProjects();
-console.log(projects);
-
-// Get detailed info (file tree) for a project
 const info = await client.getProjectInfo(projectId);
-
-// Download project as a zip buffer
 const zipBuf = await client.downloadProject(projectId);
-
-// Compile and download PDF
 const pdfBuf = await client.downloadPdf(projectId);
 
-// Upload a file
-import { readFileSync } from 'node:fs';
 await client.uploadFile(projectId, null, 'main.tex', readFileSync('main.tex'));
 
-// List review comments
 const comments = await client.listComments(projectId, { status: 'open' });
 ```
 
@@ -512,167 +296,33 @@ const comments = await client.listComments(projectId, { status: 'open' });
 
 ```ts
 import {
-  // Core client
   OverleafClient,
-
-  // Types / interfaces
+  // Types
   Project, ProjectInfo, FolderEntry, DocEntry, FileEntry,
   CommentMessage, ProjectComment, CommentContext, CommentStatus,
   ListCommentsOptions, AddCommentOptions, Credentials, SessionCookiePair,
-
-  // Configuration utilities
+  // Config utilities
   getBaseUrl, setBaseUrl, getSessionCookie, setSessionCookie,
   getSessionCookieName, setSessionCookieName, getCsrf, setCsrf,
   getLastProject, setLastProject, clearConfig, getConfigPath, saveOlAuth,
   getTimeout, setTimeout, getPasswordCredentials, setPasswordCredentials,
   clearPasswordCredentials, type PasswordCredentials,
-
   // Ignore utilities
   DEFAULT_IGNORE_PATTERNS, loadIgnore, shouldIgnore, buildTexSiblingSet,
   IgnoreContext, LoadIgnoreOptions,
 } from '@aloth/olcli';
 ```
 
----
+## Further Documentation
 
-## MCP Server
-
-`@aloth/olcli` ships an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server so AI assistants like **Claude Desktop**, **Cursor**, and **Windsurf** can interact with your Overleaf projects directly.
-
-### MCP tools
-
-| Tool | Description |
-|------|-------------|
-| `list_projects` | List all Overleaf projects |
-| `get_project_info` | Get file tree and metadata for a project |
-| `pull_project` | Download and extract a project to a local directory |
-| `push_file` | Upload a local file to a project |
-| `compile` | Compile a project and get the PDF URL |
-| `download_pdf` | Compile a project and save the PDF locally |
-| `list_comments` | List review comments (filter: all / open / resolved) |
-| `get_entities` | Get a flat list of all files in a project |
-| `download_file` | Download a specific file by its remote path |
-| `add_comment` | Add a review comment to a document |
-| `reply_to_comment` | Reply to an existing comment thread |
-| `resolve_comment` | Mark a comment thread as resolved |
-| `delete_entity` | Delete a file or document by path |
-| `rename_entity` | Rename a file or document |
-| `compile_with_outputs` | Compile and return all output files (PDF, BBL, logs…) |
-
-### Authentication
-
-The MCP server reads credentials in this order:
-
-1. **`OVERLEAF_SESSION` environment variable** — set in your MCP config (recommended)
-2. **`OVERLEAF_EMAIL` + `OVERLEAF_PASSWORD` environment variables** — for password login (self-hosted)
-3. **`.olauth` file in cwd** — written by `olcli auth`
-4. **Stored config** — written by `olcli auth` (including saved password credentials)
-
-When a session cookie expires and password credentials are available, the MCP server automatically re-authenticates.
-
-### Claude Desktop
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "overleaf": {
-      "command": "npx",
-      "args": ["-y", "@aloth/olcli-mcp"],
-      "env": {
-        "OVERLEAF_SESSION": "<your-overleaf-session-cookie>"
-      }
-    }
-  }
-}
-```
-
-Or if you have olcli installed globally (`npm install -g @aloth/olcli`):
-
-```json
-{
-  "mcpServers": {
-    "overleaf": {
-      "command": "olcli-mcp",
-      "env": {
-        "OVERLEAF_SESSION": "<your-overleaf-session-cookie>"
-      }
-    }
-  }
-}
-```
-
-### Cursor
-
-Add to your Cursor MCP settings (`~/.cursor/mcp.json` or project `.cursor/mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "overleaf": {
-      "command": "npx",
-      "args": ["-y", "@aloth/olcli-mcp"],
-      "env": {
-        "OVERLEAF_SESSION": "<your-overleaf-session-cookie>"
-      }
-    }
-  }
-}
-```
-
-### Windsurf
-
-Add to `~/.codeium/windsurf/mcp_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "overleaf": {
-      "command": "npx",
-      "args": ["-y", "@aloth/olcli-mcp"],
-      "env": {
-        "OVERLEAF_SESSION": "<your-overleaf-session-cookie>"
-      }
-    }
-  }
-}
-```
-
-### Getting your session cookie
-
-1. Open Overleaf in your browser and log in
-2. Open DevTools → Application (Chrome) or Storage (Firefox) → Cookies
-3. Find `overleaf_session2` (or `sharelatex.sid` for self-hosted)
-4. Copy the value — that's your `OVERLEAF_SESSION`
-
-Or run `olcli auth` and then the MCP server will pick it up automatically.
-
-### Self-hosted Overleaf
-
-Set `OVERLEAF_BASE_URL` in your MCP env:
-
-```json
-"env": {
-  "OVERLEAF_SESSION": "<cookie>",
-  "OVERLEAF_BASE_URL": "https://overleaf.yourcompany.com"
-}
-```
-
----
+- [MCP Server](docs/MCP.md) — AI assistant integration (Claude, Cursor, Windsurf)
+- [Git Remote Helper](docs/GIT-REMOTE.md) — use Overleaf as a native git remote
 
 ## Troubleshooting
 
-### Session expired
+**Session expired** — Get a fresh cookie from the browser and run `olcli auth` again.
 
-If you get authentication errors, your session cookie may have expired. Get a fresh one from the browser and run `olcli auth` again.
-
-### Compilation fails
-
-Check the Overleaf web editor for detailed error logs. Common issues:
-- Missing packages
-- Syntax errors in `.tex` files
-- Missing bibliography files
+**Compilation fails** — Check the Overleaf web editor for detailed error logs (missing packages, syntax errors, missing bibliography files).
 
 ## Contributing
 

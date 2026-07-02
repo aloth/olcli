@@ -1,6 +1,6 @@
 {
   "name": "@aloth/olcli",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Command-line interface for Overleaf — Sync, manage, and compile LaTeX projects from your terminal",
   "type": "module",
   "main": "dist/index.js",
@@ -14,7 +14,8 @@
   },
   "bin": {
     "olcli": "dist/cli.js",
-    "olcli-mcp": "dist/mcp.js"
+    "olcli-mcp": "dist/mcp.js",
+    "git-remote-overleaf": "dist/remote-helper.js"
   },
   "scripts": {
     "build": "tsc",

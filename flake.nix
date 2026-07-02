@@ -14,7 +14,7 @@
       {
         packages.default = pkgs.buildNpmPackage {
           pname = "olcli";
-          version = "0.4.0";
+          version = "0.7.0";
 
           src = self;
 

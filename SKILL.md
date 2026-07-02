@@ -4,14 +4,24 @@ description: Sync and manage Overleaf LaTeX projects from the command line. Pull
 license: MIT
 metadata:
   author: aloth
-  version: "1.2"
+  version: "1.3"
   cli: olcli
   install: brew tap aloth/tap && brew install olcli
 ---
 
 # Overleaf Skill
 
-Manage Overleaf LaTeX projects via the `olcli` CLI.
+Manage Overleaf LaTeX projects via the `olcli` CLI, native git remote, or MCP server.
+
+## When to Use Which Mode
+
+| Mode | Best for | How |
+|------|----------|-----|
+| **CLI** (`olcli`) | Interactive workflows, sync, compile, arXiv prep | `olcli pull/push/sync/pdf` |
+| **Git remote** | Version control, commits, diffs, CI/CD pipelines | `git clone overleaf::…` then standard git |
+| **MCP server** | AI agents with MCP support (Claude, Cursor, Windsurf) | Connect via `olcli-mcp` stdio transport |
+
+Use **CLI** when you need bidirectional sync with conflict detection, compilation, or comment management. Use **Git remote** when you want proper git history, branches, and standard `git push/pull`. Use **MCP** when an AI agent has native MCP support and doesn't need to shell out.
 
 ## Installation
 
@@ -49,6 +59,59 @@ Clear stored credentials:
 ```bash
 olcli logout
 ```
+
+### Self-hosted Overleaf
+
+```bash
+olcli config set-url https://overleaf.yourcompany.com
+olcli config set-cookie-name overleaf.sid   # if different from default
+olcli auth --cookie "YOUR_COOKIE"
+```
+
+Or pass per-command: `olcli --base-url https://overleaf.yourcompany.com list`
+
+## Git Remote Helper
+
+Use Overleaf projects as native git remotes. No wrapper scripts needed.
+
+```bash
+# Clone
+git clone overleaf::https://www.overleaf.com/project/<id>
+cd <project>
+
+# Edit, commit, push — standard git workflow
+vim main.tex
+git add . && git commit -m "update introduction"
+git push
+
+# Pull latest from Overleaf
+git pull
+```
+
+Authentication: reads `OVERLEAF_SESSION` env var, `~/.olauth` file, or stored config (same as CLI).
+
+For self-hosted instances, just use your instance URL:
+```bash
+git clone overleaf::https://overleaf.yourcompany.com/project/<id>
+```
+
+Debug with: `GIT_REMOTE_OVERLEAF_DEBUG=1 git push`
+
+## MCP Server
+
+Built-in Model Context Protocol server for AI assistant integration.
+
+```bash
+# Run standalone
+olcli-mcp
+
+# Or via npx
+npx @aloth/olcli-mcp
+```
+
+Available MCP tools: `list_projects`, `get_project_info`, `pull_project`, `push_file`, `compile`, `download_pdf`, `list_comments`, `get_entities`, `download_file`, `add_comment`, `reply_to_comment`, `resolve_comment`, `delete_entity`, `rename_entity`, `compile_with_outputs`.
+
+Auth: set `OVERLEAF_SESSION` env var in MCP config, or use stored credentials from `olcli auth`.
 
 ## Common Workflows
 
@@ -115,6 +178,19 @@ olcli download main.tex "My Paper"           # Download single file
 olcli zip "My Paper"                          # Download entire project as zip
 ```
 
+### Review comments
+
+```bash
+olcli comments list                          # List all comments (current project)
+olcli comments list --status open            # Filter by status (open/resolved/all)
+olcli comments list --context                # Include surrounding text
+olcli comments add main.tex "Fix this citation" --from 10 --to 15  # Add comment
+olcli comments reply <thread-id> "Done!"     # Reply to thread
+olcli comments resolve <thread-id>           # Mark as resolved
+olcli comments reopen <thread-id>            # Reopen a resolved thread
+olcli comments delete <thread-id>            # Delete entire thread
+```
+
 ## arXiv Submission Workflow
 
 Complete workflow for preparing an arXiv submission:
@@ -145,6 +221,7 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 | Command | Description |
 |---------|-------------|
 | `olcli auth --cookie <value>` | Authenticate with session cookie |
+| `olcli auth --email <e> --password <p>` | Authenticate with password (self-hosted) |
 | `olcli whoami` | Check authentication status |
 | `olcli logout` | Clear stored credentials |
 | `olcli check` | Show config paths and credential sources |
@@ -155,13 +232,22 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 | `olcli sync [dir]` | Bidirectional sync |
 | `olcli upload <file> [project]` | Upload a single file |
 | `olcli download <file> [project]` | Download a single file |
-| `olcli delete <file> [project]` | Delete a remote file or folder by path (alias: `rm`) |
+| `olcli delete <file> [project]` | Delete a remote file or folder (alias: `rm`) |
 | `olcli rename <old> <new> [project]` | Rename a remote file or folder (alias: `mv`) |
 | `olcli ignored [dir]` | List active ignore patterns |
 | `olcli zip [project]` | Download as zip archive |
 | `olcli compile [project]` | Trigger compilation |
 | `olcli pdf [project]` | Compile and download PDF |
 | `olcli output [type]` | Download compile outputs |
+| `olcli comments list [project]` | List review comments |
+| `olcli comments add <file> <msg>` | Add a comment |
+| `olcli comments reply <id> <body>` | Reply to a thread |
+| `olcli comments resolve <id>` | Resolve a thread |
+| `olcli comments reopen <id>` | Reopen a thread |
+| `olcli comments delete <id>` | Delete a thread |
+| `olcli config set-url <url>` | Set self-hosted base URL |
+| `olcli config set-cookie-name <name>` | Set cookie name |
+| `olcli config set-timeout <ms>` | Set HTTP timeout |
 
 ## Tips
 
@@ -173,3 +259,4 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 - **PDF rule**: `thesis.pdf` next to `thesis.tex` is auto-ignored; standalone `figures/diagram.pdf` is preserved
 - **Project ID**: You can use project ID instead of name (24-char hex from URL)
 - **Debug auth**: Run `olcli check` to see where credentials are loaded from
+- **Timeout**: `olcli --timeout 60000 pull "Big Project"` or `olcli config set-timeout 60000`

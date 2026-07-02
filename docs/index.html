@@ -4,10 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>olcli — Overleaf CLI: Sync, Compile & Manage LaTeX from Your Terminal</title>
-<meta name="description" content="Command-line interface for Overleaf. Pull, push, sync, and compile LaTeX projects from your terminal. Install via Homebrew or npm.">
+<meta name="description" content="Command-line interface for Overleaf. Pull, push, sync, and compile LaTeX projects from your terminal. Native git remote support. Install via Homebrew or npm.">
 <meta property="og:title" content="olcli — Overleaf CLI">
-<meta property="og:description" content="Sync, compile, and manage LaTeX projects from your terminal.">
+<meta property="og:description" content="Sync, compile, and manage LaTeX projects from your terminal. Native git remote support.">
 <meta property="og:url" content="https://aloth.github.io/olcli/">
+<meta property="og:image" content="https://raw.githubusercontent.com/aloth/olcli/main/screenshots/workflow.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="olcli — Overleaf CLI">
+<meta name="twitter:description" content="Sync, compile, and manage LaTeX projects from your terminal.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/aloth/olcli/main/screenshots/workflow.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -18,8 +24,8 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 /* Hero */
 .hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:60px 24px 40px;position:relative}
 .hero::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:800px;height:600px;background:radial-gradient(ellipse,rgba(88,166,255,0.08) 0%,transparent 70%);pointer-events:none}
-.hero-badge{display:inline-flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:6px 16px;font-size:13px;font-weight:500;color:var(--muted);margin-bottom:28px}
-.hero-badge code{font-family:'JetBrains Mono',monospace;color:var(--green);font-size:12px}
+.hero-badges{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:28px}
+.hero-badges img{height:22px}
 .hero h1{font-size:clamp(2.5rem,7vw,4.5rem);font-weight:800;line-height:1.05;margin-bottom:20px;letter-spacing:-0.03em}
 .hero h1 .accent{background:linear-gradient(135deg,var(--green),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .hero p{font-size:clamp(1rem,2.5vw,1.3rem);color:var(--muted);max-width:560px;line-height:1.6;margin-bottom:36px}
@@ -59,6 +65,9 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .terminal-body .line:nth-child(9){animation-delay:4.0s}
 .terminal-body .line:nth-child(10){animation-delay:4.5s}
 .terminal-body .line:nth-child(11){animation-delay:4.7s}
+.terminal-body .line:nth-child(12){animation-delay:5.5s}
+.terminal-body .line:nth-child(13){animation-delay:6.0s}
+.terminal-body .line:nth-child(14){animation-delay:6.2s}
 
 /* Features */
 .features{padding:100px 24px;position:relative}
@@ -91,7 +100,8 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .usecase-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;max-width:900px;margin:0 auto}
 .usecase-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:24px}
 .usecase-card h3{font-size:1rem;font-weight:700;margin-bottom:8px}
-.usecase-card code{font-family:'JetBrains Mono',monospace;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 14px;display:block;margin-top:12px;font-size:12px;line-height:1.6;color:var(--green);overflow-x:auto}
+.usecase-card p{color:var(--muted);font-size:0.9rem;margin-bottom:12px}
+.usecase-card code{font-family:'JetBrains Mono',monospace;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 14px;display:block;font-size:12px;line-height:1.6;color:var(--green);overflow-x:auto}
 
 /* CTA */
 .cta{padding:80px 24px;text-align:center;position:relative}
@@ -107,10 +117,10 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .btn-secondary:hover{border-color:var(--muted)}
 .btn svg{width:20px;height:20px;fill:currentColor}
 
-.stats{display:flex;gap:40px;justify-content:center;margin-top:48px;flex-wrap:wrap}
-.stat{text-align:center}
-.stat .num{font-size:1.8rem;font-weight:800;color:var(--green)}
-.stat .label{font-size:0.85rem;color:var(--dimmed);margin-top:4px}
+/* Docs nav */
+.docs-nav{display:flex;gap:24px;justify-content:center;margin-top:40px;flex-wrap:wrap}
+.docs-nav a{color:var(--blue);text-decoration:none;font-size:0.95rem;font-weight:500;transition:color 0.2s}
+.docs-nav a:hover{color:var(--green)}
 
 footer{border-top:1px solid var(--border);padding:24px;text-align:center;color:var(--dimmed);font-size:0.85rem}
 footer a{color:var(--muted);text-decoration:none}
@@ -125,9 +135,14 @@ footer a{color:var(--muted);text-decoration:none}
 <body>
 
 <section class="hero">
-  <div class="hero-badge">v0.3.0 · <code>MIT Licensed</code> · Node.js</div>
+  <div class="hero-badges">
+    <a href="https://www.npmjs.com/package/@aloth/olcli"><img src="https://img.shields.io/npm/v/@aloth/olcli.svg" alt="npm version"></a>
+    <a href="https://www.npmjs.com/package/@aloth/olcli"><img src="https://img.shields.io/npm/dm/@aloth/olcli.svg" alt="npm downloads"></a>
+    <a href="https://github.com/aloth/olcli"><img src="https://img.shields.io/github/stars/aloth/olcli" alt="GitHub stars"></a>
+    <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
+  </div>
   <h1>Overleaf,<br>from your <span class="accent">terminal.</span></h1>
-  <p>Pull, push, sync, and compile LaTeX projects without leaving your editor. Works with Git, CI/CD, and AI agents.</p>
+  <p>Pull, push, sync, and compile LaTeX projects without leaving your editor. Native git remote. MCP server for AI agents. Works with CI/CD.</p>
 
   <div class="install-bar">
     <div class="install-option" onclick="navigator.clipboard.writeText('brew tap aloth/tap && brew install olcli')">
@@ -154,17 +169,20 @@ footer a{color:var(--muted);text-decoration:none}
       <span>olcli — zsh</span>
     </div>
     <div class="terminal-body">
-      <div class="line"><span class="prompt">$ </span><span class="cmd">olcli list</span></div>
-      <div class="line"><span class="output">  PhD Thesis</span></div>
-      <div class="line"><span class="output">  Conference Paper (ICML 2026)</span></div>
-      <div class="line"><span class="output">  Grant Proposal</span></div>
-      <div class="line"><br></div>
       <div class="line"><span class="prompt">$ </span><span class="cmd">olcli pull </span><span class="string">"Conference Paper"</span><span class="cmd"> paper</span></div>
       <div class="line"><span class="success">✓ Pulled 12 files to ./paper/</span></div>
-      <div class="line"><br></div>
       <div class="line"><span class="prompt">$ </span><span class="cmd">vim paper/main.tex</span></div>
       <div class="line"><span class="prompt">$ </span><span class="cmd">olcli sync</span></div>
       <div class="line"><span class="success">✓ Pushed 1 file · Pulled 0 files · PDF compiled</span></div>
+      <div class="line"><br></div>
+      <div class="line"><span class="output"># Or use native git commands:</span></div>
+      <div class="line"><span class="prompt">$ </span><span class="cmd">git clone </span><span class="string">overleaf::https://www.overleaf.com/project/abc123</span></div>
+      <div class="line"><span class="output">Cloning into 'abc123'...</span></div>
+      <div class="line"><span class="prompt">$ </span><span class="cmd">cd abc123 && echo </span><span class="string">"Hello from git"</span><span class="cmd"> >> main.tex</span></div>
+      <div class="line"><span class="prompt">$ </span><span class="cmd">git add . && git commit -m </span><span class="string">"update intro"</span></div>
+      <div class="line"><span class="prompt">$ </span><span class="cmd">git push</span></div>
+      <div class="line"><span class="success">✓ Uploaded 1 file to Overleaf</span></div>
+      <div class="line"><span class="output">To overleaf::https://www.overleaf.com/project/abc123</span></div>
     </div>
   </div>
 </section>
@@ -174,19 +192,24 @@ footer a{color:var(--muted);text-decoration:none}
   <p class="subtitle">Full Overleaf access without opening a browser.</p>
   <div class="feature-grid">
     <div class="feature-card">
+      <div class="feature-icon">🔀</div>
+      <h3>Native Git Remote</h3>
+      <p><code>git clone overleaf::&lt;url&gt;</code> — use Overleaf as a standard git remote. Clone, pull, push with the commands you already know.</p>
+    </div>
+    <div class="feature-card">
       <div class="feature-icon">🔄</div>
       <h3>Bidirectional Sync</h3>
       <p>Smart conflict detection. Local wins if newer, remote changes pulled automatically. Local deletions propagate to Overleaf.</p>
     </div>
     <div class="feature-card">
-      <div class="feature-icon">🚫</div>
-      <h3>Smart Ignore</h3>
-      <p>LaTeX build artifacts (.aux, .bbl, .log, .synctex.gz) filtered automatically. Customize with <code>.olignore</code> (gitignore-style).</p>
+      <div class="feature-icon">🤖</div>
+      <h3>MCP Server</h3>
+      <p>Built-in Model Context Protocol server. Claude Desktop, Cursor, and Windsurf can manage your LaTeX projects directly.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">📄</div>
       <h3>Remote Compilation</h3>
-      <p>Compile PDFs using Overleaf's servers. Download output artifacts (.bbl, .log) for arXiv.</p>
+      <p>Compile PDFs using Overleaf's servers. Download output artifacts (.bbl, .log) for arXiv submissions.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">✏️</div>
@@ -194,9 +217,9 @@ footer a{color:var(--muted);text-decoration:none}
       <p>Vim, VS Code, Emacs, Sublime — edit locally in whatever you're fastest with.</p>
     </div>
     <div class="feature-card">
-      <div class="feature-icon">🤖</div>
-      <h3>AI Agent Ready</h3>
-      <p>AgentSkills compatible. Let AI assistants manage your LaTeX projects programmatically.</p>
+      <div class="feature-icon">🚫</div>
+      <h3>Smart Ignore</h3>
+      <p>LaTeX build artifacts filtered automatically. Customize with <code>.olignore</code> (gitignore syntax).</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">📦</div>
@@ -206,7 +229,7 @@ footer a{color:var(--muted);text-decoration:none}
     <div class="feature-card">
       <div class="feature-icon">🔐</div>
       <h3>Flexible Auth</h3>
-      <p>Session cookie via env var, .olauth file, or global config. Works in CI/CD pipelines.</p>
+      <p>Session cookie, env var, .olauth file, or password login. Works in CI/CD pipelines and self-hosted instances.</p>
     </div>
   </div>
 </section>
@@ -225,7 +248,7 @@ footer a{color:var(--muted);text-decoration:none}
       <div class="compare-cell"><span class="no">✗</span></div>
     </div>
     <div class="compare-row">
-      <div class="compare-cell label">Git version control</div>
+      <div class="compare-cell label">Native git workflow</div>
       <div class="compare-cell"><span class="yes">✓</span></div>
       <div class="compare-cell"><span class="partial">Premium only</span></div>
     </div>
@@ -241,7 +264,7 @@ footer a{color:var(--muted);text-decoration:none}
     </div>
     <div class="compare-row">
       <div class="compare-cell label">AI agent integration</div>
-      <div class="compare-cell"><span class="yes">✓</span></div>
+      <div class="compare-cell"><span class="yes">✓ MCP</span></div>
       <div class="compare-cell"><span class="no">✗</span></div>
     </div>
     <div class="compare-row">
@@ -260,6 +283,11 @@ footer a{color:var(--muted);text-decoration:none}
 <section class="usecases">
   <h2>Common workflows</h2>
   <div class="usecase-grid">
+    <div class="usecase-card">
+      <h3>🔀 Git clone & push</h3>
+      <p>Use Overleaf as a native git remote. Standard workflow, zero learning curve.</p>
+      <code>git clone overleaf::https://www.overleaf.com/project/abc123<br>cd abc123<br>vim main.tex<br>git add . && git commit -m "edits"<br>git push</code>
+    </div>
     <div class="usecase-card">
       <h3>📝 Daily thesis work</h3>
       <p>Edit locally, sync when ready, compile to check output.</p>
@@ -287,18 +315,19 @@ footer a{color:var(--muted);text-decoration:none}
     </a>
     <a href="https://github.com/aloth/olcli" class="btn btn-secondary">
       <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-      View on GitHub ⭐
+      View on GitHub
     </a>
   </div>
-  <div class="stats">
-    <div class="stat"><div class="num">19</div><div class="label">GitHub Stars</div></div>
-    <div class="stat"><div class="num">7</div><div class="label">Releases</div></div>
-    <div class="stat"><div class="num">MIT</div><div class="label">License</div></div>
+  <div class="docs-nav">
+    <a href="https://github.com/aloth/olcli/blob/main/README.md">📖 README</a>
+    <a href="https://github.com/aloth/olcli/blob/main/docs/GIT-REMOTE.md">🔀 Git Remote</a>
+    <a href="https://github.com/aloth/olcli/blob/main/docs/MCP.md">🤖 MCP Server</a>
+    <a href="https://www.npmjs.com/package/@aloth/olcli">📦 npm</a>
   </div>
 </section>
 
 <footer>
-  <p>Made by <a href="https://alexloth.com">Alexander Loth</a> · <a href="https://github.com/aloth/overleaf-skill">Agent Skill</a></p>
+  <p>MIT © <a href="https://alexloth.com">Alexander Loth</a> · <a href="https://github.com/aloth/olcli">GitHub</a></p>
 </footer>
 
 </body>
