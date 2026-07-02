@@ -26,8 +26,21 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     steps:
+      - name: Wait for tarball availability
+        run: |
+          for i in $(seq 1 10); do
+            STATUS=$(curl -sI "https://github.com/aloth/olcli/archive/refs/tags/${{ github.ref_name }}.tar.gz" -o /dev/null -w '%{http_code}')
+            if [ "$STATUS" = "200" ] || [ "$STATUS" = "302" ]; then
+              echo "Tarball ready (HTTP $STATUS)"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $STATUS, waiting 5s..."
+            sleep 5
+          done
+          echo "Tarball not available after 50s"
+          exit 1
       - name: Bump Homebrew formula
-        uses: mislav/bump-homebrew-formula-action@v3
+        uses: mislav/bump-homebrew-formula-action@v3.6
         with:
           formula-name: olcli
           homebrew-tap: aloth/homebrew-tap
