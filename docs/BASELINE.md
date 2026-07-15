@@ -164,3 +164,7 @@ credentials, real project identifiers, collaborator emails, or manuscript text.
 - A simultaneous Chrome-tab rerun remains unavailable because the local Chrome
   control plugin fails during initialization. The live protocol-level
   concurrency test is green, but the browser-specific checkbox stays open.
+- The first `dev` push completed the GitHub Actions CI matrix successfully on
+  Node.js 18, 20, 22, and 24. Each job installed from the lockfile, audited
+  production dependencies, typechecked, ran all tests, built, and inspected the
+  package dry run.

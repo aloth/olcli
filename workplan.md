@@ -2001,7 +2001,7 @@ Suggested sequence:
 
 ### 26.4 Release gates
 
-- [ ] CI green on all supported Node versions.
+- [x] CI green on all supported Node versions.
 - [x] Live E2E green on disposable project.
 - [x] No secrets in logs or package.
 - [x] `npm pack --dry-run` reviewed.
