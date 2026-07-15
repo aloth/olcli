@@ -1,7 +1,7 @@
 {
-  "name": "@aloth/olcli",
-  "version": "0.7.0",
-  "description": "Command-line interface for Overleaf — Sync, manage, and compile LaTeX projects from your terminal",
+  "name": "@xyin-anl/olcli",
+  "version": "0.8.0-experimental.0",
+  "description": "Experimental Overleaf CLI fork with native tracked-review and agent workflows",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -19,9 +19,19 @@
   },
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run test/unit",
+    "test:contract": "vitest run test/contract",
+    "test:e2e": "bash test/e2e.sh",
+    "test:e2e:review": "npm run build && bash test/e2e-review.sh",
+    "test:e2e:resolve": "npm run build && bash test/e2e-resolve.sh",
+    "test:e2e:review-workflow": "npm run build && bash test/e2e-review-workflow.sh",
+    "test:e2e:history": "npm run build && bash test/e2e-history.sh",
+    "verify": "npm run typecheck && npm test && npm run build",
+    "prepublishOnly": "npm run verify",
     "mcp": "node dist/mcp.js",
     "dev": "tsx src/cli.ts",
-    "lint": "eslint src/",
     "prepare": "npm run build"
   },
   "keywords": [
@@ -46,15 +56,22 @@
     "latex-tools"
   ],
   "author": "Alexander Loth <alex@alexloth.com> (https://alexloth.com)",
+  "contributors": [
+    "Xin Yin"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/aloth/olcli.git"
+    "url": "git+https://github.com/xyin-anl/olcli.git"
   },
   "bugs": {
-    "url": "https://github.com/aloth/olcli/issues"
+    "url": "https://github.com/xyin-anl/olcli/issues"
   },
-  "homepage": "https://github.com/aloth/olcli#readme",
+  "homepage": "https://github.com/xyin-anl/olcli#readme",
+  "publishConfig": {
+    "access": "public",
+    "tag": "experimental"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "adm-zip": "^0.5.16",
@@ -72,7 +89,8 @@
     "@types/node": "^22.0.0",
     "@types/tough-cookie": "^4.0.5",
     "tsx": "^4.7.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^3.2.7"
   },
   "engines": {
     "node": ">=18"
@@ -80,6 +98,12 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "SKILL.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "MIGRATION.md",
+    "THIRD_PARTY_NOTICES.md",
+    "docs/*.md"
   ]
 }

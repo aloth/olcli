@@ -2,6 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0-experimental.0] - Unreleased
+
+### Added
+
+- Reusable real-time project/document session layer with acknowledged writes,
+  timeouts, cleanup, redacted diagnostics, and separate ShareJS/history-OT
+  adapters.
+- Native tracked-change capability inspection, listing, targeted suggestions,
+  and explicit-ID accept/reject commands.
+- Durable comment-to-suggestion review workflow with a text-free local ledger,
+  idempotent retry, reconciliation, and Git commit trailers.
+- Read-only native Overleaf project-history listing, pagination, and file
+  diffs through CLI, library, and MCP.
+- Preview-first MCP review tools with `read`, `suggest`, and `full` policy
+  modes, structured mutation preconditions, and stable errors.
+- Unit, protocol-contract, fake-MCP integration, and disposable live E2E test
+  coverage.
+- Agent-ready README and `SKILL.md` instructions for the preconditioned
+  comment-to-suggestion workflow.
+
+### Security and release changes
+
+- Experimental tracked-review mutations require
+  `OLCLI_EXPERIMENTAL_REVIEW=1` or the CLI `--experimental-review` flag.
+- MCP Overleaf mutations default to read-only and older upload/comment/entity
+  tools use the same policy gate.
+- Verbose HTTP logging is redacted; raw protocol frames require an explicit
+  unsafe flag.
+- Fork package identity is `@xyin-anl/olcli` with the `experimental` npm tag.
+  Publishing is manual, repository-scoped, and environment protected.
+- Compatible transitive updates for `ajv`, `fast-uri`, and `undici` resolve
+  the production dependency advisories present at the upstream baseline.
+
+### Known limitations
+
+- Undocumented Overleaf services may change without notice.
+- `history-ot` mutation is contract-tested but not yet live-validated.
+- Native history restoration and replay into Git are not supported.
+
 ## [0.7.0] - 2026-07-02
 
 ### Added

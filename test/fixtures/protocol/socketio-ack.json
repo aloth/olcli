@@ -1,0 +1,15 @@
+{
+  "metadata": {
+    "schemaVersion": 1,
+    "capturedAt": "2026-07-13",
+    "instance": "overleaf-cloud",
+    "operation": "socket-ack",
+    "otType": "sharejs-text-ot",
+    "sanitized": true,
+    "notes": "Synthetic fixture demonstrating the committed fixture envelope."
+  },
+  "exchange": {
+    "sent": "5:42+::{\"name\":\"joinDoc\",\"args\":[\"000000000000000000000000\"]}",
+    "received": "6:::42+[null,[\"[REDACTED_TEXT:12]\"],7]"
+  }
+}

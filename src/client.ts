@@ -6,16 +6,59 @@
  */
 
 import * as cheerio from 'cheerio';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import * as https from 'node:https';
 import * as http from 'node:http';
+import { PACKAGE_VERSION } from './version.js';
+import { Logger } from './logging/logger.js';
+import { OlcliError } from './errors/olcli-error.js';
+import { decodeSocketIoV09Payload } from './realtime/socketio-v09-framing.js';
+import { SocketIoV09Transport } from './realtime/socketio-v09-transport.js';
+import { ProjectSession } from './realtime/project-session.js';
+import type { JoinedDocument } from './realtime/types.js';
+import {
+  parseDocumentComments,
+  positionToLineColumn,
+} from './comments/range-parser.js';
+import { detectChangesCapabilities } from './changes/capabilities.js';
+import { getTrackedChangesAdapter } from './changes/adapters.js';
+import type {
+  ChangesCapabilities,
+  ChangeResolutionPreview,
+  ChangeResolutionResult,
+  ListTrackedChangesOptions,
+  ResolveChangesInput,
+  SuggestChangeInput,
+  SuggestionPreview,
+  SuggestionResult,
+  TrackedChange,
+  TrackedDocumentInspection,
+} from './changes/types.js';
+import {
+  ChangesService,
+  type SaveTrackChangesBody,
+} from './changes/service.js';
+import { ReviewService } from './review/service.js';
+import type {
+  AddressReviewCommentInput,
+  AddressReviewPreview,
+  AddressReviewResult,
+  AnnotateReviewCommitInput,
+  ReconcileReviewInput,
+  ReconcileReviewResult,
+  ReviewLedger,
+  ReviewLedgerEntry,
+  ReviewStatusInput,
+  ReviewStorageOptions,
+} from './review/types.js';
+import { HistoryService } from './history/service.js';
+import type {
+  DiffHistoryOptions,
+  HistoryFileDiffResult,
+  HistoryListResult,
+  ListHistoryOptions,
+} from './history/types.js';
 
-// Read version from package.json
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
-const USER_AGENT = `olcli/${pkg.version}`;
+const USER_AGENT = `olcli/${PACKAGE_VERSION}`;
 
 const DEFAULT_BASE_URL = 'https://www.overleaf.com';
 
@@ -106,26 +149,12 @@ export interface Credentials {
   cookies: Record<string, string>;
   csrf: string;
   baseUrl?: string;
+  currentUserId?: string;
 }
 
 interface ProjectDoc {
   id: string;
   path: string;
-}
-
-interface JoinedDocument {
-  docId: string;
-  lines: string[];
-  content: string;
-  version: number;
-  ranges: any;
-  type: 'sharejs-text-ot' | 'history-ot';
-}
-
-interface ProjectSocketSession {
-  sid: string;
-  projectId: string;
-  pollUrl: () => string;
 }
 
 export interface SessionCookiePair {
@@ -137,8 +166,10 @@ export class OverleafClient {
   private cookies: Record<string, string>;
   private csrf: string;
   private baseUrl: string;
+  private currentUserId?: string;
   private verbose: boolean = false;
   private timeoutMs: number = 10000;
+  private readonly logger = new Logger();
   // Cache per-project folder trees so repeated uploads in sync/upload calls
   // don't re-fetch the tree via Socket.IO on every file.
   private folderTreeCache: Map<string, Record<string, string>> = new Map();
@@ -147,11 +178,21 @@ export class OverleafClient {
     this.cookies = credentials.cookies;
     this.csrf = credentials.csrf;
     this.baseUrl = credentials.baseUrl || DEFAULT_BASE_URL;
+    this.currentUserId = credentials.currentUserId;
   }
 
   /** Enable or disable verbose request/response logging to stderr. */
   setVerbose(v: boolean): void {
     this.verbose = v;
+    this.logger.setEnabled(v);
+  }
+
+  /**
+   * Include raw collaboration frames in verbose diagnostics. This may expose
+   * document text and should only be enabled for disposable test projects.
+   */
+  setUnsafeProtocolLogging(v: boolean): void {
+    this.logger.setUnsafeProtocolFrames(v);
   }
 
   /** Set the global HTTP request timeout in milliseconds. */
@@ -161,6 +202,10 @@ export class OverleafClient {
 
   getCookie(name: string): string | undefined {
     return this.cookies[name];
+  }
+
+  getCurrentUserId(): string | undefined {
+    return this.currentUserId;
   }
 
   getSessionCookiePair(preferredCookieName: string = 'overleaf_session2'): SessionCookiePair | undefined {
@@ -277,7 +322,8 @@ export class OverleafClient {
 
     // Update cookies if the bootstrap request added anything
     const updatedCookies = bootstrapClient.cookies;
-    return new OverleafClient({ cookies: updatedCookies, csrf, baseUrl });
+    const currentUserId = $('meta[name="ol-user_id"]').attr('content');
+    return new OverleafClient({ cookies: updatedCookies, csrf, baseUrl, currentUserId });
   }
 
   /**
@@ -360,7 +406,13 @@ export class OverleafClient {
       throw new Error('Could not find CSRF token after password login.');
     }
 
-    return new OverleafClient({ cookies: bootstrapClient.cookies, csrf: projectCsrf, baseUrl });
+    const currentUserId = $project('meta[name="ol-user_id"]').attr('content');
+    return new OverleafClient({
+      cookies: bootstrapClient.cookies,
+      csrf: projectCsrf,
+      baseUrl,
+      currentUserId,
+    });
   }
 
   private static extractCsrfToken($: cheerio.CheerioAPI): string | undefined {
@@ -424,10 +476,7 @@ export class OverleafClient {
   }
 
   private logVerbose(...args: any[]): void {
-    if (this.verbose) {
-      // eslint-disable-next-line no-console
-      console.error('[olcli]', ...args);
-    }
+    this.logger.debug('http', args.length === 1 ? args[0] : args);
   }
 
   private async httpRequest(url: string, options: {
@@ -495,12 +544,14 @@ export class OverleafClient {
             const ok = status >= 200 && status < 300;
             if (this.verbose) {
               const ct = (resHeaders['content-type'] || '') as string;
-              let snippet = '';
-              if (!ok) {
-                const text = expect === 'buffer' ? '' : (typeof body === 'string' ? body : JSON.stringify(body));
-                snippet = text ? ` body=${text.slice(0, 200).replace(/\s+/g, ' ')}` : '';
-              }
-              this.logVerbose(`${method} ${reqUrl} -> ${status} (${buffer.length}B ${ct})${snippet}`);
+              this.logVerbose({
+                method,
+                url: reqUrl,
+                status,
+                ok,
+                responseBytes: buffer.length,
+                contentType: ct,
+              });
             }
             resolve({ status, ok, headers: resHeaders, body });
           });
@@ -897,57 +948,7 @@ export class OverleafClient {
    * Decode Socket.IO 0.9 payloads. Frames may be a single packet or \ufffd-length framed packets.
    */
   private decodeSocketIoPayload(payload: string): string[] {
-    if (!payload) return [];
-    if (!payload.startsWith('\ufffd')) return [payload];
-
-    const packets: string[] = [];
-    let i = 0;
-
-    while (i < payload.length) {
-      if (payload[i] !== '\ufffd') break;
-      i += 1;
-
-      let len = '';
-      while (i < payload.length && payload[i] !== '\ufffd') {
-        len += payload[i];
-        i += 1;
-      }
-
-      if (i >= payload.length || payload[i] !== '\ufffd') break;
-      i += 1;
-
-      const packetLen = Number.parseInt(len, 10);
-      if (!Number.isFinite(packetLen) || packetLen < 0) break;
-
-      packets.push(payload.slice(i, i + packetLen));
-      i += packetLen;
-    }
-
-    return packets;
-  }
-
-  private encodeSocketIoEvent(id: number, name: string, args: any[]): string {
-    return `5:${id}+::${JSON.stringify({ name, args })}`;
-  }
-
-  private parseSocketIoAck(packet: string, id: number): any[] | null {
-    const match = packet.match(/^6:::(\d+)(.*)$/);
-    if (!match || Number.parseInt(match[1], 10) !== id) {
-      return null;
-    }
-
-    let payload = match[2] || '';
-    if (payload.startsWith('+')) {
-      payload = payload.slice(1);
-    }
-    if (!payload) return [];
-
-    const args = JSON.parse(payload);
-    return Array.isArray(args) ? args : [args];
-  }
-
-  private decodeOverleafUtf8(text: string): string {
-    return Buffer.from(text, 'binary').toString('utf-8');
+    return decodeSocketIoV09Payload(payload);
   }
 
   private generateCommentThreadId(): string {
@@ -955,32 +956,6 @@ export class OverleafClient {
     const machine = Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
     const pid = Math.floor(Math.random() * 0x7fff).toString(16).padStart(4, '0');
     return `${timestamp}${machine}${pid}000001`;
-  }
-
-  private positionToLineColumn(content: string, position: number): { line: number; column: number } {
-    const prefix = content.slice(0, position);
-    const lines = prefix.split('\n');
-    return {
-      line: lines.length,
-      column: lines[lines.length - 1].length + 1
-    };
-  }
-
-  private buildCommentContext(content: string, line: number, contextLines = 0): CommentContext | undefined {
-    if (contextLines <= 0) return undefined;
-
-    const lines = content.split('\n');
-    const lineIndex = line - 1;
-    const beforeStart = Math.max(0, lineIndex - contextLines);
-    const afterEnd = Math.min(lines.length, lineIndex + contextLines + 1);
-
-    return {
-      startLine: beforeStart + 1,
-      endLine: afterEnd,
-      before: lines.slice(beforeStart, lineIndex),
-      line: lines[lineIndex] || '',
-      after: lines.slice(lineIndex + 1, afterEnd)
-    };
   }
 
   private collectProjectDocs(projectInfo: ProjectInfo): ProjectDoc[] {
@@ -1006,176 +981,293 @@ export class OverleafClient {
     return docs;
   }
 
-  private async openProjectSocket(projectId: string): Promise<ProjectSocketSession> {
-    const handshakeUrl = `${this.baseUrl}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
-    const handshakeResponse = await this.httpRequest(handshakeUrl, {
-      headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT },
-      expect: 'text',
-      timeoutMs: 5000
-    });
-
-    if (!handshakeResponse.ok) {
-      throw new Error(`Failed to open project socket: ${handshakeResponse.status}`);
-    }
-
-    this.applySetCookieHeaders(handshakeResponse.headers['set-cookie'] as string[] | undefined);
-    const sid = (handshakeResponse.body as string).trim().split(':')[0];
-    if (!sid) {
-      throw new Error('Failed to open project socket: missing session id');
-    }
-
-    const session: ProjectSocketSession = {
-      sid,
+  /** Open a reusable real-time collaboration session for a project. */
+  async openProjectSession(projectId: string): Promise<ProjectSession> {
+    const transport = new SocketIoV09Transport({
+      baseUrl: this.baseUrl,
       projectId,
-      pollUrl: () => `${this.baseUrl}/socket.io/1/xhr-polling/${sid}?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`
-    };
-
-    for (let attempt = 0; attempt < 8; attempt++) {
-      const packets = await this.pollProjectSocket(session);
-      if (packets.some(packet => {
-        if (!packet.startsWith('5:::')) return false;
-        try {
-          return JSON.parse(packet.slice(4))?.name === 'joinProjectResponse';
-        } catch {
-          return false;
-        }
-      })) {
-        return session;
-      }
-    }
-
-    throw new Error('Project socket did not return joinProjectResponse');
-  }
-
-  private async pollProjectSocket(session: ProjectSocketSession): Promise<string[]> {
-    const response = await this.httpRequest(session.pollUrl(), {
-      headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT },
-      expect: 'text',
-      timeoutMs: 7000
-    });
-
-    if (!response.ok) {
-      throw new Error(`Socket poll failed: ${response.status}`);
-    }
-
-    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
-    const packets = this.decodeSocketIoPayload(response.body as string);
-
-    for (const packet of packets) {
-      if (packet.startsWith('2::')) {
-        const heartbeatResponse = await this.httpRequest(session.pollUrl(), {
-          method: 'POST',
-          headers: {
-            'Cookie': this.getCookieHeader(),
-            'User-Agent': USER_AGENT,
-            'Content-Type': 'text/plain;charset=UTF-8'
-          },
-          body: '2::',
-          expect: 'text',
-          timeoutMs: 5000
-        });
-        this.applySetCookieHeaders(heartbeatResponse.headers['set-cookie'] as string[] | undefined);
-      }
-    }
-
-    return packets;
-  }
-
-  private async postProjectSocketPacket(session: ProjectSocketSession, packet: string): Promise<void> {
-    const response = await this.httpRequest(session.pollUrl(), {
-      method: 'POST',
-      headers: {
+      request: (url, options) => this.httpRequest(url, options),
+      headers: () => ({
         'Cookie': this.getCookieHeader(),
         'User-Agent': USER_AGENT,
-        'Content-Type': 'text/plain;charset=UTF-8'
+      }),
+      applyResponseCookies: headers => {
+        const setCookie = headers['set-cookie'];
+        this.applySetCookieHeaders(
+          Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : undefined
+        );
       },
-      body: packet,
-      expect: 'text',
-      timeoutMs: 5000
+      onProtocolFrame: (direction, frame) => this.logger.protocol(direction, frame),
     });
-
-    if (!response.ok) {
-      throw new Error(`Socket post failed: ${response.status}`);
-    }
-
-    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+    const session = new ProjectSession(transport);
+    await session.open();
+    return session;
   }
 
-  private async socketRpc(session: ProjectSocketSession, name: string, args: any[]): Promise<any[]> {
-    const id = Math.floor(Math.random() * 0x7fffffff);
-    await this.postProjectSocketPacket(session, this.encodeSocketIoEvent(id, name, args));
-
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const packets = await this.pollProjectSocket(session);
-      for (const packet of packets) {
-        const ackArgs = this.parseSocketIoAck(packet, id);
-        if (ackArgs) {
-          const [error, ...result] = ackArgs;
-          if (error) {
-            const message = typeof error === 'string' ? error : error.message || JSON.stringify(error);
-            throw new Error(`${name} failed: ${message}`);
-          }
-          return result;
-        }
-      }
-    }
-
-    throw new Error(`${name} did not return an acknowledgement`);
-  }
-
-  private async closeProjectSocket(session: ProjectSocketSession): Promise<void> {
+  /** Inspect tracked-change support for one document without mutating the project. */
+  async getChangesCapabilities(
+    projectId: string,
+    filePath: string
+  ): Promise<ChangesCapabilities> {
+    const session = await this.openProjectSession(projectId);
     try {
-      await this.postProjectSocketPacket(session, '0::');
-    } catch {
-      // Best-effort socket cleanup only.
+      const documentSession = session.openDocumentByPath(filePath);
+      const document = await documentSession.join();
+      return detectChangesCapabilities(
+        session,
+        document,
+        documentSession.path || filePath.replace(/^\/+/, ''),
+        this.currentUserId
+      );
+    } finally {
+      await session.close();
     }
   }
 
-  private normalizeJoinedDocument(docId: string, args: any[]): JoinedDocument {
-    const [lines, version, _updates, ranges, type = 'sharejs-text-ot'] = args;
-
-    if (type === 'history-ot') {
-      const content = typeof lines?.content === 'string' ? lines.content : '';
-      return {
-        docId,
-        lines: content.split('\n'),
-        content,
-        version,
-        ranges: lines,
-        type
-      };
+  /** List native Overleaf tracked changes without modifying document state. */
+  async listTrackedChanges(
+    projectId: string,
+    options: ListTrackedChangesOptions = {}
+  ): Promise<TrackedChange[]> {
+    const contextLines = options.contextLines ?? 0;
+    if (!Number.isSafeInteger(contextLines) || contextLines < 0) {
+      throw new Error('contextLines must be a non-negative integer');
     }
 
-    const decodedLines = Array.isArray(lines)
-      ? lines.map((line: string) => this.decodeOverleafUtf8(line))
-      : [];
-    const decodedRanges = ranges || {};
-    for (const comment of decodedRanges.comments || []) {
-      if (comment?.op?.c) {
-        comment.op.c = this.decodeOverleafUtf8(comment.op.c);
+    const session = await this.openProjectSession(projectId);
+    try {
+      const documents = options.filePath
+        ? [session.findDocument(options.filePath)].filter(
+            (document): document is NonNullable<typeof document> => Boolean(document)
+          )
+        : session.listDocuments();
+
+      if (options.filePath && documents.length === 0) {
+        throw new Error(`Document not found: ${options.filePath}`);
       }
-    }
 
-    return {
-      docId,
-      lines: decodedLines,
-      content: decodedLines.join('\n'),
-      version,
-      ranges: decodedRanges,
-      type
-    };
+      const changes: TrackedChange[] = [];
+      for (const documentRef of documents) {
+        const documentSession = session.openDocument(documentRef.id, documentRef.path);
+        const document = await documentSession.join();
+        const adapter = getTrackedChangesAdapter(document.type);
+        changes.push(...adapter.listChanges(document, documentRef.path, {
+          contextLines,
+          includeRaw: options.includeRaw,
+        }));
+      }
+
+      return changes.sort(
+        (a, b) => a.path.localeCompare(b.path)
+          || a.position - b.position
+          || a.id.localeCompare(b.id)
+      );
+    } finally {
+      await session.close();
+    }
   }
 
-  private async joinDocument(session: ProjectSocketSession, docId: string): Promise<JoinedDocument> {
-    const args = await this.socketRpc(session, 'joinDoc', [
-      docId,
+  /** Inspect one tracked document without returning its source text. */
+  async inspectTrackedDocument(
+    projectId: string,
+    filePath: string
+  ): Promise<TrackedDocumentInspection> {
+    return this.createChangesService().inspectTrackedDocument(projectId, filePath);
+  }
+
+  /** Prepare a targeted native tracked suggestion without modifying Overleaf. */
+  async previewTrackedSuggestion(input: SuggestChangeInput): Promise<SuggestionPreview> {
+    return this.createChangesService().previewTrackedSuggestion(input);
+  }
+
+  /** Submit one targeted native tracked suggestion, or preview when dryRun is true. */
+  async suggestTrackedChange(
+    input: SuggestChangeInput
+  ): Promise<SuggestionPreview | SuggestionResult> {
+    const service = this.createChangesService();
+    if (input.dryRun) return service.previewTrackedSuggestion(input);
+    return service.suggestTrackedChange(input);
+  }
+
+  /** Preview an explicit tracked-change accept/reject without modifying Overleaf. */
+  async previewTrackedResolution(
+    input: ResolveChangesInput
+  ): Promise<ChangeResolutionPreview> {
+    return this.createChangesService().previewTrackedResolution(input);
+  }
+
+  /** Accept explicit tracked-change IDs, or preview when dryRun is true. */
+  async acceptTrackedChanges(
+    input: Omit<ResolveChangesInput, 'action'>
+  ): Promise<ChangeResolutionPreview | ChangeResolutionResult> {
+    const request: ResolveChangesInput = { ...input, action: 'accept' };
+    const service = this.createChangesService();
+    return input.dryRun
+      ? service.previewTrackedResolution(request)
+      : service.resolveTrackedChanges(request);
+  }
+
+  /** Reject explicit tracked-change IDs, or preview when dryRun is true. */
+  async rejectTrackedChanges(
+    input: Omit<ResolveChangesInput, 'action'>
+  ): Promise<ChangeResolutionPreview | ChangeResolutionResult> {
+    const request: ResolveChangesInput = { ...input, action: 'reject' };
+    const service = this.createChangesService();
+    return input.dryRun
+      ? service.previewTrackedResolution(request)
+      : service.resolveTrackedChanges(request);
+  }
+
+  /** Propose a tracked change for a comment and persist its review ledger entry. */
+  async addressReviewComment(
+    input: AddressReviewCommentInput
+  ): Promise<AddressReviewPreview | AddressReviewResult> {
+    return this.createReviewService(input).addressComment(input);
+  }
+
+  /** Read the local review ledger without contacting Overleaf. */
+  async getReviewStatus(input: ReviewStatusInput): Promise<ReviewLedger> {
+    return this.createReviewService(input).status(input);
+  }
+
+  /** Reconcile ledger operations against current tracked changes and comments. */
+  async reconcileReview(input: ReconcileReviewInput): Promise<ReconcileReviewResult> {
+    return this.createReviewService(input).reconcile(input);
+  }
+
+  /** Attach a verified Git commit to an existing review operation. */
+  async annotateReviewCommit(input: AnnotateReviewCommitInput): Promise<ReviewLedgerEntry> {
+    return this.createReviewService(input).annotateCommit(input);
+  }
+
+  /** Render standard Git commit trailers for an existing review operation. */
+  async getReviewCommitTrailers(
+    input: ReviewStatusInput & { operationId: string }
+  ): Promise<string[]> {
+    return this.createReviewService(input).commitTrailers(input.projectId, input.operationId);
+  }
+
+  /** List normalized Overleaf project-history updates without mutating history. */
+  async listHistory(
+    projectId: string,
+    options: ListHistoryOptions = {}
+  ): Promise<HistoryListResult> {
+    return this.createHistoryService().listHistory(projectId, options);
+  }
+
+  /** Diff one file between two Overleaf project-history versions. */
+  async diffHistory(
+    projectId: string,
+    filePath: string,
+    fromVersion: number,
+    toVersion: number,
+    options: DiffHistoryOptions = {}
+  ): Promise<HistoryFileDiffResult> {
+    return this.createHistoryService().diffFile(
+      projectId,
+      filePath,
+      fromVersion,
+      toVersion,
+      options
+    );
+  }
+
+  private createChangesService(): ChangesService {
+    return new ChangesService({
+      currentUserId: this.currentUserId,
+      openProjectSession: projectId => this.openProjectSession(projectId),
+      saveTrackChanges: (projectId, body) => this.saveTrackChanges(projectId, body),
+      acceptShareJsChanges: (projectId, docId, changeIds) =>
+        this.acceptShareJsChanges(projectId, docId, changeIds),
+    });
+  }
+
+  private createReviewService(options: ReviewStorageOptions): ReviewService {
+    return new ReviewService(this, {
+      ledgerPath: options.ledgerPath,
+      workingDirectory: options.workingDirectory,
+    });
+  }
+
+  private createHistoryService(): HistoryService {
+    return new HistoryService({
+      getHistoryJson: path => this.getHistoryJson(path),
+    });
+  }
+
+  private async getHistoryJson(path: string): Promise<unknown> {
+    const response = await this.httpRequest(new URL(path, this.baseUrl).toString(), {
+      headers: this.getHeaders(),
+      expect: 'json',
+    });
+    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+    if (!response.ok) {
+      if (response.status === 401) {
+        throw new OlcliError('SESSION_EXPIRED', 'Overleaf session expired while reading project history.');
+      }
+      if (response.status === 403) {
+        throw new OlcliError('PERMISSION_DENIED', 'Current user cannot read this project history.');
+      }
+      if (response.status === 402 || response.status === 404) {
+        throw new OlcliError(
+          'HISTORY_UNAVAILABLE',
+          'Overleaf project history is unavailable for this project or account.',
+          { details: { status: response.status } }
+        );
+      }
+      throw new OlcliError(
+        'PROTOCOL_ERROR',
+        `Failed to read Overleaf project history: HTTP ${response.status}`,
+        { details: { status: response.status } }
+      );
+    }
+    return response.body;
+  }
+
+  private async acceptShareJsChanges(
+    projectId: string,
+    docId: string,
+    changeIds: string[]
+  ): Promise<void> {
+    const response = await this.httpRequest(
+      `${this.baseUrl}/project/${projectId}/doc/${docId}/changes/accept`,
       {
-        encodeRanges: true,
-        supportsHistoryOT: true
+        method: 'POST',
+        headers: this.getHeaders(true),
+        body: JSON.stringify({ change_ids: changeIds }),
+        expect: 'text',
       }
-    ]);
+    );
+    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+    if (!response.ok) {
+      throw new OlcliError(
+        response.status === 401 || response.status === 403
+          ? 'PERMISSION_DENIED'
+          : 'MUTATION_REJECTED',
+        `Failed to accept tracked changes: HTTP ${response.status}`,
+        { details: { projectId, docId, status: response.status } }
+      );
+    }
+  }
 
-    return this.normalizeJoinedDocument(docId, args);
+  private async saveTrackChanges(
+    projectId: string,
+    body: SaveTrackChangesBody
+  ): Promise<void> {
+    const response = await this.httpRequest(`${this.baseUrl}/project/${projectId}/track_changes`, {
+      method: 'POST',
+      headers: this.getHeaders(true),
+      body: JSON.stringify(body),
+      expect: 'text',
+    });
+    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+    if (!response.ok) {
+      throw new OlcliError(
+        response.status === 401 || response.status === 403 ? 'PERMISSION_DENIED' : 'MUTATION_REJECTED',
+        `Failed to update tracked-changes state: HTTP ${response.status}`,
+        { details: { projectId, status: response.status } }
+      );
+    }
   }
 
   /**
@@ -1907,65 +1999,15 @@ export class OverleafClient {
     const docs = this.collectProjectDocs(projectInfo);
     const threads = await this.getCommentThreads(projectId);
     const comments: ProjectComment[] = [];
-    const session = await this.openProjectSocket(projectId);
+    const session = await this.openProjectSession(projectId);
 
     try {
       for (const doc of docs) {
-        const joinedDoc = await this.joinDocument(session, doc.id);
-
-        if (joinedDoc.type === 'history-ot') {
-          for (const comment of joinedDoc.ranges.comments || []) {
-            const ranges = comment.ranges || [];
-            const firstRange = ranges[0];
-            if (!firstRange) continue;
-            const selectedText = ranges
-              .map((range: any) => joinedDoc.content.slice(range.pos, range.pos + range.length))
-              .join('');
-            const location = this.positionToLineColumn(joinedDoc.content, firstRange.pos);
-            const thread = threads[comment.id] || { messages: [] };
-            const resolved = Boolean(comment.resolved || thread.resolved);
-            comments.push({
-              threadId: comment.id,
-              docId: doc.id,
-              path: doc.path,
-              position: firstRange.pos,
-              line: location.line,
-              column: location.column,
-              selectedText,
-              resolved,
-              messages: thread.messages || [],
-              context: this.buildCommentContext(joinedDoc.content, location.line, contextLines)
-            });
-          }
-          continue;
-        }
-
-        for (const comment of joinedDoc.ranges.comments || []) {
-          const op = comment.op || {};
-          const threadId = op.t || comment.id;
-          if (!threadId || typeof op.p !== 'number') continue;
-          const selectedText = typeof op.c === 'string'
-            ? op.c
-            : joinedDoc.content.slice(op.p, op.p + (op.c?.length || 0));
-          const location = this.positionToLineColumn(joinedDoc.content, op.p);
-          const thread = threads[threadId] || { messages: [] };
-          const resolved = Boolean(comment.resolved || op.resolved || thread.resolved);
-          comments.push({
-            threadId,
-            docId: doc.id,
-            path: doc.path,
-            position: op.p,
-            line: location.line,
-            column: location.column,
-            selectedText,
-            resolved,
-            messages: thread.messages || [],
-            context: this.buildCommentContext(joinedDoc.content, location.line, contextLines)
-          });
-        }
+        const joinedDoc = await session.openDocument(doc.id, doc.path).join();
+        comments.push(...parseDocumentComments(joinedDoc, doc, threads, contextLines));
       }
     } finally {
-      await this.closeProjectSocket(session);
+      await session.close();
     }
 
     return comments
@@ -2039,13 +2081,17 @@ export class OverleafClient {
     return comment;
   }
 
-  private async findComment(projectId: string, threadId: string): Promise<ProjectComment> {
+  async getComment(projectId: string, threadId: string): Promise<ProjectComment> {
     const comments = await this.listComments(projectId);
     const comment = comments.find(item => item.threadId === threadId);
     if (!comment) {
-      throw new Error(`Comment thread not found: ${threadId}`);
+      throw new OlcliError('COMMENT_NOT_FOUND', `Comment thread not found: ${threadId}`);
     }
     return comment;
+  }
+
+  private async findComment(projectId: string, threadId: string): Promise<ProjectComment> {
+    return this.getComment(projectId, threadId);
   }
 
   private resolveCommentSelection(doc: JoinedDocument, options: AddCommentOptions): { position: number; selectedText: string } {
@@ -2101,9 +2147,10 @@ export class OverleafClient {
       throw new Error(`Doc not found: ${options.filePath}`);
     }
 
-    const session = await this.openProjectSocket(projectId);
+    const session = await this.openProjectSession(projectId);
     try {
-      const joinedDoc = await this.joinDocument(session, doc.id);
+      const documentSession = session.openDocument(doc.id, doc.path);
+      const joinedDoc = await documentSession.join();
       const selection = this.resolveCommentSelection(joinedDoc, options);
       const threadId = this.generateCommentThreadId();
 
@@ -2120,13 +2167,12 @@ export class OverleafClient {
             t: threadId
           };
 
-      await this.socketRpc(session, 'applyOtUpdate', [doc.id, {
-        doc: doc.id,
-        op: [op],
-        v: joinedDoc.version
-      }]);
+      await documentSession.submit({
+        operations: [op],
+        expectedVersion: joinedDoc.version,
+      });
 
-      const location = this.positionToLineColumn(joinedDoc.content, selection.position);
+      const location = positionToLineColumn(joinedDoc.content, selection.position);
       return {
         threadId,
         docId: doc.id,
@@ -2139,7 +2185,7 @@ export class OverleafClient {
         messages: []
       };
     } finally {
-      await this.closeProjectSocket(session);
+      await session.close();
     }
   }
 

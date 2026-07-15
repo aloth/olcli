@@ -1,0 +1,28 @@
+{
+  "metadata": {
+    "schemaVersion": 1,
+    "capturedAt": "2026-07-13",
+    "instance": "overleaf-cloud",
+    "operation": "history-filetree-diff",
+    "sanitized": true
+  },
+  "response": {
+    "diff": [
+      { "pathname": "main.tex", "operation": "edited" },
+      {
+        "pathname": "renamed.tex",
+        "oldPathname": "old.tex",
+        "newPathname": "renamed.tex",
+        "operation": "renamed",
+        "editable": true
+      },
+      {
+        "pathname": "removed.bin",
+        "operation": "removed",
+        "editable": false,
+        "deletedAtV": 9
+      },
+      { "pathname": "unchanged.tex", "editable": true }
+    ]
+  }
+}

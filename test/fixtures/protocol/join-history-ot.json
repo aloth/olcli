@@ -1,0 +1,29 @@
+{
+  "metadata": {
+    "schemaVersion": 1,
+    "capturedAt": "2026-07-13",
+    "instance": "overleaf-cloud",
+    "operation": "join-document",
+    "otType": "history-ot",
+    "sanitized": true,
+    "notes": "Synthetic contract fixture; replace only with a sanitized disposable-project capture."
+  },
+  "exchange": {
+    "docId": "000000000000000000000001",
+    "acknowledgementArgs": [
+      {
+        "content": "[REDACTED_TEXT:21]",
+        "comments": [
+          {
+            "id": "000000000000000000000002",
+            "ranges": [{ "pos": 0, "length": 8 }]
+          }
+        ]
+      },
+      11,
+      [],
+      null,
+      "history-ot"
+    ]
+  }
+}

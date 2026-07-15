@@ -62,6 +62,8 @@ export const DEFAULT_IGNORE_PATTERNS: readonly string[] = Object.freeze([
   '*.swp', '*.swo', '*~', '*.bak',
   // ─── Overleaf-specific reserved ───────────────────────────────────────
   'output.pdf',                  // Overleaf compile output convention
+  '.olcli-review.json',          // local comment/change reconciliation ledger
+  '.olcli-review.json.*',        // atomic temp, lock, and corrupt backups
 ]);
 
 /**

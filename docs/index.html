@@ -3,17 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>olcli — Overleaf CLI: Sync, Compile & Manage LaTeX from Your Terminal</title>
-<meta name="description" content="Command-line interface for Overleaf. Pull, push, sync, and compile LaTeX projects from your terminal. Native git remote support. Install via Homebrew or npm.">
-<meta property="og:title" content="olcli — Overleaf CLI">
-<meta property="og:description" content="Sync, compile, and manage LaTeX projects from your terminal. Native git remote support.">
-<meta property="og:url" content="https://aloth.github.io/olcli/">
-<meta property="og:image" content="https://raw.githubusercontent.com/aloth/olcli/main/screenshots/workflow.png">
+<title>olcli — experimental tracked-review fork</title>
+<meta name="description" content="Experimental Overleaf CLI fork with native tracked changes, comments, history diffs, and preview-first MCP agent workflows.">
+<meta property="og:title" content="olcli — experimental tracked-review fork">
+<meta property="og:description" content="Native tracked-review and safe agent workflows for Overleaf.">
+<meta property="og:url" content="https://github.com/xyin-anl/olcli">
+<meta property="og:image" content="https://raw.githubusercontent.com/xyin-anl/olcli/main/screenshots/workflow.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="olcli — Overleaf CLI">
 <meta name="twitter:description" content="Sync, compile, and manage LaTeX projects from your terminal.">
-<meta name="twitter:image" content="https://raw.githubusercontent.com/aloth/olcli/main/screenshots/workflow.png">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/xyin-anl/olcli/main/screenshots/workflow.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -136,26 +136,25 @@ footer a{color:var(--muted);text-decoration:none}
 
 <section class="hero">
   <div class="hero-badges">
-    <a href="https://www.npmjs.com/package/@aloth/olcli"><img src="https://img.shields.io/npm/v/@aloth/olcli.svg" alt="npm version"></a>
-    <a href="https://www.npmjs.com/package/@aloth/olcli"><img src="https://img.shields.io/npm/dm/@aloth/olcli.svg" alt="npm downloads"></a>
-    <a href="https://github.com/aloth/olcli"><img src="https://img.shields.io/github/stars/aloth/olcli" alt="GitHub stars"></a>
+    <a href="https://github.com/xyin-anl/olcli/releases"><img src="https://img.shields.io/badge/release-local%20candidate-yellow" alt="local release candidate"></a>
+    <a href="https://github.com/xyin-anl/olcli"><img src="https://img.shields.io/badge/GitHub-xyin--anl%2Folcli-blue" alt="GitHub repository"></a>
     <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
   </div>
-  <h1>Overleaf,<br>from your <span class="accent">terminal.</span></h1>
-  <p>Pull, push, sync, and compile LaTeX projects without leaving your editor. Native git remote. MCP server for AI agents. Works with CI/CD.</p>
+  <h1>Overleaf review,<br>from your <span class="accent">agent.</span></h1>
+  <p>Experimental native tracked changes, comment workflows, history diffs, and preview-first MCP policy. Forked from aloth/olcli.</p>
 
   <div class="install-bar">
-    <div class="install-option" onclick="navigator.clipboard.writeText('brew tap aloth/tap && brew install olcli')">
+    <div class="install-option" onclick="navigator.clipboard.writeText('git clone https://github.com/xyin-anl/olcli.git')">
       <div>
-        <div class="install-label">Homebrew</div>
-        <div class="install-cmd">brew install aloth/tap/olcli</div>
+        <div class="install-label">Clone the fork</div>
+        <div class="install-cmd">git clone https://github.com/xyin-anl/olcli.git</div>
       </div>
       <div class="copy-hint">Click to copy</div>
     </div>
-    <div class="install-option" onclick="navigator.clipboard.writeText('npm install -g @aloth/olcli')">
+    <div class="install-option" onclick="navigator.clipboard.writeText('npm ci && npm run build && npm link')">
       <div>
-        <div class="install-label">npm</div>
-        <div class="install-cmd">npm install -g @aloth/olcli</div>
+        <div class="install-label">Build the checkout</div>
+        <div class="install-cmd">npm ci &amp;&amp; npm run build &amp;&amp; npm link</div>
       </div>
       <div class="copy-hint">Click to copy</div>
     </div>
@@ -308,26 +307,26 @@ footer a{color:var(--muted);text-decoration:none}
 
 <section class="cta">
   <h2>Start using olcli</h2>
-  <p>Free, open source, MIT licensed. Install in 10 seconds.</p>
+  <p>Free, open source, MIT licensed. The experimental fork is currently installed from source.</p>
   <div class="cta-buttons">
-    <a href="https://www.npmjs.com/package/@aloth/olcli" class="btn btn-primary">
-      Install via npm
+    <a href="https://github.com/xyin-anl/olcli" class="btn btn-primary">
+      Build from source
     </a>
-    <a href="https://github.com/aloth/olcli" class="btn btn-secondary">
+    <a href="https://github.com/xyin-anl/olcli" class="btn btn-secondary">
       <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
       View on GitHub
     </a>
   </div>
   <div class="docs-nav">
-    <a href="https://github.com/aloth/olcli/blob/main/README.md">📖 README</a>
-    <a href="https://github.com/aloth/olcli/blob/main/docs/GIT-REMOTE.md">🔀 Git Remote</a>
-    <a href="https://github.com/aloth/olcli/blob/main/docs/MCP.md">🤖 MCP Server</a>
-    <a href="https://www.npmjs.com/package/@aloth/olcli">📦 npm</a>
+    <a href="https://github.com/xyin-anl/olcli/blob/main/README.md">📖 README</a>
+    <a href="https://github.com/xyin-anl/olcli/blob/main/docs/PROTOCOL-COMPATIBILITY.md">🧪 Compatibility</a>
+    <a href="https://github.com/xyin-anl/olcli/blob/main/docs/MCP.md">🤖 MCP Server</a>
+    <a href="https://github.com/xyin-anl/olcli/releases">🏷️ Releases</a>
   </div>
 </section>
 
 <footer>
-  <p>MIT © <a href="https://alexloth.com">Alexander Loth</a> · <a href="https://github.com/aloth/olcli">GitHub</a></p>
+  <p>MIT · fork of <a href="https://github.com/aloth/olcli">Alexander Loth's olcli</a> · <a href="https://github.com/xyin-anl/olcli">GitHub</a></p>
 </footer>
 
 </body>

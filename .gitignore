@@ -25,6 +25,10 @@ npm-debug.log*
 # Auth files (don't commit credentials!)
 .olauth
 
+# Local review workflow state
+.olcli-review.json
+.olcli-review.json.*
+
 # Test output
 *.zip
 *.pdf

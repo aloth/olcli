@@ -1,0 +1,66 @@
+{
+  "metadata": {
+    "schemaVersion": 1,
+    "capturedAt": "2026-07-13",
+    "instance": "overleaf-cloud",
+    "operation": "history-updates",
+    "sanitized": true,
+    "notes": "Shape derived from the current official history frontend and verified against a disposable project."
+  },
+  "response": {
+    "updates": [
+      {
+        "fromV": 8,
+        "toV": 10,
+        "meta": {
+          "users": [
+            {
+              "first_name": "Synthetic",
+              "last_name": "Author",
+              "email": "author@example.invalid",
+              "id": "user-1"
+            }
+          ],
+          "start_ts": 1783900800000,
+          "end_ts": 1783900805000,
+          "origin": { "kind": "upload" }
+        },
+        "labels": [],
+        "pathnames": ["main.tex"],
+        "project_ops": []
+      },
+      {
+        "fromV": 7,
+        "toV": 8,
+        "meta": {
+          "users": [null],
+          "start_ts": 1783900700000,
+          "end_ts": 1783900700000,
+          "type": "external",
+          "source": "git-bridge"
+        },
+        "labels": [
+          {
+            "id": "label-1",
+            "comment": "Synthetic checkpoint",
+            "version": 8,
+            "user_id": "user-1",
+            "user_display_name": "Synthetic Author",
+            "created_at": "2026-07-13T00:00:00.000Z"
+          }
+        ],
+        "pathnames": [],
+        "project_ops": [
+          {
+            "rename": {
+              "pathname": "old.tex",
+              "newPathname": "renamed.tex"
+            },
+            "atV": 8
+          }
+        ]
+      }
+    ],
+    "nextBeforeTimestamp": 7
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "metadata": {
+    "schemaVersion": 1,
+    "capturedAt": "2026-07-13",
+    "instance": "overleaf-cloud",
+    "operation": "tracked-suggestion",
+    "otType": "sharejs-text-ot",
+    "sanitized": true,
+    "notes": "Synthetic protocol contract derived from a disposable-project observation."
+  },
+  "exchange": {
+    "document": {
+      "docId": "000000000000000000000001",
+      "content": "alpha old omega",
+      "lines": ["alpha old omega"],
+      "version": 3,
+      "type": "sharejs-text-ot",
+      "ranges": { "changes": [] }
+    },
+    "input": { "position": 6, "oldText": "old", "newText": "new" },
+    "options": {
+      "trackChangeSeed": "1234567890abcdef12",
+      "currentUserId": "000000000000000000000002",
+      "timestamp": "2026-07-13T00:00:00.000Z"
+    },
+    "expectedMutation": {
+      "operations": [
+        { "p": 6, "i": "new" },
+        { "p": 9, "d": "old" }
+      ],
+      "normalizedOperations": [
+        { "kind": "insert", "position": 6, "text": "new" },
+        { "kind": "delete", "position": 9, "text": "old" }
+      ],
+      "metadata": { "tc": "1234567890abcdef12" }
+    }
+  }
+}

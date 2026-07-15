@@ -10,7 +10,7 @@
  * Auth: reads session cookie from OVERLEAF_SESSION env var or .olauth file in cwd.
  *
  * Start:
- *   npx @aloth/olcli-mcp
+ *   npx --package @xyin-anl/olcli@experimental olcli-mcp
  *   node dist/mcp.js
  *   npm run mcp          # (from repo root)
  */
@@ -18,12 +18,20 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod/v3';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import AdmZip from 'adm-zip';
 
 import { OverleafClient } from './client.js';
+import { serializeError } from './errors/serialize-error.js';
+import { isExperimentalReviewEnabled } from './experimental.js';
+import { registerMcpReviewTools } from './mcp/review-tools.js';
+import {
+  parseMcpReviewMode,
+  requireMcpReviewPermission,
+} from './mcp/review-policy.js';
+import { PACKAGE_VERSION } from './version.js';
 import {
   getSessionCookie,
   getBaseUrl,
@@ -41,25 +49,10 @@ import {
  * Resolve session cookie: env var → .olauth file in cwd → stored config.
  */
 function resolveSessionCookie(): string {
-  // 1. Explicit environment variable
-  if (process.env.OVERLEAF_SESSION) {
-    return process.env.OVERLEAF_SESSION.trim();
-  }
-
-  // 2. .olauth file in current working directory
-  const olauth = join(process.cwd(), '.olauth');
-  if (existsSync(olauth)) {
-    try {
-      const raw = readFileSync(olauth, 'utf-8').trim();
-      if (raw) return raw;
-    } catch {
-      // fall through
-    }
-  }
-
-  // 3. Stored via `olcli auth` (Conf-based config)
+  // getSessionCookie implements the shared env → .olauth → global-config
+  // precedence and parses both `name=value` and value-only .olauth files.
   const stored = getSessionCookie();
-  if (stored) return stored;
+  if (stored) return stored.trim();
 
   throw new Error(
     'No Overleaf session cookie found.\n' +
@@ -103,12 +96,14 @@ async function getClient(): Promise<OverleafClient> {
 const server = new McpServer(
   {
     name: 'olcli',
-    version: '0.7.0',
+    version: PACKAGE_VERSION,
   },
   {
     capabilities: { tools: {} },
   }
 );
+const reviewMode = parseMcpReviewMode(process.env.OLCLI_MCP_REVIEW_MODE);
+const experimentalReviewEnabled = isExperimentalReviewEnabled();
 
 // ---------------------------------------------------------------------------
 // Helper: wrap async tool handlers with consistent error formatting
@@ -120,7 +115,10 @@ function wrapTool<T>(fn: () => Promise<T>): Promise<{ content: Array<{ type: 'te
       content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
     }),
     (err: unknown) => ({
-      content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({ error: serializeError(err) }, null, 2),
+      }],
       isError: true,
     })
   );
@@ -225,6 +223,7 @@ server.tool(
   },
   async ({ project_id, local_path, remote_path }) =>
     wrapTool(async () => {
+      requireMcpReviewPermission(reviewMode, 'full', 'file uploads');
       const client = await getClient();
       const absPath = resolve(local_path);
       const content = await readFile(absPath);
@@ -305,6 +304,117 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
+// Tools: native tracked changes (read-only)
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'get_changes_capabilities',
+  'Inspect native Overleaf tracked-change support for one document. This tool is read-only.',
+  {
+    project_id: z.string().describe('The Overleaf project ID'),
+    doc_path: z.string().describe('Path of the document within the project (e.g. main.tex)'),
+  },
+  async ({ project_id, doc_path }) =>
+    wrapTool(async () => {
+      const client = await getClient();
+      return client.getChangesCapabilities(project_id, doc_path);
+    })
+);
+
+server.tool(
+  'list_tracked_changes',
+  'List native Overleaf tracked changes with source locations and optional context. This tool is read-only.',
+  {
+    project_id: z.string().describe('The Overleaf project ID'),
+    doc_path: z.string().optional().describe('Optional document path; omit to inspect every document'),
+    context_lines: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .default(0)
+      .describe('Number of surrounding source lines to include'),
+  },
+  async ({ project_id, doc_path, context_lines }) =>
+    wrapTool(async () => {
+      const client = await getClient();
+      return client.listTrackedChanges(project_id, {
+        filePath: doc_path,
+        contextLines: context_lines,
+      });
+    })
+);
+
+// ---------------------------------------------------------------------------
+// Tools: Overleaf project history (read-only)
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'list_history',
+  'List normalized Overleaf project-history update groups. Versions are not Git commits or document OT versions. This tool is read-only.',
+  {
+    project_id: z.string().describe('The Overleaf project ID'),
+    limit: z.number().int().min(1).max(200).optional().default(50)
+      .describe('Maximum number of normalized update groups'),
+    before: z.number().int().nonnegative().optional()
+      .describe('Return entries older than this Overleaf project-history version'),
+    min_count: z.number().int().min(1).max(100).optional().default(10)
+      .describe('Minimum server batch size; this is not a maximum'),
+  },
+  async ({ project_id, limit, before, min_count }) =>
+    wrapTool(async () => {
+      const client = await getClient();
+      return client.listHistory(project_id, {
+        limit,
+        before,
+        minCount: min_count,
+      });
+    })
+);
+
+server.tool(
+  'diff_history',
+  'Diff one file between two Overleaf project-history versions. This tool is read-only and cannot restore history.',
+  {
+    project_id: z.string().describe('The Overleaf project ID'),
+    file_path: z.string().min(1).describe('Path of the file within the project'),
+    from_version: z.number().int().nonnegative().describe('Older Overleaf project-history version'),
+    to_version: z.number().int().positive().describe('Newer Overleaf project-history version'),
+    include_content: z.boolean().optional().default(false)
+      .describe('Include inserted/deleted text; false returns counts and metadata only'),
+    include_unchanged: z.boolean().optional().default(false)
+      .describe('Include unchanged chunks; may return most of the document'),
+  },
+  async ({
+    project_id,
+    file_path,
+    from_version,
+    to_version,
+    include_content,
+    include_unchanged,
+  }) =>
+    wrapTool(async () => {
+      const client = await getClient();
+      return client.diffHistory(
+        project_id,
+        file_path,
+        from_version,
+        to_version,
+        {
+          includeContent: include_content,
+          includeUnchanged: include_unchanged,
+        }
+      );
+    })
+);
+
+registerMcpReviewTools(server, {
+  mode: reviewMode,
+  experimentalReviewEnabled,
+  getClient,
+});
+
+// ---------------------------------------------------------------------------
 // Tool: get_entities
 // ---------------------------------------------------------------------------
 
@@ -369,6 +479,7 @@ server.tool(
   },
   async ({ project_id, doc_path, content, position, length, selected_text, line, column }) =>
     wrapTool(async () => {
+      requireMcpReviewPermission(reviewMode, 'full', 'new comments');
       const client = await getClient();
       return client.addComment(project_id, {
         filePath: doc_path,
@@ -396,6 +507,7 @@ server.tool(
   },
   async ({ project_id, thread_id, content }) =>
     wrapTool(async () => {
+      requireMcpReviewPermission(reviewMode, 'suggest', 'comment replies');
       const client = await getClient();
       const message = await client.postCommentMessage(project_id, thread_id, content);
       return { replied: true, thread_id, message };
@@ -415,6 +527,7 @@ server.tool(
   },
   async ({ project_id, thread_id }) =>
     wrapTool(async () => {
+      requireMcpReviewPermission(reviewMode, 'full', 'comment resolution');
       const client = await getClient();
       return client.resolveComment(project_id, thread_id);
     })
@@ -433,6 +546,7 @@ server.tool(
   },
   async ({ project_id, remote_path }) =>
     wrapTool(async () => {
+      requireMcpReviewPermission(reviewMode, 'full', 'entity deletion');
       const client = await getClient();
       await client.deleteByPath(project_id, remote_path);
       return { deleted: remote_path };
@@ -453,6 +567,7 @@ server.tool(
   },
   async ({ project_id, remote_path, new_name }) =>
     wrapTool(async () => {
+      requireMcpReviewPermission(reviewMode, 'full', 'entity renaming');
       const client = await getClient();
       await client.renameByPath(project_id, remote_path, new_name);
       return { old_path: remote_path, new_name };

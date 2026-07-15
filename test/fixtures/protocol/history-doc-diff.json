@@ -1,0 +1,45 @@
+{
+  "metadata": {
+    "schemaVersion": 1,
+    "capturedAt": "2026-07-13",
+    "instance": "overleaf-cloud",
+    "operation": "history-document-diff",
+    "sanitized": true
+  },
+  "response": {
+    "diff": [
+      { "u": "prefix " },
+      {
+        "d": "old",
+        "meta": {
+          "users": [
+            {
+              "first_name": "Synthetic",
+              "last_name": "Author",
+              "email": "author@example.invalid",
+              "id": "user-1"
+            }
+          ],
+          "start_ts": 1783900800000,
+          "end_ts": 1783900805000
+        }
+      },
+      {
+        "i": "new",
+        "meta": {
+          "users": [
+            {
+              "first_name": "Synthetic",
+              "last_name": "Author",
+              "email": "author@example.invalid",
+              "id": "user-1"
+            }
+          ],
+          "start_ts": 1783900800000,
+          "end_ts": 1783900805000
+        }
+      },
+      { "u": " suffix" }
+    ]
+  }
+}

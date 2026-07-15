@@ -1,14 +1,18 @@
-# olcli — Overleaf CLI
+# olcli — experimental tracked-review fork
 
 **Command-line interface for Overleaf** — Sync, manage, and compile LaTeX projects from your terminal.
 
-[![npm version](https://img.shields.io/npm/v/@aloth/olcli.svg)](https://www.npmjs.com/package/@aloth/olcli)
-[![npm downloads](https://img.shields.io/npm/dm/@aloth/olcli.svg)](https://www.npmjs.com/package/@aloth/olcli)
-[![GitHub stars](https://img.shields.io/github/stars/aloth/olcli)](https://github.com/aloth/olcli)
+[![GitHub](https://img.shields.io/badge/GitHub-xyin--anl%2Folcli-blue)](https://github.com/xyin-anl/olcli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![AgentSkills](https://img.shields.io/badge/AgentSkills-compatible-blue)](https://agentskills.io)
 
 Work with Overleaf projects directly from your command line. Edit locally with your favorite editor, version control with Git, and sync seamlessly with Overleaf's cloud compilation.
+
+> This is an experimental fork of
+> [`aloth/olcli`](https://github.com/aloth/olcli) focused on native Overleaf
+> tracked changes, comments, read-only history, and safe agent workflows. It
+> relies on undocumented services; keep Git backups and start with disposable
+> projects.
 
 <p align="center">
   <img src="screenshots/demo.gif" alt="olcli demo" width="600">
@@ -28,12 +32,16 @@ Work with Overleaf projects directly from your command line. Edit locally with y
 - 📦 **Download** individual files or full project archives
 - 📤 **Upload** files to projects
 - 💬 **Review comments** — list, add, resolve, reopen, delete, and reply to threads
+- 📝 **Native tracked review** — inspect changes and create small, preconditioned suggestions
+- 🔗 **Comment-to-change workflow** — suggest, reply, reconcile, and link Git metadata without full-file rewrites
+- 🕰️ **Read-only project history** — list native update groups and diff files between versions
 - 🗂️ **Preserve folder structure** when pushing nested files
 - ⏱️ **Configurable timeout** for slow connections
 - 🔑 **Password login** for self-hosted instances (no browser required)
 - ⚙️ **Self-hosted Overleaf/ShareLaTeX** support
 - 📊 **Output** compile artifacts (`.bbl`, `.log`, `.aux` for arXiv submissions)
 - 🤖 **MCP server** for AI assistants ([docs](docs/MCP.md))
+- 🛡️ **Preview-first MCP policy** — `read`, `suggest`, and explicit `full` mutation modes
 
 **Perfect for:**
 - Editing LaTeX in your preferred text editor (Vim, VS Code, Emacs, etc.)
@@ -43,30 +51,34 @@ Work with Overleaf projects directly from your command line. Edit locally with y
 
 ## Installation
 
-### Homebrew (macOS/Linux)
+### Current local checkout
+
+```bash
+cd /path/to/olcli
+npm ci
+npm run build
+npm link
+```
+
+Do not install upstream and the fork globally at the same time because both
+provide the `olcli`, `olcli-mcp`, and `git-remote-overleaf` executables.
+
+The fork has not been published to npm yet. After its first approved release,
+the intended installation command will be:
+
+```bash
+npm install -g @xyin-anl/olcli@experimental
+```
+
+### Upstream stable release
 
 ```bash
 brew tap aloth/tap
 brew install olcli
 ```
 
-### npm (all platforms)
-
-```bash
-npm install -g @aloth/olcli
-```
-
-Or use with `npx` without installation:
-
-```bash
-npx @aloth/olcli list
-```
-
-### For AI agents (via AgentSkills)
-
-```bash
-npx skills add aloth/olcli
-```
+The Homebrew formula installs upstream and does not include this fork's review
+features.
 
 ## Quick Start
 
@@ -116,6 +128,86 @@ git push
 
 See [Git Remote Helper docs](docs/GIT-REMOTE.md) for details.
 
+## Agent quick start
+
+Point an agent to this section and [SKILL.md](SKILL.md). The detailed MCP tool
+schemas and client configuration are in [docs/MCP.md](docs/MCP.md).
+
+### Start the local MCP server
+
+Keep the server working directory at the repository root so it can read the
+gitignored `.olauth` file:
+
+```bash
+cd /absolute/path/to/olcli
+OLCLI_EXPERIMENTAL_REVIEW=1 \
+OLCLI_MCP_REVIEW_MODE=suggest \
+node dist/mcp.js
+```
+
+Equivalent stdio MCP configuration for the current local checkout:
+
+```json
+{
+  "mcpServers": {
+    "overleaf": {
+      "command": "zsh",
+      "args": [
+        "-lc",
+        "cd /absolute/path/to/olcli && exec node dist/mcp.js"
+      ],
+      "env": {
+        "OLCLI_EXPERIMENTAL_REVIEW": "1",
+        "OLCLI_MCP_REVIEW_MODE": "suggest"
+      }
+    }
+  }
+}
+```
+
+Replace `/absolute/path/to/olcli` with this checkout's absolute path.
+
+Use `suggest` for the normal collaborator-review workflow. It permits native
+tracked suggestions and replies, while blocking accept/reject, resolution,
+uploads, renames, and deletes.
+
+### Required agent workflow
+
+For each open comment:
+
+1. Call `get_mcp_review_policy`; require `suggestTrackedChanges: true`.
+2. Call `list_comments` with `status: "open"` and
+   `include_context: true`.
+3. Call `get_changes_capabilities` for the comment's document; stop unless
+   `canSuggest` is true.
+4. Choose one small exact replacement that overlaps the selected comment
+   range. Do not rewrite or upload the whole file.
+5. Call `preview_tracked_change` with the exact `old_text` and `new_text`.
+6. Pass the preview's `version` and `textSha256` to
+   `address_review_comment` as `expected_version` and
+   `expected_text_sha256`. Use a stable UUID `operation_id`,
+   `resolution_policy: "never"`, and `dry_run: true`.
+7. Review the preview. Then repeat `address_review_comment` with the same
+   values and `dry_run: false`.
+8. Require `verified: true` and `trackChangesStateRestored: true`, compile,
+   re-list the returned change IDs, and confirm the comment reply exists.
+9. Leave acceptance, rejection, and comment resolution to collaborators unless
+   the user explicitly authorizes `full` mode.
+
+If the source version/hash changes, the match becomes ambiguous, or the
+protocol result is uncertain, stop and preview again. Never automatically
+retry a mutation with weakened preconditions. Do not use `push_file`, `push`,
+or `sync` for reviewer-facing tracked edits.
+
+Useful read-only follow-up tools are `review_status`, `reconcile_review` with
+`dry_run: true`, `list_history`, and `diff_history` with
+`include_content: false`.
+
+In explicitly authorized `full` mode, call `inspect_tracked_document` before
+previewing `accept_tracked_changes` or `reject_tracked_changes`; pass its
+`version` and `textSha256` as the required preconditions. Always use explicit
+change IDs and preview the resolution first.
+
 ## Commands
 
 All commands auto-detect the project when run from a synced directory (contains `.olcli.json`).
@@ -144,6 +236,18 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli comments resolve <id>` | Resolve a comment thread |
 | `olcli comments reopen <id>` | Reopen a resolved thread |
 | `olcli comments delete <id>` | Delete a comment thread |
+| `olcli changes doctor [project] --file <path>` | Inspect review capabilities and OT format |
+| `olcli changes list [project]` | List native tracked changes without mutating them |
+| `olcli changes suggest <file> [project]` | Preview or create one targeted native suggestion |
+| `olcli changes accept <file> <id...>` | Accept explicit IDs (`--project`, `--dry-run`) |
+| `olcli changes reject <file> <id...>` | Reject explicit IDs (`--project`, `--dry-run`) |
+| `olcli review address <thread-id> [project]` | Suggest a linked edit and reply (`--resolve never` by default) |
+| `olcli review status [project]` | Inspect the local text-free review ledger |
+| `olcli review reconcile [project]` | Classify accepted/rejected/unknown operations safely |
+| `olcli review annotate-commit <operation-id>` | Attach a verified Git commit to an operation |
+| `olcli review trailers <operation-id>` | Print standard commit trailers |
+| `olcli history list [project]` | List native project-history update groups (read-only) |
+| `olcli history diff <file> [project]` | Diff a file between native history versions (read-only) |
 | `olcli ignored [dir]` | List ignore patterns in effect |
 | `olcli config set-url <url>` | Set self-hosted base URL |
 | `olcli config set-cookie-name <name>` | Set session cookie name |
@@ -154,10 +258,89 @@ All commands auto-detect the project when run from a synced directory (contains 
 
 | Flag | Description |
 |------|-------------|
-| `--verbose` | Print HTTP requests and responses to stderr |
+| `--verbose` | Print redacted HTTP request metadata to stderr |
+| `--unsafe-protocol-logging` | Include raw collaboration frames; disposable projects only |
 | `--base-url <url>` | Override Overleaf instance URL |
 | `--cookie-name <name>` | Override session cookie name |
 | `--timeout <ms>` | Override HTTP timeout (default: 10000) |
+
+## Native tracked changes (experimental)
+
+Use the real-time collaboration path for reviewer-facing edits. A normal
+`push` uploads a file and does not create a native tracked suggestion.
+Mutation commands require `OLCLI_EXPERIMENTAL_REVIEW=1` or the global
+`--experimental-review` flag; read-only inspection and previews remain
+available without it.
+
+```bash
+# Confirm the document is supported
+olcli changes doctor "Paper" --file main.tex
+
+# Inspect existing native insertions and deletions
+olcli changes list "Paper" --file main.tex --context 2
+
+# Preview an exact, unique replacement without changing Overleaf
+olcli changes suggest main.tex "Paper" \
+  --old "A uniquely identifiable sentence." \
+  --new "A clearer, uniquely identifiable sentence." \
+  --dry-run --json
+
+# Submit and verify the native suggestion
+OLCLI_EXPERIMENTAL_REVIEW=1 olcli changes suggest main.tex "Paper" \
+  --old "A uniquely identifiable sentence." \
+  --new "A clearer, uniquely identifiable sentence." \
+  --expected-version 42 \
+  --expected-sha256 <sha256-from-preview> \
+  --json
+```
+
+The commands refuse ambiguous or stale matches, wait for collaboration
+acknowledgment, re-read the document and ranges, and restore the prior review
+mode after suggestions. Both OT formats have separate adapters; the current
+live suite validates `sharejs-text-ot`, while `history-ot` mutation is contract
+tested and reported with a doctor warning until a disposable live document is
+available. See [native tracked-change compatibility](docs/TRACKED-CHANGES.md).
+
+## Comment-to-change workflow
+
+`olcli review address` verifies that a proposed edit overlaps the selected
+comment range, creates a small native tracked suggestion, replies, and records
+only identifiers and hashes in `.olcli-review.json`. The safe default leaves
+the comment open.
+
+```bash
+olcli review address <thread-id> "Paper" \
+  --file main.tex \
+  --old "Unique original passage" \
+  --new "Unique revised passage" \
+  --reply "Proposed a tracked revision." \
+  --resolve never --dry-run --json
+
+olcli review status "Paper"
+olcli review reconcile "Paper" --dry-run --json
+```
+
+See [Comment-to-change review workflow](docs/REVIEW-WORKFLOW.md) for ledger
+privacy, recovery, resolution policy, and Git trailer details.
+
+For agents, the MCP server defaults to `OLCLI_MCP_REVIEW_MODE=read`. Set it to
+`suggest` to allow preconditioned native suggestions and comment replies while
+keeping accept/reject, resolution, uploads, renames, and deletes disabled. See
+the [MCP review mutation policy](docs/MCP.md#review-mutation-policy).
+
+## Read-only project history
+
+Inspect Overleaf's native update groups without treating them as Git commits or
+document OT versions:
+
+```bash
+olcli history list "Paper" --limit 20
+olcli history diff main.tex "Paper" --from 120 --to 135 --no-content --json
+```
+
+History restoration and replay into Git are not supported. See
+[read-only Overleaf history](docs/HISTORY.md) for pagination, privacy, binary
+files, and MCP defaults.
 
 ## Sync Behavior
 
@@ -267,18 +450,18 @@ done
 
 ## Programmatic Usage (Library API)
 
-`@aloth/olcli` exposes `OverleafClient` and all public interfaces as a library.
+`@xyin-anl/olcli` exposes `OverleafClient` and all public interfaces as a library.
 
 ### Install
 
 ```bash
-npm install @aloth/olcli
+npm install @xyin-anl/olcli@experimental
 ```
 
 ### Basic example
 
 ```ts
-import { OverleafClient } from '@aloth/olcli';
+import { OverleafClient } from '@xyin-anl/olcli';
 
 const client = await OverleafClient.fromSessionCookie(cookie);
 
@@ -290,6 +473,10 @@ const pdfBuf = await client.downloadPdf(projectId);
 await client.uploadFile(projectId, null, 'main.tex', readFileSync('main.tex'));
 
 const comments = await client.listComments(projectId, { status: 'open' });
+const history = await client.listHistory(projectId, { limit: 20 });
+const diff = await client.diffHistory(projectId, 'main.tex', 120, 135, {
+  includeContent: false,
+});
 ```
 
 ### Available exports
@@ -310,13 +497,16 @@ import {
   // Ignore utilities
   DEFAULT_IGNORE_PATTERNS, loadIgnore, shouldIgnore, buildTexSiblingSet,
   IgnoreContext, LoadIgnoreOptions,
-} from '@aloth/olcli';
+} from '@xyin-anl/olcli';
 ```
 
 ## Further Documentation
 
 - [MCP Server](docs/MCP.md) — AI assistant integration (Claude, Cursor, Windsurf)
 - [Git Remote Helper](docs/GIT-REMOTE.md) — use Overleaf as a native git remote
+- [Read-only Overleaf history](docs/HISTORY.md) — list updates and diff files safely
+- [Protocol compatibility](docs/PROTOCOL-COMPATIBILITY.md) — validated and contract-only paths
+- [Migration guide](MIGRATION.md) and [Security guidance](SECURITY.md)
 
 ## Troubleshooting
 

@@ -1,13 +1,23 @@
-name: Publish Package
+name: Publish Experimental Package
+
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type publish-experimental to continue
+        required: true
+        type: string
+
 permissions:
   id-token: write
   contents: read
+
 jobs:
   publish:
+    if: >-
+      github.repository == 'xyin-anl/olcli' &&
+      inputs.confirmation == 'publish-experimental'
+    environment: npm-release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,39 +25,14 @@ jobs:
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
-      - run: npm install -g npm@latest
-      - run: npm --version
+          cache: npm
       - run: npm ci
-      - run: npm run build --if-present
-      - run: npm test --if-present
-      - run: npm publish --access public
-
-  bump-homebrew:
-    needs: publish
-    runs-on: ubuntu-latest
-    steps:
-      - name: Wait for tarball availability
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run verify
+      - run: npm pack --dry-run
+      - name: Verify fork package identity
         run: |
-          for i in $(seq 1 10); do
-            STATUS=$(curl -sI "https://github.com/aloth/olcli/archive/refs/tags/${{ github.ref_name }}.tar.gz" -o /dev/null -w '%{http_code}')
-            if [ "$STATUS" = "200" ] || [ "$STATUS" = "302" ]; then
-              echo "Tarball ready (HTTP $STATUS)"
-              exit 0
-            fi
-            echo "Attempt $i: HTTP $STATUS, waiting 5s..."
-            sleep 5
-          done
-          echo "Tarball not available after 50s"
-          exit 1
-      - name: Bump Homebrew formula
-        uses: mislav/bump-homebrew-formula-action@v3.6
-        with:
-          formula-name: olcli
-          homebrew-tap: aloth/homebrew-tap
-          tag-name: ${{ github.ref_name }}
-          download-url: https://github.com/aloth/olcli/archive/refs/tags/${{ github.ref_name }}.tar.gz
-          create-pullrequest: false
-          commit-message: |
-            olcli: bump to {{version}}
-        env:
-          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          test "$(node -p "require('./package.json').name")" = "@xyin-anl/olcli"
+          test "$(node -p "require('./package.json').publishConfig.tag")" = "experimental"
+          node -e "if (!require('./package.json').version.includes('-experimental.')) process.exit(1)"
+      - run: npm publish

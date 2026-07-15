@@ -11,8 +11,14 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { OverleafClient } from './client.js';
+import type { ChangeResolutionResult } from './changes/types.js';
+import { serializeError } from './errors/serialize-error.js';
+import {
+  isExperimentalReviewEnabled,
+  requireExperimentalReview,
+} from './experimental.js';
+import { PACKAGE_VERSION } from './version.js';
 import {
   loadIgnore,
   shouldIgnore,
@@ -21,10 +27,6 @@ import {
   type IgnoreContext,
 } from './ignore.js';
 
-// Read version from package.json
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
-const VERSION = pkg.version;
 import {
   getSessionCookie,
   setSessionCookie,
@@ -46,14 +48,34 @@ import {
 
 const program = new Command();
 
+function failCommand(
+  spinner: ReturnType<typeof ora>,
+  error: unknown,
+  json: boolean
+): never {
+  if (json) {
+    spinner.stop();
+    console.error(JSON.stringify({ error: serializeError(error) }, null, 2));
+  } else {
+    const message = error instanceof Error ? error.message : String(error);
+    spinner.fail(`Failed: ${message}`);
+  }
+  process.exit(1);
+}
+
 program
   .name('olcli')
   .description('Overleaf CLI - interact with Overleaf projects from the command line')
-  .version(VERSION)
+  .version(PACKAGE_VERSION)
   .option('--base-url <url>', 'Overleaf instance base URL (overrides OVERLEAF_BASE_URL and config)')
   .option('--cookie-name <name>', 'Session cookie name (default: overleaf_session2, use overleaf.sid for older instances)')
   .option('--timeout <ms>', 'HTTP request timeout in milliseconds', parseInt)
-  .option('--verbose', 'Print every HTTP request, status, and error response body to stderr');
+  .option('--verbose', 'Print redacted HTTP request metadata to stderr')
+  .option('--experimental-review', 'Enable experimental tracked-review mutations')
+  .option(
+    '--unsafe-protocol-logging',
+    'Include raw collaboration frames in diagnostics (may expose document text; disposable projects only)'
+  );
 
 /**
  * Helper to get authenticated client
@@ -67,7 +89,8 @@ async function getClient(cookieOpt?: string, baseUrlOpt?: string): Promise<Overl
   if (cookie) {
     try {
       const client = await OverleafClient.fromSessionCookie(cookie, baseUrl, cookieName);
-      if (program.opts().verbose) client.setVerbose(true);
+      if (program.opts().verbose || program.opts().unsafeProtocolLogging) client.setVerbose(true);
+      if (program.opts().unsafeProtocolLogging) client.setUnsafeProtocolLogging(true);
       const timeout = (program.opts().timeout as number | undefined) || getTimeout();
       client.setGlobalTimeout(timeout);
       return client;
@@ -95,7 +118,8 @@ async function loginWithSavedPassword(
 ): Promise<OverleafClient> {
   const client = await OverleafClient.fromPasswordLogin(credentials.email, credentials.password, baseUrl);
   persistClientSession(client, cookieName);
-  if (program.opts().verbose) client.setVerbose(true);
+  if (program.opts().verbose || program.opts().unsafeProtocolLogging) client.setVerbose(true);
+  if (program.opts().unsafeProtocolLogging) client.setUnsafeProtocolLogging(true);
   const timeout = (program.opts().timeout as number | undefined) || getTimeout();
   client.setGlobalTimeout(timeout);
   return client;
@@ -574,6 +598,587 @@ commentsCmd
     } catch (error: any) {
       spinner.fail(`Failed: ${error.message}`);
       process.exit(1);
+    }
+  });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TRACKED-CHANGE COMMANDS
+// ─────────────────────────────────────────────────────────────────────────────
+
+const changesCmd = program
+  .command('changes')
+  .description('Inspect and create native Overleaf tracked changes');
+
+changesCmd
+  .command('doctor [project]')
+  .description('Inspect tracked-change capabilities for a document')
+  .requiredOption('--file <path>', 'Document path to inspect')
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (project, options) => {
+    const spinner = ora('Inspecting tracked-change capabilities...');
+    if (!options.json) spinner.start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      const capabilities = await client.getChangesCapabilities(proj.id, options.file);
+      spinner.stop();
+
+      if (options.json) {
+        console.log(JSON.stringify(capabilities, null, 2));
+        return;
+      }
+
+      const supported = capabilities.canList ? chalk.green('supported') : chalk.red('unsupported');
+      console.log(chalk.bold(`${capabilities.path}: ${supported}`));
+      console.log(`  Document ID: ${chalk.cyan(capabilities.docId)}`);
+      console.log(`  OT type: ${capabilities.otType}`);
+      console.log(`  Permission: ${capabilities.permissionsLevel}`);
+      console.log(`  Track changes feature: ${capabilities.featureAvailable ? 'available' : 'unavailable'}`);
+      console.log(`  Current-user state: ${String(capabilities.trackChangesEnabledForCurrentUser)}`);
+      console.log(`  Actions: list=${capabilities.canList} suggest=${capabilities.canSuggest} accept=${capabilities.canAccept} reject=${capabilities.canReject}`);
+      if (capabilities.reasons.length > 0) {
+        console.log(chalk.yellow('  Notes:'));
+        for (const reason of capabilities.reasons) console.log(`    - ${reason}`);
+      }
+      setLastProject(proj.id);
+    } catch (error: unknown) {
+      failCommand(spinner, error, Boolean(options.json));
+    }
+  });
+
+changesCmd
+  .command('list [project]')
+  .description('List native Overleaf tracked changes without modifying them')
+  .option('--file <path>', 'Limit results to one document')
+  .option('--context <n>', 'Include N lines of source context', parseInt)
+  .option('--unsafe-raw', 'Include undocumented raw range data (may expose document text)')
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (project, options) => {
+    const spinner = ora('Fetching tracked changes...');
+    if (!options.json) spinner.start();
+    try {
+      const contextLines = options.context == null ? 0 : options.context;
+      if (!Number.isInteger(contextLines) || contextLines < 0) {
+        throw new Error('--context must be a non-negative integer');
+      }
+
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      const changes = await client.listTrackedChanges(proj.id, {
+        filePath: options.file,
+        contextLines,
+        includeRaw: Boolean(options.unsafeRaw),
+      });
+      spinner.stop();
+
+      if (options.json) {
+        console.log(JSON.stringify(changes, null, 2));
+        return;
+      }
+      if (changes.length === 0) {
+        console.log(chalk.yellow('No tracked changes found'));
+        return;
+      }
+
+      console.log(chalk.bold(`Found ${changes.length} tracked change(s):\n`));
+      for (const change of changes) {
+        const kind = change.kind === 'insert' ? chalk.green('insert') : chalk.red('delete');
+        console.log(`${chalk.cyan(change.id)} ${kind}`);
+        console.log(`  ${change.path}:${change.line}:${change.column} (${change.otType})`);
+        console.log(`  ${chalk.dim('Text:')} ${change.text.replace(/\s+/g, ' ').trim()}`);
+        if (change.authorId) console.log(`  ${chalk.dim('Author ID:')} ${change.authorId}`);
+        if (change.timestamp) console.log(`  ${chalk.dim('Timestamp:')} ${change.timestamp}`);
+        printCommentContext(change);
+        console.log();
+      }
+      setLastProject(proj.id);
+    } catch (error: unknown) {
+      failCommand(spinner, error, Boolean(options.json));
+    }
+  });
+
+changesCmd
+  .command('suggest <file> [project]')
+  .description('Create one targeted native tracked replacement')
+  .requiredOption('--old <text>', 'Exact existing source text (empty only for an insertion)')
+  .requiredOption('--new <text>', 'Proposed replacement text (empty for a deletion)')
+  .option('--occurrence <n>', 'Use the nth match when --old is not unique', parseInt)
+  .option('--position <n>', 'Zero-based source offset (required for an empty --old)', parseInt)
+  .option('--line <n>', 'One-based line number', parseInt)
+  .option('--column <n>', 'One-based column number', parseInt)
+  .option('--expected-version <n>', 'Refuse unless the current document version matches', parseInt)
+  .option('--expected-sha256 <hash>', 'Refuse unless the current source SHA-256 matches')
+  .option('--dry-run', 'Preview the exact targeted operation without modifying Overleaf')
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (file, project, options) => {
+    const spinner = ora(options.dryRun ? 'Preparing suggestion preview...' : 'Submitting tracked suggestion...');
+    if (!options.json) spinner.start();
+    try {
+      if (!options.dryRun) {
+        requireExperimentalReview(
+          Boolean(program.opts().experimentalReview) || isExperimentalReviewEnabled(),
+          'tracked-change suggestions'
+        );
+      }
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      const suggestion = await client.suggestTrackedChange({
+        projectId: proj.id,
+        filePath: file,
+        oldText: options.old,
+        newText: options.new,
+        occurrence: options.occurrence,
+        position: options.position,
+        line: options.line,
+        column: options.column,
+        precondition: {
+          expectedVersion: options.expectedVersion,
+          expectedTextSha256: options.expectedSha256,
+        },
+        dryRun: Boolean(options.dryRun),
+      });
+      spinner.stop();
+
+      if (options.json) {
+        console.log(JSON.stringify(suggestion, null, 2));
+        return;
+      }
+
+      const isResult = 'changeIds' in suggestion;
+      console.log(chalk.bold(options.dryRun ? 'Suggestion preview' : 'Tracked suggestion created'));
+      console.log(`  ${suggestion.path}:${suggestion.line}:${suggestion.column}`);
+      console.log(`  OT type: ${suggestion.otType}`);
+      console.log(`  Version: ${suggestion.version}`);
+      console.log(`  Operations: ${suggestion.operations.map(operation => operation.kind).join(', ')}`);
+      console.log(`  Expected result SHA-256: ${suggestion.expectedResultSha256}`);
+      if (isResult) {
+        console.log(`  Change IDs: ${suggestion.changeIds.join(', ')}`);
+        console.log(`  Verified: ${suggestion.verified}`);
+        console.log(`  State restored: ${suggestion.trackChangesStateRestored}`);
+      }
+      setLastProject(proj.id);
+    } catch (error: unknown) {
+      failCommand(spinner, error, Boolean(options.json));
+    }
+  });
+
+function registerChangeResolutionCommand(action: 'accept' | 'reject'): void {
+  const title = action === 'accept' ? 'Accept' : 'Reject';
+  changesCmd
+    .command(`${action} <file> <changeIds...>`)
+    .description(`${title} explicit native tracked-change IDs`)
+    .option('-p, --project <project>', 'Project ID or name (defaults to the current project)')
+    .option('--expected-version <n>', 'Refuse unless the current document version matches', parseInt)
+    .option('--expected-sha256 <hash>', 'Refuse unless the current visible source SHA-256 matches')
+    .option('--dry-run', 'Preview the exact resolution without modifying Overleaf')
+    .option('--json', 'Output as JSON')
+    .option('--cookie <session>', 'Session cookie override')
+    .action(async (file, changeIds, options) => {
+      const spinner = ora(options.dryRun
+        ? `Preparing ${action} preview...`
+        : `${title}ing tracked changes...`);
+      if (!options.json) spinner.start();
+      try {
+        if (!options.dryRun) {
+          requireExperimentalReview(
+            Boolean(program.opts().experimentalReview) || isExperimentalReviewEnabled(),
+            `${action}ing tracked changes`
+          );
+        }
+        const client = await getClient(options.cookie);
+        const proj = await resolveProject(client, options.project);
+        const input = {
+          projectId: proj.id,
+          filePath: file,
+          changeIds,
+          precondition: {
+            expectedVersion: options.expectedVersion,
+            expectedTextSha256: options.expectedSha256,
+          },
+          dryRun: Boolean(options.dryRun),
+        };
+        const resolution = action === 'accept'
+          ? await client.acceptTrackedChanges(input)
+          : await client.rejectTrackedChanges(input);
+        spinner.stop();
+
+        if (options.json) {
+          console.log(JSON.stringify(resolution, null, 2));
+          return;
+        }
+
+        const result = 'remainingChangeIds' in resolution
+          ? resolution as ChangeResolutionResult
+          : undefined;
+        console.log(chalk.bold(options.dryRun
+          ? `${title} preview`
+          : `Tracked changes ${action}ed`));
+        console.log(`  ${resolution.path} (${resolution.otType})`);
+        console.log(`  Version: ${resolution.version}`);
+        console.log(`  Change IDs: ${resolution.changeIds.join(', ')}`);
+        console.log(`  Transport: ${resolution.transport}`);
+        console.log(`  Expected result SHA-256: ${resolution.expectedResultSha256}`);
+        if (result) {
+          console.log(`  After version: ${result.afterVersion}`);
+          console.log(`  Verified: ${result.verified}`);
+          console.log(`  Remaining changes: ${result.remainingChangeIds.length}`);
+        }
+        setLastProject(proj.id);
+      } catch (error: unknown) {
+        failCommand(spinner, error, Boolean(options.json));
+      }
+    });
+}
+
+registerChangeResolutionCommand('accept');
+registerChangeResolutionCommand('reject');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMMENT-TO-CHANGE REVIEW WORKFLOW
+// ─────────────────────────────────────────────────────────────────────────────
+
+const reviewCmd = program
+  .command('review')
+  .description('Connect comments, tracked suggestions, and a local review ledger');
+
+reviewCmd
+  .command('address <threadId> [project]')
+  .description('Create a tracked suggestion for one comment and reply to its thread')
+  .requiredOption('--file <path>', 'Document containing the comment')
+  .requiredOption('--old <text>', 'Exact existing source text')
+  .requiredOption('--new <text>', 'Proposed replacement text')
+  .option('--occurrence <n>', 'Use the nth match when --old is not unique', parseInt)
+  .option('--position <n>', 'Zero-based source offset for an insertion', parseInt)
+  .option('--line <n>', 'One-based line number', parseInt)
+  .option('--column <n>', 'One-based column number', parseInt)
+  .option('--expected-version <n>', 'Refuse unless the current document version matches', parseInt)
+  .option('--expected-sha256 <hash>', 'Refuse unless the current source SHA-256 matches')
+  .option('--reply <message>', 'Reply text (default: concise generated summary)')
+  .option('--resolve <policy>', 'Resolution policy: never, after-suggest, or after-accept', 'never')
+  .option('--operation-id <uuid>', 'Stable operation ID for a safe retry')
+  .option('--allow-unrelated', 'Allow an edit outside the comment selection')
+  .option('--ledger <path>', 'Review ledger path (default: .olcli-review.json)')
+  .option('--dry-run', 'Preview without writing the ledger or mutating Overleaf')
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (threadId, project, options) => {
+    const spinner = ora(options.dryRun
+      ? 'Preparing review workflow preview...'
+      : 'Addressing review comment...');
+    if (!options.json) spinner.start();
+    try {
+      if (!options.dryRun) {
+        requireExperimentalReview(
+          Boolean(program.opts().experimentalReview) || isExperimentalReviewEnabled(),
+          'comment-linked tracked suggestions'
+        );
+      }
+      const resolutionPolicy = String(options.resolve || 'never');
+      if (!['never', 'after-suggest', 'after-accept'].includes(resolutionPolicy)) {
+        throw new Error('--resolve must be one of: never, after-suggest, after-accept');
+      }
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      const outcome = await client.addressReviewComment({
+        projectId: proj.id,
+        threadId,
+        filePath: options.file,
+        oldText: options.old,
+        newText: options.new,
+        occurrence: options.occurrence,
+        position: options.position,
+        line: options.line,
+        column: options.column,
+        precondition: {
+          expectedVersion: options.expectedVersion,
+          expectedTextSha256: options.expectedSha256,
+        },
+        reply: options.reply,
+        resolutionPolicy: resolutionPolicy as 'never' | 'after-suggest' | 'after-accept',
+        operationId: options.operationId,
+        allowUnrelated: Boolean(options.allowUnrelated),
+        ledgerPath: options.ledger,
+        workingDirectory: process.cwd(),
+        dryRun: Boolean(options.dryRun),
+      });
+      spinner.stop();
+
+      if (options.json) {
+        console.log(JSON.stringify(outcome, null, 2));
+        return;
+      }
+      if ('suggestion' in outcome && !('entry' in outcome)) {
+        console.log(chalk.bold('Review workflow preview'));
+        console.log(`  Operation: ${outcome.operationId}`);
+        console.log(`  Thread: ${outcome.threadId}`);
+        console.log(`  Document: ${outcome.path}`);
+        console.log(`  Source version: ${outcome.suggestion.version}`);
+        console.log(`  Related to comment: ${outcome.relatedToComment}`);
+        console.log(`  Resolution policy: ${outcome.resolutionPolicy}`);
+      } else {
+        console.log(chalk.bold('Review comment addressed'));
+        console.log(`  Operation: ${outcome.operationId}`);
+        console.log(`  State: ${outcome.entry.state}`);
+        console.log(`  Changes: ${outcome.entry.changeIds.join(', ')}`);
+        console.log(`  Reply: ${outcome.entry.replyStatus}`);
+        console.log(`  Comment resolved: ${Boolean(outcome.entry.commentResolvedAt)}`);
+        console.log(`  Resumed: ${outcome.resumed}`);
+      }
+      setLastProject(proj.id);
+    } catch (error: unknown) {
+      failCommand(spinner, error, Boolean(options.json));
+    }
+  });
+
+reviewCmd
+  .command('status [project]')
+  .description('Show durable local review operations')
+  .option('--ledger <path>', 'Review ledger path (default: .olcli-review.json)')
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (project, options) => {
+    const spinner = ora('Reading review ledger...');
+    if (!options.json) spinner.start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      const ledger = await client.getReviewStatus({
+        projectId: proj.id,
+        ledgerPath: options.ledger,
+        workingDirectory: process.cwd(),
+      });
+      spinner.stop();
+      if (options.json) {
+        console.log(JSON.stringify(ledger, null, 2));
+        return;
+      }
+      if (ledger.entries.length === 0) {
+        console.log(chalk.yellow('No review operations recorded'));
+        return;
+      }
+      for (const entry of ledger.entries) {
+        console.log(`${chalk.cyan(entry.operationId)} ${entry.state}`);
+        console.log(`  Thread: ${entry.threadId}`);
+        console.log(`  Document: ${entry.path}`);
+        console.log(`  Changes: ${entry.changeIds.length}`);
+        console.log(`  Reply: ${entry.replyStatus}`);
+        console.log(`  Policy: ${entry.resolutionPolicy}`);
+      }
+    } catch (error: unknown) {
+      failCommand(spinner, error, Boolean(options.json));
+    }
+  });
+
+reviewCmd
+  .command('reconcile [project]')
+  .description('Reconcile ledger entries with current Overleaf review state')
+  .option('--operation <uuid...>', 'Limit reconciliation to explicit operation IDs')
+  .option('--ledger <path>', 'Review ledger path (default: .olcli-review.json)')
+  .option('--dry-run', 'Preview classifications and comment resolutions')
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (project, options) => {
+    const spinner = ora(options.dryRun ? 'Previewing reconciliation...' : 'Reconciling reviews...');
+    if (!options.json) spinner.start();
+    try {
+      if (!options.dryRun) {
+        requireExperimentalReview(
+          Boolean(program.opts().experimentalReview) || isExperimentalReviewEnabled(),
+          'review reconciliation writes'
+        );
+      }
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      const result = await client.reconcileReview({
+        projectId: proj.id,
+        operationIds: options.operation,
+        ledgerPath: options.ledger,
+        workingDirectory: process.cwd(),
+        dryRun: Boolean(options.dryRun),
+      });
+      spinner.stop();
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      if (result.items.length === 0) {
+        console.log(chalk.yellow('No review operations selected'));
+        return;
+      }
+      for (const item of result.items) {
+        console.log(`${chalk.cyan(item.operationId)} ${item.previousState} → ${item.state}`);
+        console.log(`  Active changes: ${item.activeChangeIds.length}`);
+        console.log(`  Comment resolved: ${item.commentResolved}`);
+        if (item.commentResolutionPlanned) console.log('  Comment resolution: planned');
+      }
+      setLastProject(proj.id);
+    } catch (error: unknown) {
+      failCommand(spinner, error, Boolean(options.json));
+    }
+  });
+
+reviewCmd
+  .command('annotate-commit <operationId> [project]')
+  .description('Record a verified Git commit on a review ledger entry')
+  .option('--commit <ref>', 'Git ref to record (default: HEAD)')
+  .option('--ledger <path>', 'Review ledger path (default: .olcli-review.json)')
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (operationId, project, options) => {
+    const spinner = ora('Annotating review operation...');
+    if (!options.json) spinner.start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      const entry = await client.annotateReviewCommit({
+        projectId: proj.id,
+        operationId,
+        commit: options.commit,
+        ledgerPath: options.ledger,
+        workingDirectory: process.cwd(),
+      });
+      spinner.stop();
+      if (options.json) console.log(JSON.stringify(entry, null, 2));
+      else console.log(`Recorded Git commit ${chalk.cyan(entry.gitCommit)} for ${entry.operationId}`);
+    } catch (error: unknown) {
+      failCommand(spinner, error, Boolean(options.json));
+    }
+  });
+
+reviewCmd
+  .command('trailers <operationId> [project]')
+  .description('Print Git commit trailers for a review operation')
+  .option('--ledger <path>', 'Review ledger path (default: .olcli-review.json)')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (operationId, project, options) => {
+    const spinner = ora('Reading review metadata...').start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      const trailers = await client.getReviewCommitTrailers({
+        projectId: proj.id,
+        operationId,
+        ledgerPath: options.ledger,
+        workingDirectory: process.cwd(),
+      });
+      spinner.stop();
+      console.log(trailers.join('\n'));
+    } catch (error: unknown) {
+      failCommand(spinner, error, false);
+    }
+  });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// READ-ONLY PROJECT HISTORY
+// ─────────────────────────────────────────────────────────────────────────────
+
+const historyCmd = program
+  .command('history')
+  .description('Inspect Overleaf project history without restoring or mutating it');
+
+historyCmd
+  .command('list [project]')
+  .description('List normalized Overleaf project-history update groups')
+  .option('-n, --limit <n>', 'Maximum entries to return (1-200)', value => parseInt(value, 10))
+  .option('--before <version>', 'Return entries older than this project-history version', parseInt)
+  .option('--min-count <n>', 'Minimum batch requested from Overleaf (1-100)', value => parseInt(value, 10))
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (project, options) => {
+    const spinner = ora('Fetching Overleaf project history...');
+    if (!options.json) spinner.start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      const result = await client.listHistory(proj.id, {
+        limit: options.limit,
+        before: options.before,
+        minCount: options.minCount,
+      });
+      spinner.stop();
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      console.log(chalk.dim('Versions below are Overleaf project-history versions, not Git commits or document OT versions.'));
+      if (result.entries.length === 0) {
+        console.log(chalk.yellow('No history entries found'));
+        return;
+      }
+      for (const entry of result.entries) {
+        const authors = entry.authors.map(author => author.name).join(', ') || 'Unknown';
+        console.log(chalk.bold(`${entry.fromVersion} → ${entry.toVersion}`));
+        console.log(`  ${entry.endedAt} · ${authors}`);
+        if (entry.pathnames.length > 0) console.log(`  Edited: ${entry.pathnames.join(', ')}`);
+        for (const operation of entry.projectOperations) {
+          const destination = operation.newPath ? ` → ${operation.newPath}` : '';
+          console.log(`  ${operation.kind}: ${operation.path}${destination}`);
+        }
+        for (const label of entry.labels) console.log(`  Label: ${label.comment}`);
+        if (entry.origin) console.log(`  Origin: ${entry.origin.kind}`);
+      }
+      if (result.nextBefore !== undefined) {
+        console.log(chalk.dim(`More history: rerun with --before ${result.nextBefore}`));
+      }
+      setLastProject(proj.id);
+    } catch (error: unknown) {
+      failCommand(spinner, error, Boolean(options.json));
+    }
+  });
+
+historyCmd
+  .command('diff <file> [project]')
+  .description('Diff one file between two Overleaf project-history versions')
+  .requiredOption('--from <version>', 'Older project-history version', parseInt)
+  .requiredOption('--to <version>', 'Newer project-history version', parseInt)
+  .option('--no-content', 'Omit chunk text and return metadata/counts only')
+  .option('--include-unchanged', 'Include unchanged chunks (may return most of the document)')
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (file, project, options) => {
+    const spinner = ora('Fetching read-only history diff...');
+    if (!options.json) spinner.start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+      const result = await client.diffHistory(
+        proj.id,
+        file,
+        options.from,
+        options.to,
+        {
+          includeContent: options.content !== false,
+          includeUnchanged: Boolean(options.includeUnchanged),
+        }
+      );
+      spinner.stop();
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      console.log(chalk.dim('Versions below are Overleaf project-history versions, not Git commits or document OT versions.'));
+      console.log(chalk.bold(`${result.path}: ${result.fromVersion} → ${result.toVersion}`));
+      console.log(`  File operation: ${result.file.operation}`);
+      if (result.binary) {
+        console.log(chalk.yellow('  Binary file: textual diff is unavailable.'));
+        return;
+      }
+      console.log(`  +${result.stats.insertedCharacters} -${result.stats.deletedCharacters} unchanged=${result.stats.unchangedCharacters}`);
+      for (const chunk of result.chunks) {
+        const marker = chunk.kind === 'insert' ? '+' : chunk.kind === 'delete' ? '-' : ' ';
+        const header = `${marker} ${chunk.kind} ${chunk.length} chars at diff offset ${chunk.offset}`;
+        console.log(chunk.kind === 'insert' ? chalk.green(header) : chunk.kind === 'delete' ? chalk.red(header) : chalk.dim(header));
+        if (chunk.text !== undefined) {
+          for (const line of chunk.text.split('\n')) console.log(`${marker} ${line}`);
+        }
+      }
+      if (result.chunks.length === 0) console.log(chalk.dim('  No changed text chunks.'));
+      setLastProject(proj.id);
+    } catch (error: unknown) {
+      failCommand(spinner, error, Boolean(options.json));
     }
   });
 
@@ -1588,7 +2193,7 @@ program
     const cookie = getSessionCookie();
     if (cookie) {
       console.log(chalk.green('✓ Session cookie found'));
-      console.log(chalk.dim(`  Value: ${cookie.substring(0, 20)}...`));
+      console.log(chalk.dim('  Value is intentionally not displayed'));
     } else {
       console.log(chalk.yellow('✗ No session cookie found'));
     }

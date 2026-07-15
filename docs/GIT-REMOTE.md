@@ -69,6 +69,9 @@ GIT_REMOTE_OVERLEAF_DEBUG=1 git push origin main
 
 ## Limitations
 
-- Overleaf has no native revision history exposed via API, so each clone creates a single "Import from Overleaf" commit (no history replay).
+- Clone and fetch intentionally import the current Overleaf snapshot as one
+  "Import from Overleaf" commit. The separate read-only history commands can
+  inspect native update groups and file diffs, but they do not replay them as
+  Git commits.
 - Concurrent edits on Overleaf between your fetch and push may cause conflicts — push uploads your version of changed files.
 - Binary files are supported but large files may be slow (uploaded individually via the Overleaf API).
