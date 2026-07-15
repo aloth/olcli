@@ -124,7 +124,7 @@ credentials, real project identifiers, collaborator emails, or manuscript text.
 ## Release-candidate audit — 2026-07-15
 
 - A clean `npm ci` passed on Node.js `v25.9.0` and npm `11.12.1`.
-- `npm run verify` passed typecheck, build, 21 test files, and all 89 unit and
+- `npm run verify` passed typecheck, build, 22 test files, and all 95 unit and
   protocol-contract tests.
 - `npm audit --omit=dev --audit-level=high` reported zero vulnerabilities.
 - `npm pack --dry-run` contained only the intended binaries, declarations,
@@ -138,6 +138,29 @@ credentials, real project identifiers, collaborator emails, or manuscript text.
 - A temporary npm installation exposed all three declared binaries, and its
   `git-remote-overleaf` helper completed a read-only clone of the disposable
   project into a temporary Git repository.
-- No push, sync, delete, rename, or full-file upload was issued during this
-  audit. Those compatibility checks remain intentionally deferred because the
-  available disposable project contains review state.
+- A second disposable project with no collaborator content or review state was
+  created specifically for legacy mutation coverage. Its `main.tex` also uses
+  `sharejs-text-ot`; creating a new Cloud project therefore did not provide a
+  live `history-ot` document.
+- The complete legacy E2E suite passed 70/70 from a fresh packed-package
+  installation, with zero cleanup failures. Coverage included upload/download,
+  ZIP, compilation, PDF and output artifacts, pull, push/dry-run/stale-root
+  recovery, bidirectional sync, deletion propagation and `--no-delete`, rename,
+  delete, error handling, and Git-remote clone/push/delete.
+- The first mutation run exposed that an absolute local upload path was being
+  recreated as remote folders. Upload defaults now preserve safe relative
+  subfolders but reduce absolute or parent-traversing paths to their basename;
+  six unit cases and the clean 70/70 rerun verify the behavior.
+- The E2E harness now propagates a local `.olauth` cookie to subprocesses that
+  intentionally change directories, requires an explicit mutation gate, and
+  deletes or independently verifies every synthetic remote artifact in its
+  exit trap.
+- A separate gated live probe created synthetic comments before, around, and
+  after a targeted replacement. A second collaboration write invalidated the
+  prepared version/hash and the stale mutation failed with `VERSION_CONFLICT`;
+  after a fresh tracked replacement and its rejection, all three comment
+  threads retained the expected file, ordering, and selected text. The probe
+  deleted every comment, suggestion, and fixture afterward.
+- A simultaneous Chrome-tab rerun remains unavailable because the local Chrome
+  control plugin fails during initialization. The live protocol-level
+  concurrency test is green, but the browser-specific checkbox stays open.

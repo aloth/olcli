@@ -19,8 +19,19 @@ All notable changes to this project will be documented in this file.
   modes, structured mutation preconditions, and stable errors.
 - Unit, protocol-contract, fake-MCP integration, and disposable live E2E test
   coverage.
+- Gated live coverage for stale-version refusal and comment anchors before,
+  inside, and after a targeted tracked edit.
 - Agent-ready README and `SKILL.md` instructions for the preconditioned
   comment-to-suggestion workflow.
+
+### Fixed
+
+- Absolute local upload paths now create a basename at the project root instead
+  of reproducing host temporary directories remotely; safe relative nested
+  paths remain nested.
+- The legacy E2E harness carries local `.olauth` credentials into commands that
+  change directories, exercises Git-remote mutations, and cleans up or verifies
+  every synthetic remote file even after failures.
 
 ### Security and release changes
 

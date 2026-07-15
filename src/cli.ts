@@ -19,6 +19,7 @@ import {
   requireExperimentalReview,
 } from './experimental.js';
 import { PACKAGE_VERSION } from './version.js';
+import { defaultUploadRemotePath } from './upload-path.js';
 import {
   loadIgnore,
   shouldIgnore,
@@ -1347,11 +1348,9 @@ program
       }
 
       const content = readFileSync(file);
-      // Preserve the relative path (e.g. 'figures/fig01.png') so the file lands
-      // in the correct subfolder, not in project root. uploadFile() will
-      // lazy-resolve the folder tree when no folderId/tree is supplied.
-      // Normalize: strip leading './' and any leading slashes.
-      const fileName = file.replace(/^(\.\/)+/, '').replace(/^\/+/, '');
+      // Preserve relative subfolders, but never recreate an absolute local
+      // machine path inside the Overleaf project.
+      const fileName = defaultUploadRemotePath(file);
 
       // Pass folder ID or null for root folder (client will compute it)
       const folderId = options.folder || null;

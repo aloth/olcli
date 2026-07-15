@@ -27,6 +27,7 @@
     "test:e2e:review": "npm run build && bash test/e2e-review.sh",
     "test:e2e:resolve": "npm run build && bash test/e2e-resolve.sh",
     "test:e2e:review-workflow": "npm run build && bash test/e2e-review-workflow.sh",
+    "test:e2e:comment-anchors": "npm run build && bash test/e2e-comment-anchors.sh",
     "test:e2e:history": "npm run build && bash test/e2e-history.sh",
     "verify": "npm run typecheck && npm test && npm run build",
     "prepublishOnly": "npm run verify",

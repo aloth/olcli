@@ -96,7 +96,7 @@ The project is successful when all of the following are true on a disposable Ove
 - [x] `olcli changes suggest` creates a small native tracked replacement visible in Overleaf's review panel.
 - [x] The suggestion is generated only when the expected source text and document version still match.
 - [ ] A concurrent browser edit causes a clean conflict error rather than an overwrite.
-- [ ] Existing comment anchors before, inside, and after the edited range remain valid or fail in a detectable way.
+- [x] Existing comment anchors before, inside, and after the edited range remain valid or fail in a detectable way.
 - [x] `olcli changes accept` accepts only the requested change IDs.
 - [x] `olcli changes reject` rejects only the requested change IDs.
 - [x] Every mutation is verified by re-reading the document and ranges.
@@ -104,7 +104,7 @@ The project is successful when all of the following are true on a disposable Ove
 - [x] CLI, library, and MCP responses expose the same structured result fields.
 - [x] A Git commit can be linked to the resulting Overleaf change IDs.
 - [ ] Unit, contract, and live end-to-end tests cover both supported OT formats.
-- [ ] Existing comments, sync, pull, push, compile, PDF, and Git-remote behavior remain compatible.
+- [x] Existing comments, sync, pull, push, compile, PDF, and Git-remote behavior remain compatible.
 
 ---
 
@@ -1011,7 +1011,7 @@ Create a known-good baseline before changing protocol behavior.
 - [x] Record the upstream baseline commit in `docs/UPSTREAM.md`.
 - [x] Run `npm ci`.
 - [x] Run `npm run build`.
-- [ ] Run existing E2E tests on a disposable project.
+- [x] Run existing E2E tests on a disposable project.
 - [x] Record current passing/failing behavior without changing it.
 - [x] Create `fork-base-v0.7.0` locally. Push it only with explicit release/repository approval.
 - [ ] Enable branch protection on `main` if practical.
@@ -1253,7 +1253,7 @@ Support both `sharejs-text-ot` and `history-ot` for suggestions.
 - [x] Verify delete-only operation.
 - [x] Verify replacement.
 - [x] Verify adjacent operations.
-- [ ] Verify edits around comments.
+- [x] Verify edits around comments.
 - [x] Verify Unicode offsets.
 - [x] Add adapter compatibility table to docs.
 - [x] Add `changes doctor` warnings for partially supported formats.
@@ -2002,7 +2002,7 @@ Suggested sequence:
 ### 26.4 Release gates
 
 - [ ] CI green on all supported Node versions.
-- [ ] Live E2E green on disposable project.
+- [x] Live E2E green on disposable project.
 - [x] No secrets in logs or package.
 - [x] `npm pack --dry-run` reviewed.
 - [x] Protocol compatibility page updated.
@@ -2210,7 +2210,7 @@ The demonstration passes only if the Overleaf UI agrees with every reported stat
 ### Functionality
 
 - [x] Comments remain functional.
-- [ ] Pull/push/sync remain functional.
+- [x] Pull/push/sync remain functional.
 - [x] Compile/PDF remain functional.
 - [x] Tracked changes can be listed.
 - [x] Targeted suggestions work.
@@ -2233,7 +2233,7 @@ The demonstration passes only if the Overleaf UI agrees with every reported stat
 
 - [x] Unit tests pass.
 - [x] Contract tests pass.
-- [ ] Live E2E passes.
+- [x] Live E2E passes.
 - [x] Build and typecheck pass.
 - [x] Package dry run is reviewed.
 - [x] Protocol compatibility is documented.

@@ -3,7 +3,7 @@
 # olcli End-to-End Test Suite
 # Tests all commands against a target project (defaults to "olcli test")
 #
-set -e
+set -o pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -16,6 +16,7 @@ NC='\033[0m' # No Color
 TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
+CLEANUP_FAILED=0
 CLEANUP_FILES=()
 CLEANUP_REMOTE_FILES=()
 
@@ -131,18 +132,36 @@ run_test_with_output() {
 
 # Cleanup function
 cleanup() {
+  local original_status=$?
+  trap - EXIT
   log_section "Cleanup"
-  
+
+  # Remove remote test files before deleting the local probe directory. A
+  # failed delete is acceptable only when a follow-up download proves that the
+  # file is already absent (for example, a deletion test removed it earlier).
+  if [ -n "${PROJECT_ID:-}" ] && command -v olcli >/dev/null 2>&1; then
+    for file in "${CLEANUP_REMOTE_FILES[@]}"; do
+      if olcli delete "$file" "$PROJECT_ID" >/dev/null 2>&1; then
+        log_info "Removed remote test file: $file"
+      elif olcli download "$file" "$PROJECT_ID" \
+        -o "$TEST_DIR/cleanup-probe" >/dev/null 2>&1; then
+        log_warn "Remote test file remains after cleanup: $file"
+        CLEANUP_FAILED=$((CLEANUP_FAILED + 1))
+      else
+        log_info "Remote test file already absent: $file"
+      fi
+      rm -f "$TEST_DIR/cleanup-probe"
+    done
+  elif [ "${#CLEANUP_REMOTE_FILES[@]}" -gt 0 ]; then
+    log_warn "Remote cleanup could not run because the project or CLI was unavailable"
+    CLEANUP_FAILED=$((CLEANUP_FAILED + 1))
+  fi
+
   # Remove local temp files
   if [ -d "$TEST_DIR" ]; then
     log_info "Removing temp directory: $TEST_DIR"
     rm -rf "$TEST_DIR"
   fi
-  
-  # Remove remote test files (best effort)
-  for file in "${CLEANUP_REMOTE_FILES[@]}"; do
-    log_info "Note: Test file '$file' may remain on Overleaf (delete manually if needed)"
-  done
   
   # Summary
   echo ""
@@ -151,9 +170,11 @@ cleanup() {
   echo "  Total tests:  $TESTS_RUN"
   echo -e "  ${GREEN}Passed:${NC}       $TESTS_PASSED"
   echo -e "  ${RED}Failed:${NC}       $TESTS_FAILED"
+  echo -e "  ${RED}Cleanup failures:${NC} $CLEANUP_FAILED"
   echo ""
-  
-  if [ $TESTS_FAILED -eq 0 ]; then
+
+  if [ "$original_status" -eq 0 ] && [ "$TESTS_FAILED" -eq 0 ] \
+    && [ "$CLEANUP_FAILED" -eq 0 ]; then
     log_success "All tests passed! 🎉"
     exit 0
   else
@@ -167,6 +188,35 @@ cleanup() {
 #######################################
 
 log_section "Test Setup"
+
+if [ "${OLCLI_E2E_ALLOW_MUTATIONS:-}" != "1" ]; then
+  log_fail "Refusing to mutate Overleaf without OLCLI_E2E_ALLOW_MUTATIONS=1"
+  exit 1
+fi
+
+# Commands exercised below intentionally change directories. Promote a local
+# .olauth cookie to the environment once so those subprocesses and the Git
+# remote helper keep using the same credentials without copying the auth file.
+if [ -z "${OVERLEAF_SESSION:-}" ]; then
+  AUTH_FILE="${OLCLI_E2E_AUTH_FILE:-.olauth}"
+  if [ -f "$AUTH_FILE" ]; then
+    AUTH_CONTENT=$(tr -d '\r\n' < "$AUTH_FILE")
+    if [[ "$AUTH_CONTENT" != *"="* ]]; then
+      export OVERLEAF_SESSION="$AUTH_CONTENT"
+    else
+      AUTH_COOKIE_NAME="${OVERLEAF_COOKIE_NAME:-overleaf_session2}"
+      IFS=';' read -ra AUTH_COOKIES <<< "$AUTH_CONTENT"
+      for AUTH_COOKIE in "${AUTH_COOKIES[@]}"; do
+        AUTH_COOKIE="${AUTH_COOKIE#"${AUTH_COOKIE%%[![:space:]]*}"}"
+        if [[ "$AUTH_COOKIE" == "$AUTH_COOKIE_NAME="* ]]; then
+          export OVERLEAF_SESSION="${AUTH_COOKIE#*=}"
+          break
+        fi
+      done
+    fi
+    unset AUTH_CONTENT AUTH_COOKIE AUTH_COOKIES AUTH_COOKIE_NAME
+  fi
+fi
 
 # Generate unique test identifiers
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -591,6 +641,55 @@ run_test "verify synced file exists" \
   "olcli download '${TEST_ID}_sync.txt' '$PROJECT_ID' -o '$SYNC_VERIFY'"
 
 #######################################
+# Test: Git Remote Helper
+#######################################
+
+log_section "Git Remote Helper Tests"
+
+GIT_REMOTE_DIR="$TEST_DIR/git_remote_project"
+GIT_REMOTE_FILE_NAME="${TEST_ID}_git_remote.txt"
+GIT_REMOTE_FILE="$GIT_REMOTE_DIR/$GIT_REMOTE_FILE_NAME"
+GIT_REMOTE_CONTENT="Git remote test - $TIMESTAMP"
+CLEANUP_REMOTE_FILES+=("$GIT_REMOTE_FILE_NAME")
+
+run_test "clone project through git remote helper" \
+  "git clone 'overleaf::https://www.overleaf.com/project/$PROJECT_ID' '$GIT_REMOTE_DIR'"
+
+run_test "git remote clone contains a commit" \
+  "test \"\$(git -C '$GIT_REMOTE_DIR' rev-list --count HEAD)\" -ge 1"
+
+git -C "$GIT_REMOTE_DIR" config user.name "olcli E2E"
+git -C "$GIT_REMOTE_DIR" config user.email "olcli-e2e@invalid.example"
+echo "$GIT_REMOTE_CONTENT" > "$GIT_REMOTE_FILE"
+
+run_test "commit synthetic Git-remote file" \
+  "git -C '$GIT_REMOTE_DIR' add '$GIT_REMOTE_FILE_NAME' && git -C '$GIT_REMOTE_DIR' commit -m 'olcli E2E Git remote upload'"
+
+run_test "push synthetic file through git remote helper" \
+  "git -C '$GIT_REMOTE_DIR' push"
+
+GIT_REMOTE_VERIFY="$TEST_DIR/verify_git_remote.txt"
+sleep 2
+run_test "download Git-remote pushed file" \
+  "olcli download '$GIT_REMOTE_FILE_NAME' '$PROJECT_ID' -o '$GIT_REMOTE_VERIFY'"
+
+run_test_with_output "Git-remote pushed content matches" \
+  "cat '$GIT_REMOTE_VERIFY'" \
+  "$GIT_REMOTE_CONTENT"
+
+rm -f "$GIT_REMOTE_FILE"
+run_test "commit synthetic Git-remote deletion" \
+  "git -C '$GIT_REMOTE_DIR' add -u '$GIT_REMOTE_FILE_NAME' && git -C '$GIT_REMOTE_DIR' commit -m 'olcli E2E Git remote deletion'"
+
+run_test "push deletion through git remote helper" \
+  "git -C '$GIT_REMOTE_DIR' push"
+
+sleep 2
+run_test "Git-remote deletion removed remote file" \
+  "olcli download '$GIT_REMOTE_FILE_NAME' '$PROJECT_ID' -o '$TEST_DIR/should_not_exist_git.txt'" \
+  false
+
+#######################################
 # Test: Delete + Rename CLI commands (re-enabled in v0.2.0)
 #######################################
 
@@ -763,7 +862,7 @@ for file in "${CLEANUP_REMOTE_FILES[@]}"; do
   echo "  - $file"
 done
 echo ""
-log_warn "Please delete these files manually via the Overleaf web UI if needed."
+log_info "The cleanup trap will now delete or verify all files listed above."
 echo ""
 
 # Cleanup will run via trap
