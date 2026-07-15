@@ -161,9 +161,15 @@ credentials, real project identifiers, collaborator emails, or manuscript text.
   after a fresh tracked replacement and its rejection, all three comment
   threads retained the expected file, ordering, and selected text. The probe
   deleted every comment, suggestion, and fixture afterward.
-- A simultaneous Chrome-tab rerun remains unavailable because the local Chrome
-  control plugin fails during initialization. The live protocol-level
-  concurrency test is green, but the browser-specific checkbox stays open.
+- The browser-specific concurrency rerun passed in the controlled internal
+  Browser after Chrome remained unavailable. On an isolated synthetic fixture,
+  the CLI captured document version 3 and its text hash, a subsequent browser
+  edit advanced the document to version 4, and the unchanged CLI mutation was
+  refused with `VERSION_CONFLICT`. The browser edit remained intact, the target
+  wording was not overwritten, no tracked suggestion was created, and comments
+  before, inside, and after the target retained their file, ordering, and
+  selected text. All three comments and the fixture were deleted, and both CLI
+  and browser state confirmed cleanup. No non-synthetic document was edited.
 - The first `dev` push completed the GitHub Actions CI matrix successfully on
   Node.js 18, 20, 22, and 24. Each job installed from the lockfile, audited
   production dependencies, typechecked, ran all tests, built, and inspected the
