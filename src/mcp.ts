@@ -245,7 +245,7 @@ server.tool(
     resource_path: z
       .string()
       .optional()
-      .describe('Path of the root document to compile (e.g. "main.tex", "backup/1.tex")'),
+      .describe('Path of a .tex file in the project to compile as the root document. E.g. "paper.tex", "folder/test.tex"'),
   },
   async ({ project_id, resource_path }) =>
     wrapTool(async () => {
@@ -267,7 +267,7 @@ server.tool(
     resource_path: z
       .string()
       .optional()
-      .describe('Path of the root document to compile (e.g. "main.tex", "backup/1.tex")'),
+      .describe('Path of a .tex file in the project to compile as the root document. E.g. "paper.tex", "folder/test.tex"'),
   },
   async ({ project_id, output_path, resource_path }) =>
     wrapTool(async () => {
@@ -479,7 +479,7 @@ server.tool(
     resource_path: z
       .string()
       .optional()
-      .describe('Path of the root document to compile (e.g. "main.tex", "backup/1.tex")'),
+      .describe('Path of a .tex file in the project to compile as the root document. E.g. "paper.tex", "folder/test.tex"'),
   },
   async ({ project_id, resource_path }) =>
     wrapTool(async () => {
