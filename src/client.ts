@@ -234,6 +234,20 @@ export class OverleafClient {
   }
 
   /**
+   * Build the request body for the compile endpoint.
+   * Support an optional resourcePath to compile a specific file.
+   */
+  private buildCompileRequestBody(resourcePath?: string): string {
+    return JSON.stringify({
+      rootDoc_id: null,
+      draft: false,
+      check: 'silent',
+      incrementalCompilesEnabled: true,
+      ...(resourcePath ? { rootResourcePath: resourcePath } : {})
+    });
+  }
+
+  /**
    * Create client from session cookie string
    */
   static async fromSessionCookie(
@@ -800,16 +814,11 @@ export class OverleafClient {
   /**
    * Compile project and get PDF
    */
-  async compileProject(projectId: string): Promise<{ pdfUrl: string; logs: string[] }> {
+  async compileProject(projectId: string, resourcePath?: string): Promise<{ pdfUrl: string; logs: string[] }> {
     const response = await this.httpRequest(this.compileUrl(projectId), {
       method: 'POST',
       headers: this.getHeaders(true),
-      body: JSON.stringify({
-        rootDoc_id: null,
-        draft: false,
-        check: 'silent',
-        incrementalCompilesEnabled: true
-      }),
+      body: this.buildCompileRequestBody(resourcePath),
       expect: 'json'
     });
 
@@ -846,8 +855,8 @@ export class OverleafClient {
   /**
    * Download compiled PDF
    */
-  async downloadPdf(projectId: string, timeoutMs?: number): Promise<Buffer> {
-    const { pdfUrl } = await this.compileProject(projectId);
+  async downloadPdf(projectId: string, timeoutMs?: number, resourcePath?: string): Promise<Buffer> {
+    const { pdfUrl } = await this.compileProject(projectId, resourcePath);
     return this.downloadBuffer(pdfUrl, timeoutMs);
   }
 
@@ -2167,7 +2176,7 @@ export class OverleafClient {
   /**
    * Compile project and get all output files
    */
-  async compileWithOutputs(projectId: string): Promise<{
+  async compileWithOutputs(projectId: string, resourcePath?: string): Promise<{
     status: 'success' | 'failure' | 'error';
     pdfUrl?: string;
     outputFiles: { path: string; type: string; url: string }[];
@@ -2175,12 +2184,7 @@ export class OverleafClient {
     const response = await this.httpRequest(this.compileUrl(projectId), {
       method: 'POST',
       headers: this.getHeaders(true),
-      body: JSON.stringify({
-        rootDoc_id: null,
-        draft: false,
-        check: 'silent',
-        incrementalCompilesEnabled: true
-      }),
+      body: this.buildCompileRequestBody(resourcePath),
       expect: 'json'
     });
 

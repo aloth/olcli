@@ -242,11 +242,15 @@ server.tool(
   'Compile an Overleaf project using the remote LaTeX compiler. Returns the PDF URL and any log messages.',
   {
     project_id: z.string().describe('The Overleaf project ID'),
+    resource_path: z
+      .string()
+      .optional()
+      .describe('Path of the root document to compile (e.g. "main.tex", "backup/1.tex")'),
   },
-  async ({ project_id }) =>
+  async ({ project_id, resource_path }) =>
     wrapTool(async () => {
       const client = await getClient();
-      return client.compileProject(project_id);
+      return client.compileProject(project_id, resource_path);
     })
 );
 
@@ -260,11 +264,15 @@ server.tool(
   {
     project_id: z.string().describe('The Overleaf project ID'),
     output_path: z.string().describe('Local file path where the PDF should be saved (e.g. output.pdf)'),
+    resource_path: z
+      .string()
+      .optional()
+      .describe('Path of the root document to compile (e.g. "main.tex", "backup/1.tex")'),
   },
-  async ({ project_id, output_path }) =>
+  async ({ project_id, output_path, resource_path }) =>
     wrapTool(async () => {
       const client = await getClient();
-      const pdfBuf = await client.downloadPdf(project_id);
+      const pdfBuf = await client.downloadPdf(project_id, undefined, resource_path);
       const absPath = resolve(output_path);
       writeFileSync(absPath, pdfBuf);
       return {
@@ -468,11 +476,15 @@ server.tool(
   'Compile an Overleaf project and return all output file metadata (PDF, BBL, logs, etc.). Useful for arXiv submission workflows.',
   {
     project_id: z.string().describe('The Overleaf project ID'),
+    resource_path: z
+      .string()
+      .optional()
+      .describe('Path of the root document to compile (e.g. "main.tex", "backup/1.tex")'),
   },
-  async ({ project_id }) =>
+  async ({ project_id, resource_path }) =>
     wrapTool(async () => {
       const client = await getClient();
-      return client.compileWithOutputs(project_id);
+      return client.compileWithOutputs(project_id, resource_path);
     })
 );
 
