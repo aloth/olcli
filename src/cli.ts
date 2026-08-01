@@ -633,6 +633,7 @@ program
   .command('pdf [project]')
   .description('Compile and download PDF')
   .option('-o, --output <path>', 'Output path (default: <project-name>.pdf)')
+  .option('-r, --resource <path>', 'Compile this .tex file as root document (e.g. paper.tex, folder/test.tex)')
   .option('--cookie <session>', 'Session cookie override')
   .action(async (project, options) => {
     const spinner = ora('Compiling project...').start();
@@ -641,7 +642,7 @@ program
       const proj = await resolveProject(client, project);
 
       spinner.text = 'Compiling...';
-      const pdf = await client.downloadPdf(proj.id);
+      const pdf = await client.downloadPdf(proj.id, undefined, options.resource);
       const outputPath = options.output || `${proj.name.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
 
       writeFileSync(outputPath, pdf);
@@ -658,6 +659,7 @@ program
   .command('output [type]')
   .description('Download compile output files (bbl, log, aux, etc.)')
   .option('-o, --output <path>', 'Output path')
+  .option('-r, --resource <path>', 'Compile this .tex file as root document (e.g. paper.tex, folder/test.tex)')
   .option('--list', 'List available output files')
   .option('--project <name>', 'Project name or ID')
   .option('--cookie <session>', 'Session cookie override')
@@ -681,7 +683,7 @@ program
       }
 
       const proj = await resolveProject(client, projectArg);
-      const result = await client.compileWithOutputs(proj.id);
+      const result = await client.compileWithOutputs(proj.id, options.resource);
 
       if (result.status !== 'success') {
         spinner.warn(`Compilation ${result.status}, but output files may still be available`);
@@ -818,6 +820,7 @@ program
 program
   .command('compile [project]')
   .description('Compile a project (trigger PDF generation)')
+  .option('-r, --resource <path>', 'Compile this .tex file as root document (e.g. paper.tex, folder/test.tex)')
   .option('--cookie <session>', 'Session cookie override')
   .action(async (project, options) => {
     const spinner = ora('Compiling...').start();
@@ -825,7 +828,7 @@ program
       const client = await getClient(options.cookie);
       const proj = await resolveProject(client, project);
 
-      const result = await client.compileProject(proj.id);
+      const result = await client.compileProject(proj.id, options.resource);
       spinner.succeed(`Compiled "${proj.name}"`);
       console.log(chalk.dim(`PDF URL: ${result.pdfUrl}`));
 
