@@ -686,7 +686,7 @@ program
       const result = await client.compileWithOutputs(proj.id, options.resource);
 
       if (result.status !== 'success') {
-        spinner.warn(`Compilation ${result.status}, but output files may still be available`);
+        spinner.warn(`Compilation ${result.status}, but output files may still be available${result.failureHint ?? ''}`);
       }
 
       if (options.list || !actualType) {

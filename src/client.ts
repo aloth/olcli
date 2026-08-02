@@ -18,6 +18,7 @@ const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-
 const USER_AGENT = `olcli/${pkg.version}`;
 
 const DEFAULT_BASE_URL = 'https://www.overleaf.com';
+const RESOURCE_PATH_FAILURE_HINT = ' (Perhaps the resource file you specified does not exist in the project?)';
 
 export interface Project {
   id: string;
@@ -831,7 +832,7 @@ export class OverleafClient {
     const data = response.body as any;
 
     if (data.status !== 'success') {
-      throw new Error(`Compilation failed: ${data.status}`);
+      throw new Error(`Compilation failed: ${data.status}${resourcePath ? RESOURCE_PATH_FAILURE_HINT : ''}`);
     }
 
     // Match by path 'output.pdf' — Overleaf's CLSI always names the main
@@ -2180,6 +2181,8 @@ export class OverleafClient {
     status: 'success' | 'failure' | 'error';
     pdfUrl?: string;
     outputFiles: { path: string; type: string; url: string }[];
+    /** Set when compilation failed and a specific root document was requested. */
+    failureHint?: string;
   }> {
     const response = await this.httpRequest(this.compileUrl(projectId), {
       method: 'POST',
@@ -2210,7 +2213,8 @@ export class OverleafClient {
         path: f.path,
         type: f.type,
         url: `${this.baseUrl}${f.url}${qs}`
-      }))
+      })),
+      failureHint: data.status !== 'success' && resourcePath ? RESOURCE_PATH_FAILURE_HINT : undefined
     };
   }
 
