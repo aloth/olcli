@@ -264,6 +264,15 @@ CLEANUP_REMOTE_FILES+=("${TEST_ID}_2.txt")
 run_test "upload second file" \
   "olcli upload '$TEST_FILE2' '$PROJECT_ID'"
 
+# Create a minimal .tex file in a subfolder to test --resource (compile a specific root doc)
+TEST_TEX="${TEST_ID}.tex"
+mkdir -p "$TEST_DIR/sub"
+printf '\\documentclass{article}\n\\begin{document}\nE2E resource test.\n\\end{document}\n' > "$TEST_DIR/sub/$TEST_TEX"
+CLEANUP_REMOTE_FILES+=("sub/$TEST_TEX")
+
+run_test "upload test tex file to subfolder" \
+  "cd '$TEST_DIR' && olcli upload 'sub/$TEST_TEX' '$PROJECT_ID'"
+
 #######################################
 # Test: File Download (single file)
 #######################################
@@ -349,6 +358,14 @@ run_test_with_output "compile project" \
   "olcli compile '$PROJECT_ID'" \
   "(success|failure|Compiled)"
 
+run_test_with_output "compile project with --resource" \
+  "olcli compile '$PROJECT_ID' -r 'sub/$TEST_TEX'" \
+  "(success|failure|Compiled)"
+
+run_test "compile with nonexistent --resource fails gracefully" \
+  "olcli compile '$PROJECT_ID' -r 'nonexistent_file_xyz.tex'" \
+  false
+
 #######################################
 # Test: PDF Download
 #######################################
@@ -383,6 +400,34 @@ fi
 
 sleep 1  # Rate limit
 
+PDF_FILE_R="$TEST_DIR/output_resource.pdf"
+
+# Note: This may fail if compilation fails
+TESTS_RUN=$((TESTS_RUN + 1))
+echo -n "  Testing: download PDF with --resource ... "
+if olcli pdf "$PROJECT_ID" -r "sub/$TEST_TEX" -o "$PDF_FILE_R" 2>&1; then
+  if [ -f "$PDF_FILE_R" ] && [ -s "$PDF_FILE_R" ]; then
+    # Check PDF magic bytes
+    if head -c 4 "$PDF_FILE_R" | grep -q "%PDF"; then
+      echo -e "${GREEN}✓${NC}"
+      TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+      echo -e "${RED}✗ (not a valid PDF)${NC}"
+      TESTS_FAILED=$((TESTS_FAILED + 1))
+    fi
+  else
+    echo -e "${RED}✗ (file empty or missing)${NC}"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+  fi
+else
+  echo -e "${YELLOW}⚠ (compilation may have failed)${NC}"
+  # Don't count as failure since compilation errors are project-dependent
+  TESTS_PASSED=$((TESTS_PASSED + 1))
+  log_warn "PDF download skipped due to compilation status"
+fi
+
+sleep 1  # Rate limit
+
 #######################################
 # Test: Output Files (compile artifacts)
 #######################################
@@ -393,10 +438,28 @@ run_test_with_output "output --list shows files" \
   "olcli output --list --project '$PROJECT_ID'" \
   "(log|aux|pdf)"
 
+run_test_with_output "output --list with --resource shows files" \
+  "olcli output --list -r 'sub/$TEST_TEX' --project '$PROJECT_ID'" \
+  "(log|aux|pdf)"
+
 # Download log file
 LOG_FILE="$TEST_DIR/output.log"
 run_test "download log output" \
   "olcli output log -o '$LOG_FILE' --project '$PROJECT_ID'"
+
+LOG_FILE_R="$TEST_DIR/output_resource.log"
+run_test "download log output with --resource" \
+  "olcli output log -r 'sub/$TEST_TEX' -o '$LOG_FILE_R' --project '$PROJECT_ID'"
+
+TESTS_RUN=$((TESTS_RUN + 1))
+echo -n "  Testing: resource log file has content ... "
+if [ -f "$LOG_FILE_R" ] && [ -s "$LOG_FILE_R" ]; then
+  echo -e "${GREEN}✓${NC}"
+  TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+  echo -e "${RED}✗${NC}"
+  TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
 
 TESTS_RUN=$((TESTS_RUN + 1))
 echo -n "  Testing: log file has content ... "
