@@ -111,6 +111,8 @@ npx @aloth/olcli-mcp
 
 Available MCP tools: `list_projects`, `get_project_info`, `pull_project`, `push_file`, `compile`, `download_pdf`, `list_comments`, `get_entities`, `download_file`, `add_comment`, `reply_to_comment`, `resolve_comment`, `delete_entity`, `rename_entity`, `compile_with_outputs`.
 
+`compile`, `download_pdf` and `compile_with_outputs` accept an optional `resource_path` to compile a specific root document.
+
 Auth: set `OVERLEAF_SESSION` env var in MCP config, or use stored credentials from `olcli auth`.
 
 ## Common Workflows
@@ -153,14 +155,19 @@ olcli sync --no-ignore     # escape hatch: upload everything
 ```bash
 olcli pdf                      # Compile and download
 olcli pdf -o paper.pdf         # Custom output name
+olcli pdf -r chapters/intro.tex  # Compile a specific root document
 olcli compile                  # Just compile (no download)
+olcli compile -r appendix.tex  # Compile a specific root document without downloading
 ```
+
+`-r, --resource <path>` works on `compile`, `pdf`, and `output`: it compiles the given `.tex` file as the root document. Useful when a project contains several documents.  
 
 ### Download .bbl for arXiv submission
 
 ```bash
 olcli output bbl               # Download compiled .bbl
 olcli output bbl -o main.bbl   # Custom filename
+olcli output bbl -r appendix.tex
 olcli output --list            # List all available outputs
 ```
 
