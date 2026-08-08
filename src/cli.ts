@@ -13,6 +13,7 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OverleafClient } from './client.js';
+import { resolveRemotePath } from './paths.js';
 import {
   loadIgnore,
   shouldIgnore,
@@ -730,6 +731,7 @@ program
 program
   .command('upload <file> [project]')
   .description('Upload a file to a project')
+  .option('--to <path>', 'Destination path within the project (default: derived from <file>)')
   .option('--folder <id>', 'Target folder ID (default: root)')
   .option('--cookie <session>', 'Session cookie override')
   .action(async (file, project, options) => {
@@ -744,11 +746,11 @@ program
       }
 
       const content = readFileSync(file);
-      // Preserve the relative path (e.g. 'figures/fig01.png') so the file lands
-      // in the correct subfolder, not in project root. uploadFile() will
-      // lazy-resolve the folder tree when no folderId/tree is supplied.
-      // Normalize: strip leading './' and any leading slashes.
-      const fileName = file.replace(/^(\.\/)+/, '').replace(/^\/+/, '');
+      // Derive the remote path: an explicit --to wins, absolute paths collapse
+      // to their basename, relative paths keep their directory part so
+      // 'figures/fig01.png' still lands in the 'figures' folder. uploadFile()
+      // lazy-resolves the folder tree when no folderId/tree is supplied.
+      const fileName = resolveRemotePath(file, options.to);
 
       // Pass folder ID or null for root folder (client will compute it)
       const folderId = options.folder || null;

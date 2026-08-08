@@ -254,7 +254,7 @@ echo "$TEST_CONTENT" > "$TEST_FILE"
 CLEANUP_REMOTE_FILES+=("${TEST_ID}.txt")
 
 run_test "upload file to project" \
-  "cd '$TEST_DIR' && olcli upload '${TEST_ID}.txt' '$PROJECT_ID'"
+  "olcli upload '$TEST_FILE' '$PROJECT_ID'"
 
 # Create file in subfolder test
 TEST_FILE2="$TEST_DIR/${TEST_ID}_2.txt"
@@ -262,7 +262,7 @@ echo "Second test file - $TEST_CONTENT" > "$TEST_FILE2"
 CLEANUP_REMOTE_FILES+=("${TEST_ID}_2.txt")
 
 run_test "upload second file" \
-  "cd '$TEST_DIR' && olcli upload '${TEST_ID}_2.txt' '$PROJECT_ID'"
+  "olcli upload '$TEST_FILE2' '$PROJECT_ID'"
 
 # Create a minimal .tex file in a subfolder to test --resource (compile a specific root doc)
 TEST_TEX="${TEST_ID}.tex"
@@ -272,6 +272,33 @@ CLEANUP_REMOTE_FILES+=("sub/$TEST_TEX")
 
 run_test "upload test tex file to subfolder" \
   "cd '$TEST_DIR' && olcli upload 'sub/$TEST_TEX' '$PROJECT_ID'"
+
+# Regression: an absolute local path must land in the project root, not in a
+# mirrored 'tmp/tmp.xxx/' folder tree (see issue #39).
+TEST_FILE_ABS="$TEST_DIR/${TEST_ID}_abs.txt"
+echo "absolute path test - $TEST_CONTENT" > "$TEST_FILE_ABS"
+CLEANUP_REMOTE_FILES+=("${TEST_ID}_abs.txt")
+
+run_test "upload with absolute path lands in project root" \
+  "olcli upload '$TEST_FILE_ABS' '$PROJECT_ID'"
+
+sleep 1
+
+run_test "download file uploaded via absolute path" \
+  "olcli download '${TEST_ID}_abs.txt' '$PROJECT_ID' -o '$TEST_DIR/dl_abs.txt'"
+
+# Regression: --to sets the remote destination explicitly.
+TEST_FILE_TO="$TEST_DIR/${TEST_ID}_to.txt"
+echo "--to test - $TEST_CONTENT" > "$TEST_FILE_TO"
+CLEANUP_REMOTE_FILES+=("sub/${TEST_ID}_to.txt")
+
+run_test "upload with --to places file at given remote path" \
+  "olcli upload '$TEST_FILE_TO' '$PROJECT_ID' --to 'sub/${TEST_ID}_to.txt'"
+
+sleep 1
+
+run_test "download file uploaded via --to" \
+  "olcli download 'sub/${TEST_ID}_to.txt' '$PROJECT_ID' -o '$TEST_DIR/dl_to.txt'"
 
 #######################################
 # Test: File Download (single file)
@@ -668,10 +695,10 @@ echo "delete test - $TIMESTAMP" > "$DR_FILE_DEL"
 CLEANUP_REMOTE_FILES+=("${TEST_ID}_rename_orig.txt" "$DR_FILE_NEW_NAME" "$DR_FILE_TO_DELETE")
 
 run_test "upload file for rename test" \
-  "cd '$TEST_DIR' && olcli upload '${TEST_ID}_rename_orig.txt' '$PROJECT_ID'"
+  "olcli upload '$DR_FILE_ORIG' '$PROJECT_ID'"
 
 run_test "upload file for delete test" \
-  "cd '$TEST_DIR' && olcli upload '${TEST_ID}_to_delete.txt' '$PROJECT_ID'"
+  "olcli upload '$DR_FILE_DEL' '$PROJECT_ID'"
 
 sleep 2
 run_test "rename remote file" \
@@ -708,7 +735,7 @@ CLEANUP_REMOTE_FILES+=("$SYNC_DEL_FILE_NAME")
 
 # Seed a remote file then pull (sets up the manifest)
 run_test "upload file that will later be deleted via sync" \
-  "cd '$TEST_DIR' && olcli upload '$SYNC_DEL_FILE_NAME' '$PROJECT_ID'"
+  "olcli upload '$SYNC_DEL_FILE' '$PROJECT_ID'"
 
 sleep 2
 run_test "initial pull writes manifest" \
@@ -760,7 +787,7 @@ echo "protected by --no-delete" > "$SYNC_NODEL_FILE"
 CLEANUP_REMOTE_FILES+=("$SYNC_NODEL_FILE_NAME")
 
 run_test "upload file for --no-delete test" \
-  "cd '$TEST_DIR' && olcli upload '$SYNC_NODEL_FILE_NAME' '$PROJECT_ID'"
+  "olcli upload '$SYNC_NODEL_FILE' '$PROJECT_ID'"
 
 sleep 2
 run_test "refresh manifest with new seeded file" \
@@ -809,7 +836,7 @@ echo "special filename test" > "$SPECIAL_FILE"
 CLEANUP_REMOTE_FILES+=("test-file_123.txt")
 
 run_test "upload file with dashes and underscores" \
-  "cd '$TEST_DIR' && olcli upload 'test-file_123.txt' '$PROJECT_ID'"
+  "olcli upload '$SPECIAL_FILE' '$PROJECT_ID'"
 
 run_test "download file with dashes and underscores" \
   "olcli download 'test-file_123.txt' '$PROJECT_ID' -o '$TEST_DIR/dl_special.txt'"
