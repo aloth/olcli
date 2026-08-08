@@ -24,6 +24,7 @@ import { join, resolve } from 'node:path';
 import AdmZip from 'adm-zip';
 
 import { OverleafClient } from './client.js';
+import { resolveRemotePath } from './paths.js';
 import {
   getSessionCookie,
   getBaseUrl,
@@ -221,14 +222,16 @@ server.tool(
     remote_path: z
       .string()
       .optional()
-      .describe('Target path within the project (default: basename of local_path)'),
+      .describe(
+        'Target path within the project. Defaults to the basename for absolute local paths, or the relative path as given (e.g. "figures/diagram.png")'
+      ),
   },
   async ({ project_id, local_path, remote_path }) =>
     wrapTool(async () => {
       const client = await getClient();
       const absPath = resolve(local_path);
       const content = await readFile(absPath);
-      const remoteName = remote_path ?? local_path.split('/').pop() ?? local_path;
+      const remoteName = resolveRemotePath(local_path, remote_path);
       return client.uploadFile(project_id, null, remoteName, content);
     })
 );

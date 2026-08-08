@@ -176,7 +176,13 @@ olcli output --list            # List all available outputs
 ```bash
 olcli upload figure1.png "My Paper"          # Upload to project root
 olcli upload diagram.pdf                      # Auto-detect project from .olcli.json
+olcli upload figures/diagram.png              # Relative path is preserved remotely
+olcli upload /tmp/build/diagram.png           # Absolute path lands in the project root
+olcli upload /tmp/build/diagram.png --to figures/diagram.png   # Explicit destination
 ```
+
+Remote path rules: a relative local path keeps its directory part, an absolute
+local path collapses to its basename, and `--to` overrides both.
 
 ### Download specific files
 
@@ -237,7 +243,7 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 | `olcli pull [project] [dir]` | Download project files |
 | `olcli push [dir]` | Upload local changes |
 | `olcli sync [dir]` | Bidirectional sync |
-| `olcli upload <file> [project]` | Upload a single file |
+| `olcli upload <file> [project]` | Upload a single file (`--to <path>` sets the remote destination) |
 | `olcli download <file> [project]` | Download a single file |
 | `olcli delete <file> [project]` | Delete a remote file or folder (alias: `rm`) |
 | `olcli rename <old> <new> [project]` | Rename a remote file or folder (alias: `mv`) |

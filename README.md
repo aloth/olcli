@@ -132,7 +132,7 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli pull [project] [dir]` | Download project files to local directory |
 | `olcli push [dir]` | Upload local changes to Overleaf |
 | `olcli sync [dir]` | Bidirectional sync (pull + push) |
-| `olcli upload <file> [project]` | Upload a single file |
+| `olcli upload <file> [project]` | Upload a single file (`--to <path>` sets the remote destination) |
 | `olcli download <file> [project]` | Download a single file |
 | `olcli delete <file> [project]` | Delete a remote file or folder (alias: `rm`) |
 | `olcli rename <old> <new> [project]` | Rename a remote file or folder (alias: `mv`) |
@@ -269,7 +269,9 @@ olcli pdf "Conference Paper" -r appendix.tex -o appendix.pdf
 olcli compile "Conference Paper" -r folder/test.tex
 
 # Upload figures
-olcli upload figures/diagram.png
+olcli upload figures/diagram.png          # relative path is preserved
+olcli upload /tmp/build/diagram.png       # absolute path lands in the project root
+olcli upload /tmp/build/diagram.png --to figures/diagram.png   # explicit destination
 
 # arXiv submission prep
 olcli output bbl -o main.bbl

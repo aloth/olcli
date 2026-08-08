@@ -273,6 +273,33 @@ CLEANUP_REMOTE_FILES+=("sub/$TEST_TEX")
 run_test "upload test tex file to subfolder" \
   "cd '$TEST_DIR' && olcli upload 'sub/$TEST_TEX' '$PROJECT_ID'"
 
+# Regression: an absolute local path must land in the project root, not in a
+# mirrored 'tmp/tmp.xxx/' folder tree (see issue #39).
+TEST_FILE_ABS="$TEST_DIR/${TEST_ID}_abs.txt"
+echo "absolute path test - $TEST_CONTENT" > "$TEST_FILE_ABS"
+CLEANUP_REMOTE_FILES+=("${TEST_ID}_abs.txt")
+
+run_test "upload with absolute path lands in project root" \
+  "olcli upload '$TEST_FILE_ABS' '$PROJECT_ID'"
+
+sleep 1
+
+run_test "download file uploaded via absolute path" \
+  "olcli download '${TEST_ID}_abs.txt' '$PROJECT_ID' -o '$TEST_DIR/dl_abs.txt'"
+
+# Regression: --to sets the remote destination explicitly.
+TEST_FILE_TO="$TEST_DIR/${TEST_ID}_to.txt"
+echo "--to test - $TEST_CONTENT" > "$TEST_FILE_TO"
+CLEANUP_REMOTE_FILES+=("sub/${TEST_ID}_to.txt")
+
+run_test "upload with --to places file at given remote path" \
+  "olcli upload '$TEST_FILE_TO' '$PROJECT_ID' --to 'sub/${TEST_ID}_to.txt'"
+
+sleep 1
+
+run_test "download file uploaded via --to" \
+  "olcli download 'sub/${TEST_ID}_to.txt' '$PROJECT_ID' -o '$TEST_DIR/dl_to.txt'"
+
 #######################################
 # Test: File Download (single file)
 #######################################
