@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-08-08
+
+### Added
+- **Compile a specific `.tex` file as the root document** ([#38](https://github.com/aloth/olcli/pull/38)) - contributed by [@SomeBottle](https://github.com/SomeBottle)
+  - New `-r, --resource <path>` option on `compile`, `pdf`, and `output`
+  - Sets `rootResourcePath` on the Overleaf compile endpoint, so multi-document projects can build `appendix.tex`, a checklist document, or any other file independently
+  - Useful for pulling a per-document `.bbl` when preparing arXiv bundles
+  - MCP tools `compile`, `download_pdf`, and `compile_with_outputs` accept an optional `resource_path`
+  - Clearer error when a compile fails and a resource path was given, hinting that the file may not exist in the project
+  - E2E coverage for compile, PDF download, output listing, and log download with `--resource`
+- **`--to <path>` option on `olcli upload`** ([#40](https://github.com/aloth/olcli/pull/40), closes [#39](https://github.com/aloth/olcli/issues/39)) to state the remote destination explicitly
+
+### Fixed
+- **Absolute paths passed to `olcli upload` no longer mirror the local directory structure into the project** ([#39](https://github.com/aloth/olcli/issues/39)) - reported by [@SomeBottle](https://github.com/SomeBottle) while working on #38
+  - `/tmp/tmp.abc123/paper.tex` previously uploaded to `tmp/tmp.abc123/paper.tex`; it now lands in the project root as `paper.tex`
+  - Relative paths are unchanged, so `figures/diagram.png` still lands in the `figures` folder
+  - `.` and `..` segments are normalized, and paths that would escape the project root are collapsed rather than passed through
+  - MCP `push_file` uses the same resolution for `remote_path`, so CLI and MCP agree
+  - Path logic extracted into `src/paths.ts`
+
 ## [0.7.0] - 2026-07-02
 
 ### Added
