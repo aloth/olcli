@@ -40,7 +40,7 @@ jobs:
           echo "Tarball not available after 50s"
           exit 1
       - name: Bump Homebrew formula
-        uses: mislav/bump-homebrew-formula-action@v3.6
+        uses: mislav/bump-homebrew-formula-action@v4.2
         with:
           formula-name: olcli
           homebrew-tap: aloth/homebrew-tap
