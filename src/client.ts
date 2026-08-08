@@ -18,6 +18,7 @@ const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-
 const USER_AGENT = `olcli/${pkg.version}`;
 
 const DEFAULT_BASE_URL = 'https://www.overleaf.com';
+const RESOURCE_PATH_FAILURE_HINT = ' (Perhaps the resource file you specified does not exist in the project?)';
 
 export interface Project {
   id: string;
@@ -231,6 +232,20 @@ export class OverleafClient {
 
   private compileUrl(projectId: string): string {
     return `${this.baseUrl}/project/${projectId}/compile?enable_pdf_caching=true`;
+  }
+
+  /**
+   * Build the request body for the compile endpoint.
+   * Support an optional resourcePath to compile a specific file.
+   */
+  private buildCompileRequestBody(resourcePath?: string): string {
+    return JSON.stringify({
+      rootDoc_id: null,
+      draft: false,
+      check: 'silent',
+      incrementalCompilesEnabled: true,
+      ...(resourcePath ? { rootResourcePath: resourcePath } : {})
+    });
   }
 
   /**
@@ -800,16 +815,11 @@ export class OverleafClient {
   /**
    * Compile project and get PDF
    */
-  async compileProject(projectId: string): Promise<{ pdfUrl: string; logs: string[] }> {
+  async compileProject(projectId: string, resourcePath?: string): Promise<{ pdfUrl: string; logs: string[] }> {
     const response = await this.httpRequest(this.compileUrl(projectId), {
       method: 'POST',
       headers: this.getHeaders(true),
-      body: JSON.stringify({
-        rootDoc_id: null,
-        draft: false,
-        check: 'silent',
-        incrementalCompilesEnabled: true
-      }),
+      body: this.buildCompileRequestBody(resourcePath),
       expect: 'json'
     });
 
@@ -822,7 +832,7 @@ export class OverleafClient {
     const data = response.body as any;
 
     if (data.status !== 'success') {
-      throw new Error(`Compilation failed: ${data.status}`);
+      throw new Error(`Compilation failed: ${data.status}${resourcePath ? RESOURCE_PATH_FAILURE_HINT : ''}`);
     }
 
     // Match by path 'output.pdf' — Overleaf's CLSI always names the main
@@ -846,8 +856,8 @@ export class OverleafClient {
   /**
    * Download compiled PDF
    */
-  async downloadPdf(projectId: string, timeoutMs?: number): Promise<Buffer> {
-    const { pdfUrl } = await this.compileProject(projectId);
+  async downloadPdf(projectId: string, timeoutMs?: number, resourcePath?: string): Promise<Buffer> {
+    const { pdfUrl } = await this.compileProject(projectId, resourcePath);
     return this.downloadBuffer(pdfUrl, timeoutMs);
   }
 
@@ -2167,20 +2177,17 @@ export class OverleafClient {
   /**
    * Compile project and get all output files
    */
-  async compileWithOutputs(projectId: string): Promise<{
+  async compileWithOutputs(projectId: string, resourcePath?: string): Promise<{
     status: 'success' | 'failure' | 'error';
     pdfUrl?: string;
     outputFiles: { path: string; type: string; url: string }[];
+    /** Set when compilation failed and a specific root document was requested. */
+    failureHint?: string;
   }> {
     const response = await this.httpRequest(this.compileUrl(projectId), {
       method: 'POST',
       headers: this.getHeaders(true),
-      body: JSON.stringify({
-        rootDoc_id: null,
-        draft: false,
-        check: 'silent',
-        incrementalCompilesEnabled: true
-      }),
+      body: this.buildCompileRequestBody(resourcePath),
       expect: 'json'
     });
 
@@ -2206,7 +2213,8 @@ export class OverleafClient {
         path: f.path,
         type: f.type,
         url: `${this.baseUrl}${f.url}${qs}`
-      }))
+      })),
+      failureHint: data.status !== 'success' && resourcePath ? RESOURCE_PATH_FAILURE_HINT : undefined
     };
   }
 

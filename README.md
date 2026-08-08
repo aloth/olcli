@@ -103,6 +103,8 @@ olcli push
 
 ```bash
 olcli pdf
+# Compile a specific .tex file (for multi-doc projects):
+olcli pdf -r appendix.tex
 ```
 
 ### 5. Or use native git commands
@@ -149,6 +151,16 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli config set-cookie-name <name>` | Set session cookie name |
 | `olcli config set-timeout <ms>` | Set default HTTP timeout |
 | `olcli check` | Show config paths and credential sources |
+
+### Compile Options
+
+The compile-related commands (`compile`, `pdf`, `output`) accept:
+
+| Flag | Description |
+|------|-------------|
+| `-r, --resource <path>` | Compile a specific `.tex` file as the root document (e.g. `appendix.tex`, `folder/test.tex`) |
+
+Useful in multi-doc projects: each `-r` run compiles the file as if it were the main document.
 
 ### Global Options
 
@@ -252,11 +264,16 @@ olcli sync && olcli pdf -o draft.pdf
 # Quick PDF download
 olcli pdf "Conference Paper" -o paper.pdf
 
+# Compile a specific root document
+olcli pdf "Conference Paper" -r appendix.tex -o appendix.pdf
+olcli compile "Conference Paper" -r folder/test.tex
+
 # Upload figures
 olcli upload figures/diagram.png
 
 # arXiv submission prep
 olcli output bbl -o main.bbl
+olcli output bbl -r folder/test.tex -o main.bbl  # compile artifacts from a specific root doc
 olcli zip -o arxiv-submission.zip
 
 # Backup all projects
