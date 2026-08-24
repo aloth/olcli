@@ -815,6 +815,38 @@ program
     }
   });
 
+program
+  .command('project-rename <newname> [project]')
+  .description('Rename the project itself (not a file inside it)')
+  .option('--dry-run', 'Show what would change without applying')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (newname, project, options) => {
+    const spinner = ora('Renaming project...').start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project);
+
+      if (proj.name === newname) {
+        spinner.info(`Project is already named "${newname}"`);
+        return;
+      }
+
+      if (options.dryRun) {
+        spinner.stop();
+        console.log(chalk.bold('Would rename project:'));
+        console.log(`  ${chalk.cyan(proj.name)} \u2192 ${chalk.cyan(newname)}  ${chalk.dim(`(${proj.id})`)}`);
+        return;
+      }
+
+      await client.renameProject(proj.id, newname);
+      spinner.succeed(`Renamed project: ${proj.name} \u2192 ${newname}`);
+      setLastProject(proj.id);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPILE COMMAND
 // ─────────────────────────────────────────────────────────────────────────────
