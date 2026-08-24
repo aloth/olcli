@@ -984,6 +984,7 @@ program
   .description('Upload local changes to Overleaf project')
   .option('--project <name>', 'Project name or ID (overrides .olcli.json)')
   .option('--all', 'Upload all files (not just changed)')
+  .option('--delete', 'Propagate local deletions to the remote (opt-in; see docs)')
   .option('--dry-run', 'Show what would be uploaded without uploading')
   .option('--probe-folder', 'Probe for correct folder ID (use if uploads fail with folder_not_found)')
   .option('--no-default-ignore', 'Disable built-in LaTeX artifact ignore list (only .olignore applies)')
@@ -1000,12 +1001,21 @@ program
     let lastPull: Date | undefined;
     let rootFolderId: string | undefined;
 
+    let previousPushManifest: string[] = [];
+
     if (existsSync(metaPath)) {
       const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
       projectId = meta.projectId;
       projectName = meta.projectName;
       lastPull = meta.lastPull ? new Date(meta.lastPull) : undefined;
       rootFolderId = meta.rootFolderId;
+      // Written by a previous push (pushManifest) or pull (remoteManifest).
+      // Either is a valid baseline for "what did this directory last put there".
+      if (Array.isArray(meta.pushManifest)) {
+        previousPushManifest = meta.pushManifest as string[];
+      } else if (Array.isArray(meta.remoteManifest)) {
+        previousPushManifest = meta.remoteManifest as string[];
+      }
     }
 
     if (options.project) {
@@ -1051,6 +1061,10 @@ program
 
       const filesToUpload: { path: string; relativePath: string }[] = [];
       const filesIgnored: string[] = [];
+      // Every local file that survives ignore filtering, regardless of mtime.
+      // filesToUpload is mtime-filtered and therefore useless as a deletion
+      // baseline: an unchanged file would look "absent" and get deleted.
+      const allLocalPaths = new Set<string>();
 
       function scanDir(currentDir: string, relativeBase: string = '') {
         const entries = readdirSync(currentDir, { withFileTypes: true });
@@ -1077,6 +1091,7 @@ program
               filesIgnored.push(relativePath);
               continue;
             }
+            allLocalPaths.add(relativePath);
             // Check if file is newer than last pull (unless --all)
             if (options.all || !lastPull) {
               filesToUpload.push({ path: fullPath, relativePath });
@@ -1101,16 +1116,46 @@ program
         spinner.start('Scanning files...');
       }
 
-      if (filesToUpload.length === 0) {
+      // Deletion candidates: tracked by a previous push/pull from THIS directory,
+      // gone locally now. Never derived from the remote listing - that would also
+      // sweep away files someone else uploaded through the Overleaf editor.
+      //
+      // Skipped entirely without a baseline manifest: on a first push we cannot
+      // tell "deleted locally" from "never existed here", and guessing wrong
+      // destroys remote work.
+      const filesToDelete: string[] = [];
+      if (options.delete && previousPushManifest.length > 0) {
+        for (const path of previousPushManifest) {
+          if (path === 'output.pdf' || path.endsWith('/output.pdf')) continue;
+          if (!allLocalPaths.has(path)) filesToDelete.push(path);
+        }
+      }
+      const noBaseline = options.delete === true && previousPushManifest.length === 0;
+
+      if (filesToUpload.length === 0 && filesToDelete.length === 0) {
         spinner.info('No files to upload');
+        if (noBaseline) {
+          console.log(chalk.dim('  --delete skipped: no manifest yet (first push from this directory)'));
+        }
         return;
       }
 
       if (options.dryRun) {
         spinner.stop();
-        console.log(chalk.bold(`Would upload ${filesToUpload.length} file(s) to "${projectName}":`));
-        for (const f of filesToUpload) {
-          console.log(`  ${chalk.cyan(f.relativePath)}`);
+        if (filesToUpload.length > 0) {
+          console.log(chalk.bold(`Would upload ${filesToUpload.length} file(s) to "${projectName}":`));
+          for (const f of filesToUpload) {
+            console.log(`  ${chalk.cyan(f.relativePath)}`);
+          }
+        }
+        if (filesToDelete.length > 0) {
+          console.log(chalk.bold(`Would delete ${filesToDelete.length} file(s) on "${projectName}":`));
+          for (const p of filesToDelete) {
+            console.log(`  ${chalk.red(p)}`);
+          }
+        }
+        if (noBaseline) {
+          console.log(chalk.dim('  --delete skipped: no manifest yet (first push from this directory)'));
         }
         return;
       }
@@ -1165,10 +1210,29 @@ program
         }
       }
 
-      // Update last push time
+      // Deletions run after uploads: a rename arrives as add+remove, and doing
+      // it in this order never leaves the remote without the file.
+      let deleted = 0;
+      const deleteSkipped: { path: string; reason: string }[] = [];
+      if (filesToDelete.length > 0) {
+        spinner.text = `Deleting ${filesToDelete.length} remote file(s)...`;
+        for (const path of filesToDelete) {
+          try {
+            await client.deleteByPath(projectId!, path);
+            deleted++;
+          } catch (error: any) {
+            // Already gone remotely is the common case and not an error worth
+            // failing the push over.
+            deleteSkipped.push({ path, reason: error.message || String(error) });
+          }
+        }
+      }
+
+      // Update last push time and the manifest that the next --delete reads.
       if (existsSync(metaPath)) {
         const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
         meta.lastPush = new Date().toISOString();
+        meta.pushManifest = Array.from(allLocalPaths).sort();
         writeFileSync(metaPath, JSON.stringify(meta, null, 2));
       }
 
@@ -1179,6 +1243,19 @@ program
         }
       } else {
         spinner.succeed(`Uploaded ${uploaded} file(s) to "${projectName}"`);
+      }
+
+      if (deleted > 0) {
+        console.log(chalk.dim(`  ✖ ${deleted} deleted on remote`));
+      }
+      if (deleteSkipped.length > 0) {
+        console.log(chalk.yellow(`  ${deleteSkipped.length} deletion(s) skipped:`));
+        for (const s of deleteSkipped) {
+          console.log(chalk.dim(`    ${s.path}: ${s.reason}`));
+        }
+      }
+      if (noBaseline) {
+        console.log(chalk.dim('  --delete skipped: no manifest yet; next push has a baseline'));
       }
 
       setLastProject(projectId!);
