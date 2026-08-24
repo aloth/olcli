@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2026-08-24
+
+### Added
+- **`olcli push --delete`** - opt-in propagation of local deletions to the remote
+  - `push` has never removed remote files, so a file deleted locally stayed on Overleaf indefinitely. `sync` already handles this ([#7](https://github.com/aloth/olcli/issues/7)), but `sync` pulls the remote over the working tree first, which is not acceptable when the local tree is the source of truth
+  - Deletion candidates come from `pushManifest` in `.olcli.json` (what this directory last uploaded), **never** from the remote listing - files uploaded by collaborators through the web editor are left alone
+  - Skipped entirely when no baseline manifest exists (first push from a directory), since "deleted locally" and "never existed here" cannot be told apart
+  - Deletions run *after* uploads, so a rename never leaves the remote without the file
+  - Opt-in: default `push` behaviour is unchanged
+- **`olcli project rename <newname> [project]`** - rename the project itself
+  - `olcli rename` targets a doc/file/folder *inside* a project; there was no way to rename the project
+  - `--dry-run` prints the change without applying it
+  - Renaming to the current name is a no-op with an info message, not an error
+- **`olcli project rename-bulk`** - pattern-based rename across many projects
+  - Filters with `--match <regex>`, transforms with `--search`/`--replace`, `--prefix`, `--suffix`
+  - **Dry-run is the default.** `--apply` is required to change anything - inverted from the usual convention because Overleaf keeps no project-name history, so a bulk rename fired on a typo cannot be undone
+  - `--max <n>` refuses to apply when more than `n` projects would change
+  - **Collision detection**: refuses to apply when two projects would end up with the same name, or when a target name is already taken by an untouched project. Overleaf tolerates duplicate names, so without this check the operation would succeed silently and leave projects that cannot be told apart in any listing
+  - A failure mid-run is reported and the remaining renames continue; a partial run is recoverable by re-running, aborting midway would leave the same partial state with no report
+- **MCP tool `rename_project`** - rename a project through the MCP surface
+- **MCP tool `plan_project_renames`** - preview a bulk rename; returns planned renames, skipped projects and collisions
+  - Deliberately plan-only. There is no apply counterpart on the MCP surface: an account-wide rename is unrecoverable, so applying a plan requires a human running `olcli project rename-bulk --apply`
+
+### Changed
+- Rename planning logic extracted into `src/rename-plan.ts` as a pure function, so the CLI and the MCP server evaluate the same rules. Two copies would drift, and the collision check is the part that must not
+
+### Notes
+- `.olcli.json` gains an optional `pushManifest` field. Older versions ignore unknown fields, so downgrading is safe. When no `pushManifest` exists, `push --delete` falls back to the `remoteManifest` written by `pull`
+
 ## [0.8.0] - 2026-08-08
 
 ### Added

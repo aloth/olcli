@@ -20,7 +20,11 @@
 | `resolve_comment` | Mark a comment thread as resolved |
 | `delete_entity` | Delete a file or document by path |
 | `rename_entity` | Rename a file or document |
+| `rename_project` | Rename the project itself (not a file inside it) |
+| `plan_project_renames` | Preview a bulk project rename — **plan only, never applies** |
 | `compile_with_outputs` | Compile and return all output files (PDF, BBL, logs…) |
+
+> **Why `plan_project_renames` cannot apply.** A bulk rename across an account is unrecoverable: Overleaf keeps no project-name history, and it tolerates duplicate names, so a bad pattern succeeds silently and leaves projects nobody can tell apart. The tool returns the planned renames, skipped projects and any collisions; executing them requires a human running `olcli project rename-bulk --apply` in a terminal.
 
 ## Authentication
 
