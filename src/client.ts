@@ -1834,6 +1834,33 @@ export class OverleafClient {
   }
 
   /**
+   * Rename the project itself (not an entity inside it).
+   *
+   * Distinct from renameEntity, which targets a doc/file/folder within a
+   * project. Overleaf exposes the project-level rename under a different
+   * path and expects `newProjectName` rather than `name`.
+   */
+  async renameProject(projectId: string, newName: string): Promise<void> {
+    const trimmed = newName.trim();
+    if (!trimmed) {
+      throw new Error('Project name must not be empty');
+    }
+
+    const response = await this.httpRequest(`${this.baseUrl}/project/${projectId}/rename`, {
+      method: 'POST',
+      headers: this.getHeaders(true),
+      body: JSON.stringify({ newProjectName: trimmed }),
+      expect: 'text'
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to rename project: ${response.status}`);
+    }
+
+    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+  }
+
+  /**
    * Delete a file by path
    */
   async deleteByPath(projectId: string, path: string): Promise<void> {

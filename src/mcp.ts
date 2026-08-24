@@ -25,6 +25,7 @@ import AdmZip from 'adm-zip';
 
 import { OverleafClient } from './client.js';
 import { resolveRemotePath } from './paths.js';
+import { planProjectRenames } from './rename-plan.js';
 import {
   getSessionCookie,
   getBaseUrl,
@@ -488,6 +489,71 @@ server.tool(
     wrapTool(async () => {
       const client = await getClient();
       return client.compileWithOutputs(project_id, resource_path);
+    })
+);
+
+// ---------------------------------------------------------------------------
+// Tool: rename_project
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'rename_project',
+  'Rename an Overleaf project itself (not a file inside it). Use rename_entity for files and folders.',
+  {
+    project_id: z.string().describe('The Overleaf project ID'),
+    new_name: z.string().describe('New project name'),
+  },
+  async ({ project_id, new_name }) =>
+    wrapTool(async () => {
+      const client = await getClient();
+      await client.renameProject(project_id, new_name);
+      return { project_id, new_name };
+    })
+);
+
+// ---------------------------------------------------------------------------
+// Tool: plan_project_renames
+//
+// Deliberately plan-only. There is no apply counterpart on the MCP surface:
+// a bulk rename across an entire account is unrecoverable (Overleaf keeps no
+// project-name history), and an agent that can trigger it on a
+// misunderstood instruction is a risk with no matching benefit. The agent
+// computes and explains the plan; a human runs
+// `olcli project rename-bulk --apply`.
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'plan_project_renames',
+  'Preview a bulk project rename across the account. Returns the planned renames, skipped projects and any name collisions. This tool NEVER renames anything - applying the plan requires the human to run `olcli project rename-bulk --apply` in a terminal.',
+  {
+    match: z
+      .string()
+      .optional()
+      .describe('Regex; only projects whose name matches are considered'),
+    search: z
+      .string()
+      .optional()
+      .describe('Literal substring to replace (not a regex)'),
+    replace: z
+      .string()
+      .optional()
+      .describe('Replacement text; supports $1/$2 backrefs when used with match'),
+    prefix: z.string().optional().describe('Text to prepend to the name'),
+    suffix: z.string().optional().describe('Text to append to the name'),
+  },
+  async ({ match, search, replace, prefix, suffix }) =>
+    wrapTool(async () => {
+      const client = await getClient();
+      const projects = await client.listProjects();
+      const plan = planProjectRenames(projects, { match, search, replace, prefix, suffix });
+      return {
+        ...plan,
+        applied: false,
+        note:
+          plan.collisions.length > 0
+            ? 'Collisions present. Overleaf allows duplicate names, so applying this would succeed silently and leave indistinguishable projects. Fix the pattern before proceeding.'
+            : 'Preview only. Run `olcli project rename-bulk --apply` to execute.',
+      };
     })
 );
 
