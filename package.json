@@ -22,6 +22,7 @@
     "mcp": "node dist/mcp.js",
     "dev": "tsx src/cli.ts",
     "lint": "eslint src/",
+    "test": "tsx --test test/*.test.ts",
     "prepare": "npm run build"
   },
   "keywords": [

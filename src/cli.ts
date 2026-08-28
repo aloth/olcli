@@ -13,7 +13,7 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OverleafClient } from './client.js';
-import { resolveRemotePath } from './paths.js';
+import { resolveRemotePath, resolveWithin } from './paths.js';
 import { planProjectRenames } from './rename-plan.js';
 import {
   loadIgnore,
@@ -1063,9 +1063,16 @@ program
       let skippedCount = 0;
       const skippedFiles: string[] = [];
 
+      const unsafeEntries: string[] = [];
+
       for (const entry of entries) {
         if (!entry.isDirectory) {
-          const filePath = join(targetDir, entry.entryName);
+          const filePath = resolveWithin(targetDir, entry.entryName);
+          if (!filePath) {
+            // Entry would escape the target directory (zip-slip) - never extract
+            unsafeEntries.push(entry.entryName);
+            continue;
+          }
           const fileDir = dirname(filePath);
 
           // Check if local file exists and is newer than last pull
@@ -1091,10 +1098,19 @@ program
         }
       }
 
+      if (unsafeEntries.length > 0) {
+        console.log(chalk.yellow(`  Skipped ${unsafeEntries.length} unsafe archive entr${unsafeEntries.length === 1 ? 'y' : 'ies'} (path escapes target directory):`));
+        for (const name of unsafeEntries.slice(0, 5)) {
+          console.log(chalk.dim(`    ${name}`));
+        }
+      }
+
       // Save project metadata (with manifest of remote files for sync deletion tracking)
       const remoteManifest: string[] = [];
       for (const e of entries) {
-        if (!e.isDirectory) remoteManifest.push(e.entryName);
+        if (!e.isDirectory && resolveWithin(targetDir, e.entryName)) {
+          remoteManifest.push(e.entryName);
+        }
       }
       writeFileSync(join(targetDir, '.olcli.json'), JSON.stringify({
         projectId,
@@ -1531,12 +1547,22 @@ program
         spinner.start();
       }
 
-      // Extract remote files
+      // Extract remote files (skipping entries that would escape the target
+      // directory - zip-slip protection)
       const remoteFiles = new Map<string, Buffer>();
+      const unsafeRemoteEntries: string[] = [];
       for (const entry of zip.getEntries()) {
         if (!entry.isDirectory) {
+          if (!resolveWithin(targetDir, entry.entryName)) {
+            unsafeRemoteEntries.push(entry.entryName);
+            continue;
+          }
           remoteFiles.set(entry.entryName, entry.getData());
         }
+      }
+      if (unsafeRemoteEntries.length > 0) {
+        spinner.warn(`Skipped ${unsafeRemoteEntries.length} unsafe archive entr${unsafeRemoteEntries.length === 1 ? 'y' : 'ies'} (path escapes target directory)`);
+        spinner.start();
       }
 
       // Merge: local changes take precedence for files modified after last pull
@@ -1597,7 +1623,8 @@ program
 
       // Write remote files, but preserve local modifications
       for (const [path, remoteContent] of remoteFiles) {
-        const filePath = join(targetDir, path);
+        const filePath = resolveWithin(targetDir, path);
+        if (!filePath) continue; // already filtered above; defense in depth
         const fileDir = dirname(filePath);
         if (!existsSync(fileDir)) {
           mkdirSync(fileDir, { recursive: true });
