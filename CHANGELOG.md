@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.1] - 2026-09-01
+
+### Fixed
+- **Zip-slip path traversal when extracting project archives** ([#44](https://github.com/aloth/olcli/pull/44), reported and fixed by [@Waynting](https://github.com/Waynting))
+  - `pull` and `sync` joined each archive entry name onto the target directory with no validation, so an entry named `../../../../home/user/.bashrc` would be written outside the project directory
+  - adm-zip's own `extractAllTo()` guards against this, but olcli extracts manually via `entry.getData()` and `writeFileSync()`, which bypasses it
+  - This matters because olcli supports self-hosted Overleaf and ShareLaTeX instances, so the archive does not always come from a server the user controls or trusts
+  - New `resolveWithin(baseDir, relativePath)` in `src/paths.ts` resolves a candidate path against the base directory and returns `null` unless the result is strictly inside it. Rejects `..` escapes, absolute paths, Windows drive letters, the base directory itself, and sibling-prefix cases where `/tmp/project-evil` string-prefixes `/tmp/project`
+  - `pull` skips unsafe entries with a warning and excludes them from the `remoteManifest` written to `.olcli.json`, so they cannot enter deletion propagation on a later sync
+  - `sync` filters them when building its remote file map and re-checks in the write loop
+  - Well-formed archives are unaffected: safe entry names resolve to exactly the paths they did before
+
+### Added
+- `npm test` script running `test/paths.test.ts` via `node:test` and the existing `tsx` dev dependency. `publish.yml` already called `npm test --if-present`, which was a no-op until now, so this turns it into a real gate before publish. No new dependencies
+
 ## [0.9.0] - 2026-08-24
 
 ### Added
