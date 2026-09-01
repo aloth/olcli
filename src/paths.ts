@@ -2,6 +2,27 @@
  * Path helpers for mapping local file paths to remote Overleaf project paths.
  */
 
+import { resolve, sep } from 'node:path';
+
+/**
+ * Safely resolve a (possibly attacker-controlled) relative path, such as a
+ * zip entry name, inside a base directory.
+ *
+ * Protects against "zip-slip" path traversal: entry names containing '..'
+ * segments, absolute paths, or Windows drive letters that would escape the
+ * base directory are rejected.
+ *
+ * Returns the absolute resolved path when it is strictly inside `baseDir`,
+ * or `null` when the path would escape (or resolve to) the base directory.
+ */
+export function resolveWithin(baseDir: string, relativePath: string): string | null {
+  const base = resolve(baseDir);
+  const target = resolve(base, relativePath);
+  if (target === base) return null;
+  if (!target.startsWith(base + sep)) return null;
+  return target;
+}
+
 /**
  * Normalize a path intended to be used as a remote path inside an Overleaf
  * project.
