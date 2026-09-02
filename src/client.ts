@@ -37,6 +37,19 @@ export interface ProjectInfo {
   rootFolder: FolderEntry[];
 }
 
+export type ProjectTemplate = 'blank' | 'example';
+
+export interface CreateProjectOptions {
+  template?: ProjectTemplate;
+}
+
+export interface CreatedProject {
+  id: string;
+  name: string;
+  url: string;
+  ownerId?: string;
+}
+
 export interface FolderEntry {
   _id: string;
   name: string;
@@ -632,6 +645,49 @@ export class OverleafClient {
   async getProjectById(id: string): Promise<Project | undefined> {
     const projects = await this.listProjects();
     return projects.find(p => p.id === id);
+  }
+
+  /**
+   * Create a blank or example project.
+   */
+  async createProject(name: string, options: CreateProjectOptions = {}): Promise<CreatedProject> {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      throw new Error('Project name must not be empty');
+    }
+
+    const template = options.template ?? 'blank';
+    if (template !== 'blank' && template !== 'example') {
+      throw new Error(`Unsupported project template: ${template}`);
+    }
+
+    const response = await this.httpRequest(`${this.baseUrl}/project/new`, {
+      method: 'POST',
+      headers: this.getHeaders(true),
+      body: JSON.stringify({
+        projectName: trimmed,
+        ...(template === 'example' ? { template } : {})
+      }),
+      expect: 'json'
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to create project: ${response.status}`);
+    }
+
+    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+
+    const projectId = response.body?.project_id;
+    if (typeof projectId !== 'string' || !projectId) {
+      throw new Error('Failed to create project: response did not include a project ID');
+    }
+
+    return {
+      id: projectId,
+      name: trimmed,
+      url: `${this.baseUrl}/project/${projectId}`,
+      ...(typeof response.body?.owner_ref === 'string' ? { ownerId: response.body.owner_ref } : {})
+    };
   }
 
   /**

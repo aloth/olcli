@@ -17,6 +17,7 @@ Work with Overleaf projects directly from your command line. Edit locally with y
 ## Features
 
 - 📋 **List** all your Overleaf projects
+- ✨ **Create** blank or example projects
 - ⬇️ **Pull** project files to local directory for offline editing
 - ⬆️ **Push** local changes back to Overleaf
 - 🔄 **Sync** bidirectionally with smart conflict detection
@@ -136,6 +137,7 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli download <file> [project]` | Download a single file |
 | `olcli delete <file> [project]` | Delete a remote file or folder (alias: `rm`) |
 | `olcli rename <old> <new> [project]` | Rename a remote file or folder (alias: `mv`) |
+| `olcli project create <name>` | Create a blank or example project (`--template blank\|example`) |
 | `olcli project rename <new> [project]` | Rename the project itself (`--dry-run`) |
 | `olcli project rename-bulk` | Rename many projects by pattern (dry-run unless `--apply`) |
 | `olcli compile [project]` | Trigger PDF compilation |
@@ -303,6 +305,7 @@ import { OverleafClient } from '@aloth/olcli';
 
 const client = await OverleafClient.fromSessionCookie(cookie);
 
+const created = await client.createProject('My Paper');
 const projects = await client.listProjects();
 const info = await client.getProjectInfo(projectId);
 const zipBuf = await client.downloadProject(projectId);
@@ -319,7 +322,8 @@ const comments = await client.listComments(projectId, { status: 'open' });
 import {
   OverleafClient,
   // Types
-  Project, ProjectInfo, FolderEntry, DocEntry, FileEntry,
+  Project, ProjectInfo, ProjectTemplate, CreateProjectOptions, CreatedProject,
+  FolderEntry, DocEntry, FileEntry,
   CommentMessage, ProjectComment, CommentContext, CommentStatus,
   ListCommentsOptions, AddCommentOptions, Credentials, SessionCookiePair,
   // Config utilities
