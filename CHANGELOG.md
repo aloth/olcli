@@ -20,12 +20,12 @@ All notable changes to this project will be documented in this file.
   - Both sides pass through the same ignore layers and the same dotfile rule. Filtering only the local side would have listed `output.pdf` and every stray `.aux` on Overleaf as a local deletion on every run
   - Remote-only files are reported but flagged as untouched by a plain `push`, since only `push --delete` removes them
   - Archive entries whose names escape the target directory are dropped, consistent with what `pull` refuses to extract
-- **Continuous integration for pull requests** ([#46](https://github.com/aloth/olcli/issues/46))
+- **Continuous integration for pull requests**
   - The repository had no CI for pull requests. Only `publish.yml` existed, triggered by tags, so a change was first executed by a machine other than the author's at release time
   - `.github/workflows/ci.yml` runs `npm ci`, lint, build and test on pull requests and on pushes to `main`, across Node 20.18.1 and 24
   - A final step verifies `dist/cli.js`, `dist/mcp.js`, `dist/remote-helper.js` and `dist/index.js` are non-empty and that `node dist/cli.js --version` runs. `tsc` exiting zero does not prove entry points were emitted, and this is the step that caught the Node 18 breakage above on its first run
   - `test/e2e*.sh` are deliberately excluded: they drive a real Overleaf account
-- **A working `npm run lint`.** The script had been defined since the initial release with no `eslint` in `devDependencies` and no configuration, so it failed on every clean install. Adds `eslint` 9 with `typescript-eslint`, flat config, no type-checked rules
+- **A working `npm run lint`** ([#46](https://github.com/aloth/olcli/issues/46)). The script had been defined since the initial release with no `eslint` in `devDependencies` and no configuration, so it failed on every clean install. Adds `eslint` 9 with `typescript-eslint`, flat config, no type-checked rules
   - `no-explicit-any` is a warning rather than an error. 58 pre-existing occurrences sit where untyped JSON comes back from Overleaf, which publishes no schema for those responses. As an error, CI would be red on `main` from the day it was switched on
 
 ### Changed
@@ -49,7 +49,7 @@ All notable changes to this project will be documented in this file.
 - `latexdiff` integration (`--latexdiff`, `--pdf`) is deliberately left out of this change and will follow separately
 
 ### Contributors
-- [@Waynting](https://github.com/Waynting) - `olcli diff`, proposal and implementation ([#45](https://github.com/aloth/olcli/issues/45), [#48](https://github.com/aloth/olcli/pull/48))
+- [@Waynting](https://github.com/Waynting) - `olcli diff` ([#48](https://github.com/aloth/olcli/pull/48))
 
 ## [0.9.1] - 2026-09-01
 
