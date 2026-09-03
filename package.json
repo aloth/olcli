@@ -72,8 +72,10 @@
     "@types/adm-zip": "^0.5.7",
     "@types/node": "^22.0.0",
     "@types/tough-cookie": "^4.0.5",
+    "eslint": "^9.39.5",
     "tsx": "^4.7.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.69.0"
   },
   "engines": {
     "node": ">=18"
