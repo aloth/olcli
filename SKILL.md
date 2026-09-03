@@ -133,6 +133,18 @@ olcli sync              # Bidirectional sync (pull + push, propagates local dele
 olcli sync --no-delete  # Sync without propagating local deletions to remote
 ```
 
+### Review changes before pushing
+
+```bash
+olcli diff                 # unified diff of every changed file
+olcli diff --name-only     # changed paths only
+olcli diff --file main.tex # a single file
+```
+
+The remote side is fetched fresh each run, so this shows what a subsequent
+`push` would overwrite — not a comparison against the last `pull`. `a/` is the
+remote, `b/` is local. Binary files are reported as differing without a patch.
+
 ### Delete or rename remote files
 
 ```bash
@@ -243,6 +255,7 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 | `olcli pull [project] [dir]` | Download project files |
 | `olcli push [dir]` | Upload local changes |
 | `olcli sync [dir]` | Bidirectional sync |
+| `olcli diff [project] [dir]` | Content-level diff of local files vs. the live remote |
 | `olcli upload <file> [project]` | Upload a single file (`--to <path>` sets the remote destination) |
 | `olcli download <file> [project]` | Download a single file |
 | `olcli delete <file> [project]` | Delete a remote file or folder (alias: `rm`) |
@@ -266,6 +279,7 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 
 - **Auto-detect project**: Run commands from a synced directory (contains `.olcli.json`) to skip the project argument
 - **Dry run**: Use `olcli push --dry-run` or `olcli sync --dry-run` to preview before applying
+- **Preview content**: `push --dry-run` lists files by modification time; `olcli diff` compares actual contents, so the two lists can differ
 - **Force overwrite**: Use `olcli pull --force` to overwrite local changes
 - **Two-way deletes**: `olcli sync` propagates *local* deletions to the remote; use `--no-delete` to opt out per run
 - **Build artifacts**: `.aux`, `.bbl`, `.log`, `.synctex.gz` etc. are filtered by default. Add custom patterns to a `.olignore` file (gitignore-style)

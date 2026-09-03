@@ -563,6 +563,51 @@ fi
 sleep 1  # Rate limit
 
 #######################################
+# Test: Diff
+#######################################
+
+log_section "Diff Tests"
+
+# The pulled directory is byte-identical to the remote at this point, so a
+# diff must report nothing. Anything else means the two sides are being
+# filtered differently.
+run_test "diff reports no changes on a freshly pulled directory" \
+  "cd '$PULL_DIR' && olcli diff | grep -q 'No differences'"
+
+DIFF_TEST_FILE="$PULL_DIR/${TEST_ID}.txt"
+DIFF_ORIGINAL_CONTENT=$(cat "$DIFF_TEST_FILE")
+echo "diff test modification - $TIMESTAMP" >> "$DIFF_TEST_FILE"
+
+run_test "diff --name-only marks a modified file with M" \
+  "cd '$PULL_DIR' && olcli diff --name-only | grep -qE '^M +${TEST_ID}\\.txt$'"
+
+run_test "diff shows the added line as a local addition" \
+  "cd '$PULL_DIR' && olcli diff --file '${TEST_ID}.txt' | grep -q '^+diff test modification'"
+
+run_test "diff --file limits output to the requested file" \
+  "cd '$PULL_DIR' && test \$(olcli diff --file '${TEST_ID}.txt' | grep -c '^diff --olcli') -eq 1"
+
+# Restore, so the push tests below see the tree they expect.
+printf '%s\n' "$DIFF_ORIGINAL_CONTENT" > "$DIFF_TEST_FILE"
+
+DIFF_NEW_FILE="$PULL_DIR/${TEST_ID}_diffonly.txt"
+echo "local only - $TIMESTAMP" > "$DIFF_NEW_FILE"
+
+run_test "diff --name-only marks a local-only file with A" \
+  "cd '$PULL_DIR' && olcli diff --name-only | grep -qE '^A +${TEST_ID}_diffonly\\.txt$'"
+
+run_test "diff ignores build artifacts on both sides" \
+  "cd '$PULL_DIR' && touch '$PULL_DIR/scratch.aux' && ! olcli diff --name-only | grep -q 'scratch\\.aux'"
+
+rm -f "$DIFF_NEW_FILE" "$PULL_DIR/scratch.aux"
+
+# Back to a clean tree; verify the restore actually worked before pushing.
+run_test "diff is clean again after restoring the tree" \
+  "cd '$PULL_DIR' && olcli diff | grep -q 'No differences'"
+
+sleep 1  # Rate limit
+
+#######################################
 # Test: Push
 #######################################
 

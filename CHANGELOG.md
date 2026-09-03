@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **`olcli diff [project] [dir]`** ([#45](https://github.com/aloth/olcli/issues/45)) - content-level preview of what a push would change
+  - `push --dry-run` answers *which files*; there was no way to see *what changed inside them* short of pulling into a scratch directory and running `diff(1)` by hand
+  - Unified diff to stdout, colourized when stdout is a TTY. `--name-only` for paths only, `--file <path>` for a single file, `-U <n>` for context width
+  - **The remote side is fetched fresh on every run**, and the command says so in `--help` and in its output footer. `.olcli.json` records remote *paths*, never remote *contents*, so there is no stored snapshot to compare against - "diff against the last pull" would have meant inventing a content cache, not reusing one. Fetching fresh is also what makes the diff describe what a subsequent `push` will overwrite, which is the question the command exists to answer
+  - Cost of fetching fresh is one request: `downloadProject` returns the whole project as a single archive, the same call `pull` and `sync` already make. Per-file fetching would have been one request per file and still could not have identified which files differ without downloading them
+  - `a/` is the remote and `b/` is local, so a `+` line is content `push` would upload and a `-` line is content it would overwrite
+  - Binary files (PDFs, images) are reported as `Binary files ... differ`, detected by a NUL byte in the first 8000 bytes. No attempt is made to be cleverer
+  - Both sides pass through the same ignore layers and the same dotfile rule. Filtering only the local side would have listed `output.pdf` and every stray `.aux` on Overleaf as a local deletion on every run
+  - Remote-only files are reported but flagged as untouched by a plain `push`, since only `push --delete` removes them
+  - Archive entries whose names escape the target directory are dropped, consistent with what `pull` refuses to extract
+
+### Changed
+- Local file scanning extracted into `src/scan.ts`. `push` and `sync` each carried their own copy of the same walk-and-filter loop and the two had already drifted (`sync` guarded against a missing directory, `push` did not); `diff` would have made a third. Same reasoning as `src/rename-plan.ts` in 0.9.0
+- `push --dry-run` now notes that its list is selected by modification time and points at `olcli diff` for content changes. The two commands answer different questions and will disagree - a file touched but not edited appears in `push --dry-run` and not in `diff` - so the overlap is resolved by making each one say what it measures rather than by merging them
+
+### Notes
+- New runtime dependency: [`diff`](https://www.npmjs.com/package/diff) `^9.0.0`, which has no dependencies of its own
+- Comparison, rendering and remote-tree filtering live in `src/diff.ts` as pure functions, so they are unit-tested without an Overleaf account (`npm test`). Like `rename-plan.ts`, they are not re-exported from the package root
+- `latexdiff` integration (`--latexdiff`, `--pdf`) is deliberately left out of this change and will follow separately
+
 ## [0.9.2] - 2026-09-03
 
 ### Fixed

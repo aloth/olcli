@@ -20,6 +20,7 @@ Work with Overleaf projects directly from your command line. Edit locally with y
 - ⬇️ **Pull** project files to local directory for offline editing
 - ⬆️ **Push** local changes back to Overleaf
 - 🔄 **Sync** bidirectionally with smart conflict detection
+- 🔍 **Diff** local files against the live remote before pushing
 - 🔀 **Git remote** — use Overleaf as a native git remote ([docs](docs/GIT-REMOTE.md))
 - ✌️ **Two-way deletions** — files removed locally are deleted on Overleaf on next sync
 - 🗑️ **Delete** and ✏️ **rename** remote files by path
@@ -132,6 +133,7 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli pull [project] [dir]` | Download project files to local directory |
 | `olcli push [dir]` | Upload local changes to Overleaf (`--delete` also removes files deleted locally) |
 | `olcli sync [dir]` | Bidirectional sync (pull + push) |
+| `olcli diff [project] [dir]` | Show content-level changes between local files and the remote |
 | `olcli upload <file> [project]` | Upload a single file (`--to <path>` sets the remote destination) |
 | `olcli download <file> [project]` | Download a single file |
 | `olcli delete <file> [project]` | Delete a remote file or folder (alias: `rm`) |
@@ -191,6 +193,39 @@ Useful in multi-doc projects: each `-r` run compiles the file as if it were the 
 - Local modifications win if newer
 - **Propagates local deletions** — use `--no-delete` to opt out
 - Use `--dry-run` to preview without applying
+
+### Diff
+
+`olcli diff` compares the bytes of your local files against the project's
+current contents and prints a unified diff.
+
+```bash
+olcli diff                 # every changed file, as patches
+olcli diff --name-only     # just the changed paths
+olcli diff --file main.tex # one file
+olcli diff -U 8            # wider context
+```
+
+**The remote side is fetched fresh on every run.** The diff describes the
+project as it is at that moment — which is what a subsequent `push` would
+overwrite — not a comparison against your last `pull`. `.olcli.json` records
+remote *paths*, never remote *contents*, so there is no stored snapshot to
+compare against; and the whole project arrives in a single request, the same
+one `pull` makes, so fetching fresh costs one round trip rather than one per
+file. A collaborator editing between `diff` and `push` can still change the
+outcome, which is why the fetch time is printed.
+
+In the output, `a/` is the remote and `b/` is local: a `+` line is content
+`push` would upload, a `-` line is content it would overwrite. Files that
+differ only in bytes that are not text (PDFs, images) are reported as
+`Binary files ... differ`. Both sides pass through the same ignore layers, so
+build artifacts sitting on Overleaf are not reported as locally deleted.
+
+`diff --name-only` and `push --dry-run` answer different questions and will
+disagree. `push --dry-run` lists files whose **modification time** is newer
+than the last pull, because that is what `push` uploads; `diff` lists files
+whose **contents** actually differ. A file you touched without editing appears
+in the first and not the second.
 
 #### How deletion propagation works
 

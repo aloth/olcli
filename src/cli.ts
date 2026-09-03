@@ -13,13 +13,11 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OverleafClient } from './client.js';
-import { resolveRemotePath, resolveWithin } from './paths.js';
+import { resolveRemotePath, resolveWithin, normalizeRemotePath } from './paths.js';
 import { planProjectRenames } from './rename-plan.js';
-import {
-  loadIgnore,
-  shouldIgnore,
-  buildTexSiblingSet,
-} from './ignore.js';
+import { scanLocalFiles } from './scan.js';
+import { compareTrees, filterRemoteTree, renderFileDiff, statusLetter } from './diff.js';
+import { loadIgnore } from './ignore.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -1197,55 +1195,21 @@ program
       });
 
       // Get list of files to upload
-      const { readdirSync, statSync } = await import('node:fs');
+      const { files: localFileList, ignored: filesIgnored } = scanLocalFiles(targetDir, ignoreCtx);
 
       const filesToUpload: { path: string; relativePath: string }[] = [];
-      const filesIgnored: string[] = [];
       // Every local file that survives ignore filtering, regardless of mtime.
       // filesToUpload is mtime-filtered and therefore useless as a deletion
       // baseline: an unchanged file would look "absent" and get deleted.
       const allLocalPaths = new Set<string>();
 
-      function scanDir(currentDir: string, relativeBase: string = '') {
-        const entries = readdirSync(currentDir, { withFileTypes: true });
-        // Pre-compute sibling .tex set for the PDF special rule.
-        const texSiblings = buildTexSiblingSet(
-          entries.filter((e) => !e.isDirectory()).map((e) => e.name),
-        );
-        for (const entry of entries) {
-          // Skip hidden files and .olcli.json (always — predates ignore subsystem)
-          if (entry.name.startsWith('.')) continue;
-
-          const fullPath = join(currentDir, entry.name);
-          const relativePath = relativeBase ? `${relativeBase}/${entry.name}` : entry.name;
-
-          if (entry.isDirectory()) {
-            // Test directory ignore (gitignore semantics: trailing slash matches dir)
-            if (shouldIgnore(`${relativePath}/`, ignoreCtx)) {
-              filesIgnored.push(`${relativePath}/`);
-              continue;
-            }
-            scanDir(fullPath, relativePath);
-          } else {
-            if (shouldIgnore(relativePath, ignoreCtx, texSiblings)) {
-              filesIgnored.push(relativePath);
-              continue;
-            }
-            allLocalPaths.add(relativePath);
-            // Check if file is newer than last pull (unless --all)
-            if (options.all || !lastPull) {
-              filesToUpload.push({ path: fullPath, relativePath });
-            } else {
-              const stats = statSync(fullPath);
-              if (stats.mtime > lastPull) {
-                filesToUpload.push({ path: fullPath, relativePath });
-              }
-            }
-          }
+      for (const file of localFileList) {
+        allLocalPaths.add(file.relativePath);
+        // Check if file is newer than last pull (unless --all)
+        if (options.all || !lastPull || file.mtime > lastPull) {
+          filesToUpload.push({ path: file.path, relativePath: file.relativePath });
         }
       }
-
-      scanDir(targetDir);
 
       if (options.showIgnored && filesIgnored.length > 0) {
         spinner.stop();
@@ -1296,6 +1260,12 @@ program
         }
         if (noBaseline) {
           console.log(chalk.dim('  --delete skipped: no manifest yet (first push from this directory)'));
+        }
+        // This list is mtime-based: a file touched but not edited is in it, and
+        // a file whose bytes already match the remote is too. `olcli diff`
+        // compares content instead.
+        if (filesToUpload.length > 0) {
+          console.log(chalk.dim('  selected by modification time — run `olcli diff` to see content changes'));
         }
         return;
       }
@@ -1479,42 +1449,18 @@ program
 
       // Track local modifications
       const localFiles = new Map<string, { mtime: Date; content: Buffer }>();
-      const filesIgnored: string[] = [];
-      const { readdirSync, statSync } = await import('node:fs');
-
-      function scanLocalFiles(currentDir: string, relativeBase: string = '') {
-        if (!existsSync(currentDir)) return;
-        const entries = readdirSync(currentDir, { withFileTypes: true });
-        const texSiblings = buildTexSiblingSet(
-          entries.filter((e) => !e.isDirectory()).map((e) => e.name),
-        );
-        for (const entry of entries) {
-          if (entry.name.startsWith('.')) continue;
-          const fullPath = join(currentDir, entry.name);
-          const relativePath = relativeBase ? `${relativeBase}/${entry.name}` : entry.name;
-          if (entry.isDirectory()) {
-            if (shouldIgnore(`${relativePath}/`, ignoreCtx)) {
-              filesIgnored.push(`${relativePath}/`);
-              continue;
-            }
-            scanLocalFiles(fullPath, relativePath);
-          } else {
-            if (shouldIgnore(relativePath, ignoreCtx, texSiblings)) {
-              filesIgnored.push(relativePath);
-              continue;
-            }
-            const stats = statSync(fullPath);
-            localFiles.set(relativePath, {
-              mtime: stats.mtime,
-              content: readFileSync(fullPath)
-            });
-          }
-        }
-      }
+      let filesIgnored: string[] = [];
 
       // Read local files before overwriting
-      if (existsSync(metaPath)) {
-        scanLocalFiles(targetDir);
+      if (existsSync(targetDir) && existsSync(metaPath)) {
+        const scan = scanLocalFiles(targetDir, ignoreCtx);
+        filesIgnored = scan.ignored;
+        for (const file of scan.files) {
+          localFiles.set(file.relativePath, {
+            mtime: file.mtime,
+            content: readFileSync(file.path)
+          });
+        }
       }
 
       if (options.showIgnored && filesIgnored.length > 0) {
@@ -1708,6 +1654,161 @@ program
       process.exit(1);
     }
   });
+
+program
+  .command('diff [project] [dir]')
+  .description('Show content-level differences between local files and the remote project')
+  .option('--name-only', 'List changed paths instead of printing patches')
+  .option('--file <path>', 'Diff a single file')
+  .option('-U, --unified <n>', 'Lines of context around each hunk (default: 3)', parseInt)
+  .option('--no-default-ignore', 'Disable built-in LaTeX artifact ignore list (only .olignore applies)')
+  .option('--no-ignore', 'Disable all ignore filtering')
+  .option('--cookie <session>', 'Session cookie override')
+  .addHelpText('after', `
+The remote side is fetched fresh on every run, so the diff describes the
+project as it is right now - which is what a subsequent push would overwrite.
+It is not a comparison against the last pull. A collaborator editing between
+diff and push can still change the outcome; the fetch time is printed for that
+reason.`)
+  .action(async (project, dir, options) => {
+    const targetDir = dir || '.';
+
+    if (!existsSync(targetDir)) {
+      console.error(chalk.red(`Directory not found: ${targetDir}`));
+      process.exit(1);
+    }
+
+    const spinner = ora('Connecting...').start();
+    try {
+      const client = await getClient(options.cookie);
+
+      let resolved;
+      try {
+        resolved = await resolveProject(client, project, targetDir);
+      } catch (error: any) {
+        spinner.fail(error.message);
+        console.error('Either run from a directory with .olcli.json or pass a project name/ID');
+        process.exit(1);
+      }
+      const { id: projectId, name: projectName } = resolved;
+
+      // The whole project arrives as one zip in a single request - the same
+      // call pull and sync already make. Fetching per-file would mean one
+      // request per file and could not tell us which files differ without
+      // downloading them anyway.
+      spinner.text = 'Fetching remote project...';
+      const zipBuffer = await client.downloadProject(projectId);
+      const fetchedAt = new Date();
+
+      const AdmZip = (await import('adm-zip')).default;
+      const zip = new AdmZip(zipBuffer);
+
+      const ignoreCtx = loadIgnore(targetDir, {
+        noDefaults: options.defaultIgnore === false,
+        disableAll: options.ignore === false,
+      });
+
+      // Both sides go through the same filters; see filterRemoteTree.
+      const remoteFiles = filterRemoteTree(
+        zip.getEntries()
+          .filter((e) => !e.isDirectory)
+          .map((e) => ({ path: e.entryName, data: e.getData() })),
+        ignoreCtx,
+        (path) => resolveWithin(targetDir, path) !== null,
+      );
+
+      const scan = scanLocalFiles(targetDir, ignoreCtx);
+      const localFiles = new Map<string, Buffer>();
+      for (const file of scan.files) {
+        localFiles.set(file.relativePath, readFileSync(file.path));
+      }
+
+      let entries = compareTrees(localFiles, remoteFiles).filter((e) => e.status !== 'unchanged');
+
+      if (options.file) {
+        const wanted = normalizeRemotePath(options.file);
+        entries = entries.filter((e) => e.path === wanted);
+        if (entries.length === 0) {
+          spinner.info(`No differences in ${wanted}`);
+          if (!localFiles.has(wanted) && !remoteFiles.has(wanted)) {
+            console.log(chalk.dim('  (file is on neither side, or is filtered by an ignore rule)'));
+          }
+          return;
+        }
+      }
+
+      spinner.stop();
+
+      if (entries.length === 0) {
+        console.log(chalk.green(`No differences — local files match "${projectName}"`));
+        console.log(chalk.dim(`  remote fetched ${fetchedAt.toISOString()}`));
+        return;
+      }
+
+      if (options.nameOnly) {
+        for (const e of entries) {
+          const colour = e.status === 'added' ? chalk.green
+            : e.status === 'deleted' ? chalk.red
+            : chalk.yellow;
+          console.log(`${colour(statusLetter(e.status))}  ${e.path}`);
+        }
+      } else {
+        for (const e of entries) {
+          const patch = renderFileDiff(
+            e,
+            localFiles.get(e.path),
+            remoteFiles.get(e.path),
+            { context: options.unified },
+          );
+          patch.replace(/\n$/, '').split('\n').forEach((line, index) => {
+            console.log(colourizeDiffLine(line, index, e.binary));
+          });
+        }
+      }
+
+      console.log();
+      // With --file the summary would count only the one file asked for, which
+      // reads as "this is all that differs". Report totals only for a full run.
+      if (!options.file) {
+        const counts = {
+          added: entries.filter((e) => e.status === 'added').length,
+          modified: entries.filter((e) => e.status === 'modified').length,
+          deleted: entries.filter((e) => e.status === 'deleted').length,
+        };
+        console.log(chalk.bold(
+          `${entries.length} file(s) differ from "${projectName}": ` +
+          `${counts.added} added, ${counts.modified} modified, ${counts.deleted} remote-only`
+        ));
+        if (counts.deleted > 0) {
+          console.log(chalk.dim('  remote-only files are left alone by push; use push --delete to remove them'));
+        }
+      }
+      console.log(chalk.dim(`  a/ = remote as of ${fetchedAt.toISOString()}, b/ = local`));
+
+      setLastProject(projectId);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+/**
+ * Colourize one line of a rendered patch. chalk already no-ops when stdout is
+ * not a TTY, so this needs no flag of its own.
+ *
+ * The file headers are identified by position, not by prefix: a removed line
+ * whose own content starts with `--` renders as `--- something` and would
+ * otherwise be mistaken for the `---` header and shown as unchanged.
+ */
+function colourizeDiffLine(line: string, index: number, binary: boolean): string {
+  if (index === 0) return chalk.bold(line);          // our `diff --olcli` header
+  if (binary) return chalk.magenta(line);            // the single summary line
+  if (index <= 2) return chalk.bold(line);           // `---` / `+++`
+  if (line.startsWith('@@')) return chalk.cyan(line);
+  if (line.startsWith('+')) return chalk.green(line);
+  if (line.startsWith('-')) return chalk.red(line);
+  return line;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELP
