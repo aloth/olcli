@@ -28,10 +28,12 @@ jobs:
       # One failing version should not hide the others.
       fail-fast: false
       matrix:
-        # 18 is the floor declared in package.json engines, 24 is what
-        # publish.yml ships with. Both are tested because a release that only
-        # works on the newer one would still satisfy the engines field.
-        node-version: ['18', '24']
+        # 20.18.1 is the exact floor declared in engines, not "20": setup-node
+        # would resolve a bare '20' to the newest 20.x, which is not what the
+        # package promises. Testing the newest minor of the floor major is how
+        # the Node 18 claim survived unnoticed until this workflow existed.
+        # 24 is what publish.yml releases with.
+        node-version: ['20.18.1', '24']
 
     steps:
       - uses: actions/checkout@v4
