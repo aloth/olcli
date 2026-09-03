@@ -20,7 +20,7 @@
  */
 
 import { readFileSync, existsSync } from 'node:fs';
-import { join, dirname, basename } from 'node:path';
+import { join, basename } from 'node:path';
 import ignore, { Ignore } from 'ignore';
 
 /**

@@ -25,6 +25,27 @@ All notable changes to this project will be documented in this file.
 - Comparison, rendering and remote-tree filtering live in `src/diff.ts` as pure functions, so they are unit-tested without an Overleaf account (`npm test`). Like `rename-plan.ts`, they are not re-exported from the package root
 - `latexdiff` integration (`--latexdiff`, `--pdf`) is deliberately left out of this change and will follow separately
 
+## [0.9.2] - 2026-09-03
+
+### Fixed
+- **`engines` claimed Node 18 support that did not exist.** olcli would not start at all on Node 18: `client.ts` imports `cheerio` at module load, `cheerio@1.2.0` depends on `undici@7.x`, and undici references `File` as a global, which Node only exposes from 20 onwards. The process died with `ReferenceError: File is not defined` before printing anything, including `--version`
+  - Published 0.9.1 declared `engines: { node: ">=18" }` while its own lockfile resolved `cheerio 1.2.0` and `undici 7.20.0`, both declaring `>=20.18.1`. The manifest and the dependency tree contradicted each other
+  - `engines` is now `>=20.18.1`, the exact floor every `undici` release in the `^7.19.0` range requires. Not `>=20`: the floor is a patch version, and rounding it down would restate the same kind of claim this release is fixing
+  - Node 18 reached end of life on 2025-04-30. Pinning `cheerio` back to `~1.1.0` to keep it was considered and rejected: it freezes a dependency that would need manual attention on every future update, and its `undici@^7.10.0` range was never measured to actually work on 18
+  - Verified against real Node 20.18.1 and 20.20.2 binaries, not against a version string: `npm ci`, lint, build, tests and `node dist/cli.js --version` all pass, and `dist/client.js` imports without error
+
+### Added
+- **Continuous integration for pull requests** ([#46](https://github.com/aloth/olcli/issues/46))
+  - The repository had no CI for pull requests. Only `publish.yml` existed, triggered by tags, so a change was first executed by a machine other than the author's at release time
+  - `.github/workflows/ci.yml` runs `npm ci`, lint, build and test on pull requests and on pushes to `main`, across Node 20.18.1 and 24
+  - A final step verifies `dist/cli.js`, `dist/mcp.js`, `dist/remote-helper.js` and `dist/index.js` are non-empty and that `node dist/cli.js --version` runs. `tsc` exiting zero does not prove entry points were emitted, and this is the step that caught the Node 18 breakage above on its first run
+  - `test/e2e*.sh` are deliberately excluded: they drive a real Overleaf account
+- **A working `npm run lint`.** The script had been defined since the initial release with no `eslint` in `devDependencies` and no configuration, so it failed on every clean install. Adds `eslint` 9 with `typescript-eslint`, flat config, no type-checked rules
+  - `no-explicit-any` is a warning rather than an error. 58 pre-existing occurrences sit where untyped JSON comes back from Overleaf, which publishes no schema for those responses. As an error, CI would be red on `main` from the day it was switched on
+
+### Internal
+- Removed dead code the new lint setup surfaced: `printFolder` in `cli.ts`, unreachable since the initial 0.1.0 release and only ever calling itself; five imports that were pulled in and never referenced; twelve `catch (e)` clauses that never read the binding; three `let` bindings never reassigned. No behavior change
+
 ## [0.9.1] - 2026-09-01
 
 ### Fixed

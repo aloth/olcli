@@ -1,0 +1,67 @@
+name: CI
+
+# Runs on pull requests and on pushes to main. Nothing here publishes; the
+# release path stays in publish.yml, which is triggered by tags only.
+#
+# ⚠️ test/e2e*.sh are deliberately NOT run here. They drive a real Overleaf
+# account: login, pull, push, compile against a live project. `npm test` globs
+# `test/*.test.ts`, so the shell suites are already outside it - do not "fix"
+# that by widening the glob.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # A second push to the same PR cancels the first; no point finishing a run
+  # for a commit nobody will merge.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      # One failing version should not hide the others.
+      fail-fast: false
+      matrix:
+        # 20.18.1 is the exact floor declared in engines, not "20": setup-node
+        # would resolve a bare '20' to the newest 20.x, which is not what the
+        # package promises. Testing the newest minor of the floor major is how
+        # the Node 18 claim survived unnoticed until this workflow existed.
+        # 24 is what publish.yml releases with.
+        node-version: ['20.18.1', '24']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      # ci, not install: fails if package-lock.json and package.json disagree,
+      # which is exactly what should stop a pull request.
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      # The published package is dist/ plus README and LICENSE. A build that
+      # compiles but produces no entry points would otherwise pass everything
+      # above and still ship broken.
+      - name: Verify build output
+        run: |
+          for f in dist/cli.js dist/mcp.js dist/remote-helper.js dist/index.js; do
+            test -s "$f" || { echo "missing or empty: $f"; exit 1; }
+          done
+          node dist/cli.js --version

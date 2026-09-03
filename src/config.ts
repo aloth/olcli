@@ -5,7 +5,6 @@
 import Conf from 'conf';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 
 interface OlcliConfig {
   sessionCookie?: string;

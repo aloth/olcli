@@ -440,7 +440,6 @@ export class OverleafClient {
 
   private logVerbose(...args: any[]): void {
     if (this.verbose) {
-      // eslint-disable-next-line no-console
       console.error('[olcli]', ...args);
     }
   }
@@ -462,7 +461,7 @@ export class OverleafClient {
     // built-in Web Fetch primitives. Keeps every code path on httpRequest
     // (no fetch() reintroduction) while properly serializing multipart uploads.
     let bodyBuffer: string | Buffer | undefined;
-    let extraHeaders: Record<string, string> = {};
+    const extraHeaders: Record<string, string> = {};
     if (options.body instanceof FormData) {
       const req = new Request('http://x/', { method: 'POST', body: options.body });
       const arrayBuf = await req.arrayBuffer();
@@ -502,7 +501,7 @@ export class OverleafClient {
             } else if (expect === 'json') {
               try {
                 body = JSON.parse(buffer.toString('utf-8'));
-              } catch (e) {
+              } catch {
                 this.logVerbose(`${method} ${reqUrl} -> ${status} (invalid JSON, ${buffer.length} bytes)`);
                 return reject(new Error(`Failed to parse JSON response from ${reqUrl}`));
               }
@@ -568,7 +567,7 @@ export class OverleafClient {
       try {
         const data = JSON.parse(prefetchedBlob);
         projectsData = data.projects || data;
-      } catch (e) {
+      } catch {
         // Try next method
       }
     }
@@ -585,7 +584,7 @@ export class OverleafClient {
               projectsData = data.projects;
               break;
             }
-          } catch (e) {
+          } catch {
             // Continue
           }
         }
@@ -598,7 +597,7 @@ export class OverleafClient {
       if (projectsMeta) {
         try {
           projectsData = JSON.parse(projectsMeta);
-        } catch (e) {
+        } catch {
           // Continue
         }
       }
@@ -660,7 +659,7 @@ export class OverleafClient {
     if (projectMeta) {
       try {
         projectInfo = JSON.parse(projectMeta);
-      } catch (e) {
+      } catch {
         // Continue
       }
     }
@@ -674,7 +673,7 @@ export class OverleafClient {
           try {
             projectInfo = JSON.parse(content);
             break;
-          } catch (e) {
+          } catch {
             // Continue
           }
         }
@@ -1487,7 +1486,7 @@ export class OverleafClient {
       if (projectInfo.rootFolder?.[0]?._id) {
         return projectInfo.rootFolder[0]._id;
       }
-    } catch (e) {
+    } catch {
       // Fall through to computed method
     }
 
@@ -1558,12 +1557,12 @@ export class OverleafClient {
           // Success! Delete the probe file and return this folder ID
           try {
             await this.deleteEntity(projectId, data.entity_id, 'doc');
-          } catch (e) {
+          } catch {
             // Ignore delete errors for probe file
           }
           return folderId;
         }
-      } catch (e) {
+      } catch {
         // Continue to next candidate
       }
     }
@@ -1644,7 +1643,7 @@ export class OverleafClient {
           if (data?.error === 'folder_not_found') {
             return { success: false, error: 'folder_not_found' };
           }
-        } catch (e) {
+        } catch {
           // Ignore non-JSON responses and return generic HTTP error below.
         }
         return { success: false, error: `${response.status} - ${text}` };
@@ -1905,7 +1904,7 @@ export class OverleafClient {
       if (entity && entity.type !== 'folder') {
         return await this.downloadFile(projectId, entity.id, entity.type);
       }
-    } catch (e) {
+    } catch {
       // Fall through to zip method
     }
 
