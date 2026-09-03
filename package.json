@@ -63,6 +63,7 @@
     "cheerio": "^1.0.0",
     "commander": "^12.1.0",
     "conf": "^13.0.0",
+    "diff": "^9.0.0",
     "ignore": "^7.0.5",
     "ora": "^8.0.1",
     "tough-cookie": "^4.1.4",
@@ -70,6 +71,7 @@
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",
+    "@types/diff": "^7.0.2",
     "@types/node": "^22.0.0",
     "@types/tough-cookie": "^4.0.5",
     "tsx": "^4.7.0",
