@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [0.10.0] - 2026-09-03
 
 ### Added
+- **`diff_project` MCP tool** - the MCP counterpart of `olcli diff`, so an assistant can preview what a push would change without shelling out to the CLI. Read-only: nothing is uploaded or written
+  - Returns one entry per changed file with `path`, `status`, `binary` and a unified `patch`, rather than one block of diff text. The other 17 tools return JSON and an agent should be able to filter by status without parsing output
+  - `name_only` drops the patch text, `file` restricts to one path, `context` sets hunk width, and both ignore switches mirror the CLI flags
+  - Same semantics as the command: the remote is fetched fresh on every call and `remote_fetched_at` is part of the response, because a collaborator editing between the call and a later push can still change the outcome
+  - Registration verified over a real MCP handshake rather than by reading the source: `tools/list` returns 18 tools including `diff_project`, with `project_id` and `local_dir` required
 - **`olcli diff [project] [dir]`** ([#45](https://github.com/aloth/olcli/issues/45)) - content-level preview of what a push would change
   - `push --dry-run` answers *which files*; there was no way to see *what changed inside them* short of pulling into a scratch directory and running `diff(1)` by hand
   - Unified diff to stdout, colourized when stdout is a TTY. `--name-only` for paths only, `--file <path>` for a single file, `-U <n>` for context width
@@ -36,6 +41,7 @@ All notable changes to this project will be documented in this file.
 
 ### Internal
 - Removed dead code the new lint setup surfaced: `printFolder` in `cli.ts`, unreachable since the initial 0.1.0 release and only ever calling itself; five imports that were pulled in and never referenced; twelve `catch (e)` clauses that never read the binding; three `let` bindings never reassigned. No behavior change
+- `docs/MCP.md` and `SKILL.md` listed 15 and 17 MCP tools against 18 registered. `rename_project` and `plan_project_renames` had been missing since they were added; both files are now checked against the registrations rather than maintained by hand
 
 ### Notes
 - New runtime dependency: [`diff`](https://www.npmjs.com/package/diff) `^9.0.0`, which has no dependencies of its own

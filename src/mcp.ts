@@ -24,8 +24,11 @@ import { join, resolve } from 'node:path';
 import AdmZip from 'adm-zip';
 
 import { OverleafClient } from './client.js';
-import { resolveRemotePath } from './paths.js';
+import { resolveRemotePath, resolveWithin, normalizeRemotePath } from './paths.js';
 import { planProjectRenames } from './rename-plan.js';
+import { scanLocalFiles } from './scan.js';
+import { compareTrees, filterRemoteTree, renderFileDiff } from './diff.js';
+import { loadIgnore } from './ignore.js';
 import {
   getSessionCookie,
   getBaseUrl,
@@ -553,6 +556,125 @@ server.tool(
           plan.collisions.length > 0
             ? 'Collisions present. Overleaf allows duplicate names, so applying this would succeed silently and leave indistinguishable projects. Fix the pattern before proceeding.'
             : 'Preview only. Run `olcli project rename-bulk --apply` to execute.',
+      };
+    })
+);
+
+// ---------------------------------------------------------------------------
+// Tool: diff_project
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'diff_project',
+  'Compare local files against the current remote state of an Overleaf project and return the content-level differences. Read-only: nothing is uploaded or written. This is the MCP counterpart of `olcli diff`.',
+  {
+    project_id: z.string().describe('The Overleaf project ID'),
+    local_dir: z.string().describe('Local directory to compare against the remote project'),
+    file: z
+      .string()
+      .optional()
+      .describe('Restrict the comparison to a single path, as it appears in the project'),
+    name_only: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Omit the patch text and return only paths and statuses (default: false)'),
+    context: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .default(3)
+      .describe('Lines of context around each hunk (default: 3)'),
+    no_default_ignore: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Disable the built-in LaTeX artifact ignore list; only .olignore applies'),
+    no_ignore: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Disable all ignore filtering on both sides'),
+  },
+  async ({ project_id, local_dir, file, name_only, context, no_default_ignore, no_ignore }) =>
+    wrapTool(async () => {
+      const targetDir = resolve(local_dir);
+      if (!existsSync(targetDir)) {
+        throw new Error(`Directory not found: ${targetDir}`);
+      }
+
+      const client = await getClient();
+
+      // Fetched fresh on every call, exactly like `olcli diff`. The manifest
+      // records remote paths, never remote contents, so there is no snapshot to
+      // compare against - and a diff that does not describe what a subsequent
+      // push would overwrite answers a different question than the one asked.
+      // One request: downloadProject returns the whole project as one archive.
+      const zipBuffer = await client.downloadProject(project_id);
+      const fetchedAt = new Date().toISOString();
+      const zip = new AdmZip(zipBuffer);
+
+      const ignoreCtx = loadIgnore(targetDir, {
+        noDefaults: no_default_ignore,
+        disableAll: no_ignore,
+      });
+
+      // Both sides go through the same filters. Filtering only the local side
+      // would report every build artifact sitting on Overleaf as a deletion.
+      const remoteFiles = filterRemoteTree(
+        zip
+          .getEntries()
+          .filter((e) => !e.isDirectory)
+          .map((e) => ({ path: e.entryName, data: e.getData() })),
+        ignoreCtx,
+        (path) => resolveWithin(targetDir, path) !== null,
+      );
+
+      const scan = scanLocalFiles(targetDir, ignoreCtx);
+      const localFiles = new Map<string, Buffer>();
+      for (const localFile of scan.files) {
+        localFiles.set(localFile.relativePath, readFileSync(localFile.path));
+      }
+
+      let entries = compareTrees(localFiles, remoteFiles).filter((e) => e.status !== 'unchanged');
+
+      if (file) {
+        const wanted = normalizeRemotePath(file);
+        entries = entries.filter((e) => e.path === wanted);
+      }
+
+      const files = entries.map((entry) => ({
+        path: entry.path,
+        status: entry.status,
+        binary: entry.binary,
+        // Only a plain push uploads and overwrites; remote-only files survive it,
+        // so calling them "deleted" without this flag would misdescribe the effect.
+        removed_only_by_push_delete: entry.status === 'deleted',
+        ...(name_only
+          ? {}
+          : {
+              patch: renderFileDiff(
+                entry,
+                localFiles.get(entry.path),
+                remoteFiles.get(entry.path),
+                { context },
+              ),
+            }),
+      }));
+
+      return {
+        project_id,
+        local_dir: targetDir,
+        // The remote was read at this instant. A collaborator editing between
+        // this call and a later push can still change the outcome.
+        remote_fetched_at: fetchedAt,
+        changed_count: files.length,
+        files,
+        note:
+          files.length === 0
+            ? 'No differences.'
+            : 'Patches are oriented a/ = remote, b/ = local: + is content a push would upload, - is content it would overwrite.',
       };
     })
 );

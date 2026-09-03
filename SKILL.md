@@ -109,9 +109,11 @@ olcli-mcp
 npx @aloth/olcli-mcp
 ```
 
-Available MCP tools: `list_projects`, `get_project_info`, `pull_project`, `push_file`, `compile`, `download_pdf`, `list_comments`, `get_entities`, `download_file`, `add_comment`, `reply_to_comment`, `resolve_comment`, `delete_entity`, `rename_entity`, `compile_with_outputs`.
+Available MCP tools: `list_projects`, `get_project_info`, `pull_project`, `push_file`, `compile`, `download_pdf`, `list_comments`, `get_entities`, `download_file`, `add_comment`, `reply_to_comment`, `resolve_comment`, `delete_entity`, `rename_entity`, `rename_project`, `plan_project_renames`, `compile_with_outputs`, `diff_project`.
 
 `compile`, `download_pdf` and `compile_with_outputs` accept an optional `resource_path` to compile a specific root document.
+
+`diff_project` is the MCP counterpart of `olcli diff`: read-only, fetches the remote fresh on every call, and returns one entry per changed file with `path`, `status`, `binary` and a unified `patch`. Pass `name_only` to drop the patch text. `plan_project_renames` previews bulk renames and never applies them.
 
 Auth: set `OVERLEAF_SESSION` env var in MCP config, or use stored credentials from `olcli auth`.
 
