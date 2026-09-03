@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.10.0] - 2026-09-03
 
 ### Added
 - **`olcli diff [project] [dir]`** ([#45](https://github.com/aloth/olcli/issues/45)) - content-level preview of what a push would change
@@ -15,26 +15,6 @@ All notable changes to this project will be documented in this file.
   - Both sides pass through the same ignore layers and the same dotfile rule. Filtering only the local side would have listed `output.pdf` and every stray `.aux` on Overleaf as a local deletion on every run
   - Remote-only files are reported but flagged as untouched by a plain `push`, since only `push --delete` removes them
   - Archive entries whose names escape the target directory are dropped, consistent with what `pull` refuses to extract
-
-### Changed
-- Local file scanning extracted into `src/scan.ts`. `push` and `sync` each carried their own copy of the same walk-and-filter loop and the two had already drifted (`sync` guarded against a missing directory, `push` did not); `diff` would have made a third. Same reasoning as `src/rename-plan.ts` in 0.9.0
-- `push --dry-run` now notes that its list is selected by modification time and points at `olcli diff` for content changes. The two commands answer different questions and will disagree - a file touched but not edited appears in `push --dry-run` and not in `diff` - so the overlap is resolved by making each one say what it measures rather than by merging them
-
-### Notes
-- New runtime dependency: [`diff`](https://www.npmjs.com/package/diff) `^9.0.0`, which has no dependencies of its own
-- Comparison, rendering and remote-tree filtering live in `src/diff.ts` as pure functions, so they are unit-tested without an Overleaf account (`npm test`). Like `rename-plan.ts`, they are not re-exported from the package root
-- `latexdiff` integration (`--latexdiff`, `--pdf`) is deliberately left out of this change and will follow separately
-
-## [0.9.2] - 2026-09-03
-
-### Fixed
-- **`engines` claimed Node 18 support that did not exist.** olcli would not start at all on Node 18: `client.ts` imports `cheerio` at module load, `cheerio@1.2.0` depends on `undici@7.x`, and undici references `File` as a global, which Node only exposes from 20 onwards. The process died with `ReferenceError: File is not defined` before printing anything, including `--version`
-  - Published 0.9.1 declared `engines: { node: ">=18" }` while its own lockfile resolved `cheerio 1.2.0` and `undici 7.20.0`, both declaring `>=20.18.1`. The manifest and the dependency tree contradicted each other
-  - `engines` is now `>=20.18.1`, the exact floor every `undici` release in the `^7.19.0` range requires. Not `>=20`: the floor is a patch version, and rounding it down would restate the same kind of claim this release is fixing
-  - Node 18 reached end of life on 2025-04-30. Pinning `cheerio` back to `~1.1.0` to keep it was considered and rejected: it freezes a dependency that would need manual attention on every future update, and its `undici@^7.10.0` range was never measured to actually work on 18
-  - Verified against real Node 20.18.1 and 20.20.2 binaries, not against a version string: `npm ci`, lint, build, tests and `node dist/cli.js --version` all pass, and `dist/client.js` imports without error
-
-### Added
 - **Continuous integration for pull requests** ([#46](https://github.com/aloth/olcli/issues/46))
   - The repository had no CI for pull requests. Only `publish.yml` existed, triggered by tags, so a change was first executed by a machine other than the author's at release time
   - `.github/workflows/ci.yml` runs `npm ci`, lint, build and test on pull requests and on pushes to `main`, across Node 20.18.1 and 24
@@ -43,8 +23,27 @@ All notable changes to this project will be documented in this file.
 - **A working `npm run lint`.** The script had been defined since the initial release with no `eslint` in `devDependencies` and no configuration, so it failed on every clean install. Adds `eslint` 9 with `typescript-eslint`, flat config, no type-checked rules
   - `no-explicit-any` is a warning rather than an error. 58 pre-existing occurrences sit where untyped JSON comes back from Overleaf, which publishes no schema for those responses. As an error, CI would be red on `main` from the day it was switched on
 
+### Changed
+- Local file scanning extracted into `src/scan.ts`. `push` and `sync` each carried their own copy of the same walk-and-filter loop and the two had already drifted (`sync` guarded against a missing directory, `push` did not); `diff` would have made a third. Same reasoning as `src/rename-plan.ts` in 0.9.0
+- `push --dry-run` now notes that its list is selected by modification time and points at `olcli diff` for content changes. The two commands answer different questions and will disagree - a file touched but not edited appears in `push --dry-run` and not in `diff` - so the overlap is resolved by making each one say what it measures rather than by merging them
+
+### Fixed
+- **`engines` claimed Node 18 support that did not exist.** olcli would not start at all on Node 18: `client.ts` imports `cheerio` at module load, `cheerio@1.2.0` depends on `undici@7.x`, and undici references `File` as a global, which Node only exposes from 20 onwards. The process died with `ReferenceError: File is not defined` before printing anything, including `--version`
+  - Published 0.9.1 declared `engines: { node: ">=18" }` while its own lockfile resolved `cheerio 1.2.0` and `undici 7.20.0`, both declaring `>=20.18.1`. The manifest and the dependency tree contradicted each other
+  - `engines` is now `>=20.18.1`, the exact floor every `undici` release in the `^7.19.0` range requires. Not `>=20`: the floor is a patch version, and rounding it down would restate the same kind of claim this release is fixing
+  - Node 18 reached end of life on 2025-04-30. Pinning `cheerio` back to `~1.1.0` to keep it was considered and rejected: it freezes a dependency that would need manual attention on every future update, and its `undici@^7.10.0` range was never measured to actually work on 18
+  - Verified against real Node 20.18.1 and 20.20.2 binaries, not against a version string: `npm ci`, lint, build, tests and `node dist/cli.js --version` all pass, and `dist/client.js` imports without error
+
 ### Internal
 - Removed dead code the new lint setup surfaced: `printFolder` in `cli.ts`, unreachable since the initial 0.1.0 release and only ever calling itself; five imports that were pulled in and never referenced; twelve `catch (e)` clauses that never read the binding; three `let` bindings never reassigned. No behavior change
+
+### Notes
+- New runtime dependency: [`diff`](https://www.npmjs.com/package/diff) `^9.0.0`, which has no dependencies of its own
+- Comparison, rendering and remote-tree filtering live in `src/diff.ts` as pure functions, so they are unit-tested without an Overleaf account (`npm test`). Like `rename-plan.ts`, they are not re-exported from the package root
+- `latexdiff` integration (`--latexdiff`, `--pdf`) is deliberately left out of this change and will follow separately
+
+### Contributors
+- [@Waynting](https://github.com/Waynting) - `olcli diff`, proposal and implementation ([#45](https://github.com/aloth/olcli/issues/45), [#48](https://github.com/aloth/olcli/pull/48))
 
 ## [0.9.1] - 2026-09-01
 
