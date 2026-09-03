@@ -19,8 +19,6 @@ import {
   loadIgnore,
   shouldIgnore,
   buildTexSiblingSet,
-  DEFAULT_IGNORE_PATTERNS,
-  type IgnoreContext,
 } from './ignore.js';
 
 // Read version from package.json
@@ -30,7 +28,6 @@ const VERSION = pkg.version;
 import {
   getSessionCookie,
   setSessionCookie,
-  getLastProject,
   setLastProject,
   getConfigPath,
   saveOlAuth,
@@ -134,7 +131,7 @@ async function resolveProject(
     }
     
     // Otherwise, look up by name
-    let proj = await client.getProject(projectArg);
+    const proj = await client.getProject(projectArg);
     if (!proj) {
       throw new Error(`Project not found: ${projectArg}`);
     }
@@ -347,24 +344,6 @@ program
       process.exit(1);
     }
   });
-
-function printFolder(folder: any, indent: string): void {
-  // Print subfolders
-  for (const f of folder.folders || []) {
-    console.log(`${indent}📁 ${chalk.blue(f.name)}/`);
-    printFolder(f, indent + '  ');
-  }
-
-  // Print docs
-  for (const d of folder.docs || []) {
-    console.log(`${indent}📄 ${d.name}`);
-  }
-
-  // Print files
-  for (const f of folder.fileRefs || []) {
-    console.log(`${indent}📎 ${f.name}`);
-  }
-}
 
 const commentsCmd = program
   .command('comments')
@@ -1085,7 +1064,7 @@ program
                 skippedFiles.push(entry.entryName);
                 continue;
               }
-            } catch (e) {
+            } catch {
               // File doesn't exist or can't stat, proceed with download
             }
           }

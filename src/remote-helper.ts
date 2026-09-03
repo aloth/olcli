@@ -324,7 +324,7 @@ async function main(): Promise<void> {
   debug(`Project ID: ${projectId}, Base URL: ${baseUrl}`);
 
   ensureStateDir();
-  let state = loadState();
+  const state = loadState();
 
   const rl = createInterface({
     input: process.stdin,
