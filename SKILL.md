@@ -274,8 +274,13 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 | `olcli comments reopen <id>` | Reopen a thread |
 | `olcli comments delete <id>` | Delete a thread |
 | `olcli config set-url <url>` | Set self-hosted base URL |
+| `olcli config get-url` | Show the configured base URL |
 | `olcli config set-cookie-name <name>` | Set cookie name |
+| `olcli config get-cookie-name` | Show the configured cookie name |
 | `olcli config set-timeout <ms>` | Set HTTP timeout |
+| `olcli config get-timeout` | Show the configured HTTP timeout |
+| `olcli project rename <old> <new>` | Rename a project |
+| `olcli project rename-bulk` | Rename many projects by pattern (dry-run unless `--apply`) |
 
 ## Tips
 

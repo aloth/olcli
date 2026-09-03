@@ -152,8 +152,11 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli comments delete <id>` | Delete a comment thread |
 | `olcli ignored [dir]` | List ignore patterns in effect |
 | `olcli config set-url <url>` | Set self-hosted base URL |
+| `olcli config get-url` | Show the configured base URL |
 | `olcli config set-cookie-name <name>` | Set session cookie name |
+| `olcli config get-cookie-name` | Show the configured session cookie name |
 | `olcli config set-timeout <ms>` | Set default HTTP timeout |
+| `olcli config get-timeout` | Show the configured HTTP timeout |
 | `olcli check` | Show config paths and credential sources |
 
 ### Compile Options
