@@ -60,6 +60,15 @@ Clear stored credentials:
 olcli logout
 ```
 
+Clears the global config and the `.olauth` file in the current directory, and
+reports each. Environment variables cannot be unset by a child process, so
+`OVERLEAF_SESSION` and `OVERLEAF_EMAIL`/`OVERLEAF_PASSWORD` are reported rather
+than silently ignored — they outrank anything on disk.
+
+For unattended use, prefer `OVERLEAF_EMAIL`/`OVERLEAF_PASSWORD` over
+`olcli auth --password`: every command reads them, and nothing is written to
+disk or to shell history.
+
 ### Self-hosted Overleaf
 
 ```bash
@@ -255,9 +264,9 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 | Command | Description |
 |---------|-------------|
 | `olcli auth --cookie <value>` | Authenticate with session cookie |
-| `olcli auth --email <e> --password <p>` | Authenticate with password (self-hosted) |
+| `olcli auth --email <e>` | Authenticate with password, prompted (self-hosted) |
 | `olcli whoami` | Check authentication status |
-| `olcli logout` | Clear stored credentials |
+| `olcli logout` | Clear the global config and the local `.olauth` |
 | `olcli check` | Show config paths and credential sources |
 | `olcli list` | List all projects |
 | `olcli project create <name>` | Create a blank or example project |

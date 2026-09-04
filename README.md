@@ -83,8 +83,15 @@ olcli auth --cookie "your_session_cookie_value"
 **Email/password** (self-hosted without reCAPTCHA):
 
 ```bash
-olcli auth --email "you@example.com" --password "your_password"
+olcli auth --email "you@example.com"
+# prompts for the password, so it stays out of your shell history
 ```
+
+The password is **not stored** unless you pass `--save-password`. A session
+cookie is saved either way and is what later commands use; the password only
+buys an automatic re-login once that cookie expires. For scripts, set
+`OVERLEAF_EMAIL` and `OVERLEAF_PASSWORD` — every command reads them, so a
+scripted run never needs `olcli auth` at all.
 
 ### 2. List Projects
 
@@ -128,7 +135,7 @@ All commands auto-detect the project when run from a synced directory (contains 
 |---------|-------------|
 | `olcli auth` | Set session cookie or login with email/password |
 | `olcli whoami` | Check authentication status |
-| `olcli logout` | Clear stored credentials |
+| `olcli logout` | Clear the global config and the local `.olauth`, reporting each |
 | `olcli list` | List all projects |
 | `olcli info [project]` | Show project details and file list |
 | `olcli pull [project] [dir]` | Download project files to local directory |
@@ -283,6 +290,23 @@ hardcoded here: on macOS it lands under `~/Library/Preferences/`, on Linux under
 ⚠️ `olcli auth --save-local` writes `.olauth` into the **current directory**,
 which is usually your LaTeX project. Add it to that project's `.gitignore`
 before committing.
+
+### What is stored, and how to clear it
+
+Everything is stored in plaintext, so it is worth knowing what is on disk:
+
+| Credential | Stored by default | Where |
+|---|---|---|
+| Session cookie | yes | global config, or `.olauth` with `--save-local` |
+| Email + password | **no** — only with `--save-password` | global config |
+
+`olcli check` reports what exists without printing any secret.
+
+`olcli logout` clears the global config **and** the `.olauth` file in the
+current directory, then lists what it removed. It cannot unset environment
+variables, so if `OVERLEAF_SESSION` or `OVERLEAF_EMAIL`/`OVERLEAF_PASSWORD` are
+set, it says so instead of implying you are logged out — those take precedence
+over anything on disk.
 
 ### Self-hosted Overleaf
 
