@@ -8,6 +8,55 @@ All notable changes to this project will be documented in this file.
 - `olcli project create <name>` creates a blank or example Overleaf project from the command line
 - `OverleafClient.createProject()` exposes project creation through the package's programmatic API
 
+## [0.10.0] - 2026-09-03
+
+### Added
+- **`diff_project` MCP tool** - the MCP counterpart of `olcli diff`, so an assistant can preview what a push would change without shelling out to the CLI. Read-only: nothing is uploaded or written
+  - Returns one entry per changed file with `path`, `status`, `binary` and a unified `patch`, rather than one block of diff text. The other 17 tools return JSON and an agent should be able to filter by status without parsing output
+  - `name_only` drops the patch text, `file` restricts to one path, `context` sets hunk width, and both ignore switches mirror the CLI flags
+  - Same semantics as the command: the remote is fetched fresh on every call and `remote_fetched_at` is part of the response, because a collaborator editing between the call and a later push can still change the outcome
+  - Registration verified over a real MCP handshake rather than by reading the source: `tools/list` returns 18 tools including `diff_project`, with `project_id` and `local_dir` required
+- **`olcli diff [project] [dir]`** ([#45](https://github.com/aloth/olcli/issues/45)) - content-level preview of what a push would change
+  - `push --dry-run` answers *which files*; there was no way to see *what changed inside them* short of pulling into a scratch directory and running `diff(1)` by hand
+  - Unified diff to stdout, colourized when stdout is a TTY. `--name-only` for paths only, `--file <path>` for a single file, `-U <n>` for context width
+  - **The remote side is fetched fresh on every run**, and the command says so in `--help` and in its output footer. `.olcli.json` records remote *paths*, never remote *contents*, so there is no stored snapshot to compare against - "diff against the last pull" would have meant inventing a content cache, not reusing one. Fetching fresh is also what makes the diff describe what a subsequent `push` will overwrite, which is the question the command exists to answer
+  - Cost of fetching fresh is one request: `downloadProject` returns the whole project as a single archive, the same call `pull` and `sync` already make. Per-file fetching would have been one request per file and still could not have identified which files differ without downloading them
+  - `a/` is the remote and `b/` is local, so a `+` line is content `push` would upload and a `-` line is content it would overwrite
+  - Binary files (PDFs, images) are reported as `Binary files ... differ`, detected by a NUL byte in the first 8000 bytes. No attempt is made to be cleverer
+  - Both sides pass through the same ignore layers and the same dotfile rule. Filtering only the local side would have listed `output.pdf` and every stray `.aux` on Overleaf as a local deletion on every run
+  - Remote-only files are reported but flagged as untouched by a plain `push`, since only `push --delete` removes them
+  - Archive entries whose names escape the target directory are dropped, consistent with what `pull` refuses to extract
+- **Continuous integration for pull requests**
+  - The repository had no CI for pull requests. Only `publish.yml` existed, triggered by tags, so a change was first executed by a machine other than the author's at release time
+  - `.github/workflows/ci.yml` runs `npm ci`, lint, build and test on pull requests and on pushes to `main`, across Node 20.18.1 and 24
+  - A final step verifies `dist/cli.js`, `dist/mcp.js`, `dist/remote-helper.js` and `dist/index.js` are non-empty and that `node dist/cli.js --version` runs. `tsc` exiting zero does not prove entry points were emitted, and this is the step that caught the Node 18 breakage above on its first run
+  - `test/e2e*.sh` are deliberately excluded: they drive a real Overleaf account
+- **A working `npm run lint`** ([#46](https://github.com/aloth/olcli/issues/46)). The script had been defined since the initial release with no `eslint` in `devDependencies` and no configuration, so it failed on every clean install. Adds `eslint` 9 with `typescript-eslint`, flat config, no type-checked rules
+  - `no-explicit-any` is a warning rather than an error. 58 pre-existing occurrences sit where untyped JSON comes back from Overleaf, which publishes no schema for those responses. As an error, CI would be red on `main` from the day it was switched on
+
+### Changed
+- Local file scanning extracted into `src/scan.ts`. `push` and `sync` each carried their own copy of the same walk-and-filter loop and the two had already drifted (`sync` guarded against a missing directory, `push` did not); `diff` would have made a third. Same reasoning as `src/rename-plan.ts` in 0.9.0
+- `push --dry-run` now notes that its list is selected by modification time and points at `olcli diff` for content changes. The two commands answer different questions and will disagree - a file touched but not edited appears in `push --dry-run` and not in `diff` - so the overlap is resolved by making each one say what it measures rather than by merging them
+
+### Fixed
+- **`engines` claimed Node 18 support that did not exist.** olcli would not start at all on Node 18: `client.ts` imports `cheerio` at module load, `cheerio@1.2.0` depends on `undici@7.x`, and undici references `File` as a global, which Node only exposes from 20 onwards. The process died with `ReferenceError: File is not defined` before printing anything, including `--version`
+  - Published 0.9.1 declared `engines: { node: ">=18" }` while its own lockfile resolved `cheerio 1.2.0` and `undici 7.20.0`, both declaring `>=20.18.1`. The manifest and the dependency tree contradicted each other
+  - `engines` is now `>=20.18.1`, the exact floor every `undici` release in the `^7.19.0` range requires. Not `>=20`: the floor is a patch version, and rounding it down would restate the same kind of claim this release is fixing
+  - Node 18 reached end of life on 2025-04-30. Pinning `cheerio` back to `~1.1.0` to keep it was considered and rejected: it freezes a dependency that would need manual attention on every future update, and its `undici@^7.10.0` range was never measured to actually work on 18
+  - Verified against real Node 20.18.1 and 20.20.2 binaries, not against a version string: `npm ci`, lint, build, tests and `node dist/cli.js --version` all pass, and `dist/client.js` imports without error
+
+### Internal
+- Removed dead code the new lint setup surfaced: `printFolder` in `cli.ts`, unreachable since the initial 0.1.0 release and only ever calling itself; five imports that were pulled in and never referenced; twelve `catch (e)` clauses that never read the binding; three `let` bindings never reassigned. No behavior change
+- `docs/MCP.md` and `SKILL.md` listed 15 and 17 MCP tools against 18 registered. `rename_project` and `plan_project_renames` had been missing since they were added; both files are now checked against the registrations rather than maintained by hand
+
+### Notes
+- New runtime dependency: [`diff`](https://www.npmjs.com/package/diff) `^9.0.0`, which has no dependencies of its own
+- Comparison, rendering and remote-tree filtering live in `src/diff.ts` as pure functions, so they are unit-tested without an Overleaf account (`npm test`). Like `rename-plan.ts`, they are not re-exported from the package root
+- `latexdiff` integration (`--latexdiff`, `--pdf`) is deliberately left out of this change and will follow separately
+
+### Contributors
+- [@Waynting](https://github.com/Waynting) - `olcli diff` ([#48](https://github.com/aloth/olcli/pull/48))
+
 ## [0.9.1] - 2026-09-01
 
 ### Fixed

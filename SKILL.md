@@ -109,9 +109,11 @@ olcli-mcp
 npx @aloth/olcli-mcp
 ```
 
-Available MCP tools: `list_projects`, `get_project_info`, `pull_project`, `push_file`, `compile`, `download_pdf`, `list_comments`, `get_entities`, `download_file`, `add_comment`, `reply_to_comment`, `resolve_comment`, `delete_entity`, `rename_entity`, `compile_with_outputs`.
+Available MCP tools: `list_projects`, `get_project_info`, `pull_project`, `push_file`, `compile`, `download_pdf`, `list_comments`, `get_entities`, `download_file`, `add_comment`, `reply_to_comment`, `resolve_comment`, `delete_entity`, `rename_entity`, `rename_project`, `plan_project_renames`, `compile_with_outputs`, `diff_project`.
 
 `compile`, `download_pdf` and `compile_with_outputs` accept an optional `resource_path` to compile a specific root document.
+
+`diff_project` is the MCP counterpart of `olcli diff`: read-only, fetches the remote fresh on every call, and returns one entry per changed file with `path`, `status`, `binary` and a unified `patch`. Pass `name_only` to drop the patch text. `plan_project_renames` previews bulk renames and never applies them.
 
 Auth: set `OVERLEAF_SESSION` env var in MCP config, or use stored credentials from `olcli auth`.
 
@@ -139,6 +141,18 @@ olcli push              # Upload changes only
 olcli sync              # Bidirectional sync (pull + push, propagates local deletions)
 olcli sync --no-delete  # Sync without propagating local deletions to remote
 ```
+
+### Review changes before pushing
+
+```bash
+olcli diff                 # unified diff of every changed file
+olcli diff --name-only     # changed paths only
+olcli diff --file main.tex # a single file
+```
+
+The remote side is fetched fresh each run, so this shows what a subsequent
+`push` would overwrite — not a comparison against the last `pull`. `a/` is the
+remote, `b/` is local. Binary files are reported as differing without a patch.
 
 ### Delete or rename remote files
 
@@ -251,6 +265,7 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 | `olcli pull [project] [dir]` | Download project files |
 | `olcli push [dir]` | Upload local changes |
 | `olcli sync [dir]` | Bidirectional sync |
+| `olcli diff [project] [dir]` | Content-level diff of local files vs. the live remote |
 | `olcli upload <file> [project]` | Upload a single file (`--to <path>` sets the remote destination) |
 | `olcli download <file> [project]` | Download a single file |
 | `olcli delete <file> [project]` | Delete a remote file or folder (alias: `rm`) |
@@ -267,13 +282,19 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 | `olcli comments reopen <id>` | Reopen a thread |
 | `olcli comments delete <id>` | Delete a thread |
 | `olcli config set-url <url>` | Set self-hosted base URL |
+| `olcli config get-url` | Show the configured base URL |
 | `olcli config set-cookie-name <name>` | Set cookie name |
+| `olcli config get-cookie-name` | Show the configured cookie name |
 | `olcli config set-timeout <ms>` | Set HTTP timeout |
+| `olcli config get-timeout` | Show the configured HTTP timeout |
+| `olcli project rename <old> <new>` | Rename a project |
+| `olcli project rename-bulk` | Rename many projects by pattern (dry-run unless `--apply`) |
 
 ## Tips
 
 - **Auto-detect project**: Run commands from a synced directory (contains `.olcli.json`) to skip the project argument
 - **Dry run**: Use `olcli push --dry-run` or `olcli sync --dry-run` to preview before applying
+- **Preview content**: `push --dry-run` lists files by modification time; `olcli diff` compares actual contents, so the two lists can differ
 - **Force overwrite**: Use `olcli pull --force` to overwrite local changes
 - **Two-way deletes**: `olcli sync` propagates *local* deletions to the remote; use `--no-delete` to opt out per run
 - **Build artifacts**: `.aux`, `.bbl`, `.log`, `.synctex.gz` etc. are filtered by default. Add custom patterns to a `.olignore` file (gitignore-style)

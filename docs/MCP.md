@@ -23,6 +23,9 @@
 | `rename_project` | Rename the project itself (not a file inside it) |
 | `plan_project_renames` | Preview a bulk project rename — **plan only, never applies** |
 | `compile_with_outputs` | Compile and return all output files (PDF, BBL, logs…) |
+| `diff_project` | Content-level diff of a local directory against the live remote — **read-only** |
+
+> **What `diff_project` compares.** The remote side is fetched fresh on every call, so the result describes the project as it is right now, which is what a later push would overwrite. It is not a comparison against the last pull: the manifest records remote paths, never remote contents, so there is no stored snapshot. Every response carries `remote_fetched_at` for that reason — a collaborator editing between the call and a push can still change the outcome. Patches are oriented `a/` = remote, `b/` = local, so a `+` line is content a push would upload. Pass `name_only` to get statuses without patch text.
 
 > **Why `plan_project_renames` cannot apply.** A bulk rename across an account is unrecoverable: Overleaf keeps no project-name history, and it tolerates duplicate names, so a bad pattern succeeds silently and leaves projects nobody can tell apart. The tool returns the planned renames, skipped projects and any collisions; executing them requires a human running `olcli project rename-bulk --apply` in a terminal.
 
