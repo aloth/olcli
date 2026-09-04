@@ -2,11 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## [0.11.0] - 2026-09-04
 
 ### Added
-- `olcli project create <name>` creates a blank or example Overleaf project from the command line
-- `OverleafClient.createProject()` exposes project creation through the package's programmatic API
+- **`olcli project create <name>`** ([#47](https://github.com/aloth/olcli/pull/47)) - create a blank or example Overleaf project from the command line
+  - `--template blank|example` picks an empty project or Overleaf's example document, `--json` prints the created project for scripting
+  - The new project becomes the remembered project, so a following `pull` or `push` needs no argument
+  - `OverleafClient.createProject()` exposes the same thing through the programmatic API, with `ProjectTemplate`, `CreateProjectOptions` and `CreatedProject` exported from the package root
+  - Tested against a local HTTP server that captures the outgoing request, so request construction, response mapping, validation and failure paths are covered without an Overleaf account
+- **`create_project` MCP tool** - the same thing for AI assistants, so one asked to start a new paper does not have to shell out to the CLI
+  - Applies rather than previews, unlike `plan_project_renames`. That one is plan-only because a bulk rename across an account is unrecoverable; creating is additive, touches nothing existing, and an unwanted project can be deleted afterwards
+  - Returns the created project plus the template used, so a caller can tell a blank project from an example one without asking again
+  - Registration verified over a real MCP handshake: `tools/list` returns 19 tools including `create_project`
+
+### Fixed
+- **The documented global config path was wrong on macOS.** The README named `~/.config/olcli-nodejs/config.json`, but `conf` resolves to `~/Library/Preferences/olcli-nodejs/config.json` there. The path is platform-dependent and is no longer hardcoded in the docs; `olcli check` and `olcli auth` both print the real one
+
+### Contributors
+- [@mohamedsobhi777](https://github.com/mohamedsobhi777) - `olcli project create` ([#47](https://github.com/aloth/olcli/pull/47))
 
 ## [0.10.0] - 2026-09-03
 

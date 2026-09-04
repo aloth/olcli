@@ -274,7 +274,15 @@ Credentials are checked in order:
 
 1. `OVERLEAF_SESSION` environment variable
 2. `.olauth` file in current directory
-3. Global config: `~/.config/olcli-nodejs/config.json`
+3. Global config — run `olcli check` to see the exact path
+
+The global config path is platform-dependent (`conf` resolves it), so it is not
+hardcoded here: on macOS it lands under `~/Library/Preferences/`, on Linux under
+`~/.config/`. `olcli auth` prints the path it wrote to.
+
+⚠️ `olcli auth --save-local` writes `.olauth` into the **current directory**,
+which is usually your LaTeX project. Add it to that project's `.gitignore`
+before committing.
 
 ### Self-hosted Overleaf
 
