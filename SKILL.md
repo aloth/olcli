@@ -126,6 +126,13 @@ olcli pull "My Paper"
 cd My_Paper/
 ```
 
+### Create a project
+
+```bash
+olcli project create "My Paper"
+olcli project create "Example Paper" --template example
+```
+
 ### Edit and sync changes
 
 ```bash
@@ -253,6 +260,7 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 | `olcli logout` | Clear stored credentials |
 | `olcli check` | Show config paths and credential sources |
 | `olcli list` | List all projects |
+| `olcli project create <name>` | Create a blank or example project |
 | `olcli info [project]` | Show project details |
 | `olcli pull [project] [dir]` | Download project files |
 | `olcli push [dir]` | Upload local changes |

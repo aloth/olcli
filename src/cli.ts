@@ -799,7 +799,42 @@ program
 
 const projectCmd = program
   .command('project')
-  .description('Operate on projects themselves (rename, bulk rename)');
+  .description('Operate on projects themselves (create, rename, bulk rename)');
+
+projectCmd
+  .command('create <name>')
+  .description('Create a new project')
+  .option('-t, --template <type>', 'Project template: blank or example', 'blank')
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (name, options) => {
+    const template = options.template as string;
+    if (template !== 'blank' && template !== 'example') {
+      console.error(chalk.red(`Unsupported project template: ${template}`));
+      console.error('Supported templates: blank, example');
+      process.exit(1);
+    }
+
+    const spinner = ora('Creating project...').start();
+    try {
+      const client = await getClient(options.cookie);
+      const created = await client.createProject(name, { template });
+      setLastProject(created.id);
+
+      if (options.json) {
+        spinner.stop();
+        console.log(JSON.stringify(created, null, 2));
+        return;
+      }
+
+      spinner.succeed(`Created project: ${created.name}`);
+      console.log(`  ${chalk.cyan(created.id)}`);
+      console.log(`  ${chalk.cyan(created.url)}`);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
 
 projectCmd
   .command('rename <newname> [project]')

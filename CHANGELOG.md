@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+- `olcli project create <name>` creates a blank or example Overleaf project from the command line
+- `OverleafClient.createProject()` exposes project creation through the package's programmatic API
+
 ## [0.10.0] - 2026-09-03
 
 ### Added

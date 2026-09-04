@@ -19,6 +19,9 @@ export {
   // Interfaces
   type Project,
   type ProjectInfo,
+  type ProjectTemplate,
+  type CreateProjectOptions,
+  type CreatedProject,
   type FolderEntry,
   type DocEntry,
   type FileEntry,
