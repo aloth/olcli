@@ -680,6 +680,32 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
+// Tool: create_project
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'create_project',
+  'Create a new Overleaf project and return its id, name and URL. Unlike plan_project_renames, this one does apply: creating is additive, nothing existing is overwritten, and an unwanted project can be deleted afterwards.',
+  {
+    name: z.string().describe('Project name'),
+    template: z
+      .enum(['blank', 'example'])
+      .optional()
+      .default('blank')
+      .describe('Project template: an empty project, or Overleaf\'s example document'),
+  },
+  async ({ name, template }) =>
+    wrapTool(async () => {
+      const client = await getClient();
+      const created = await client.createProject(name, { template });
+      return {
+        ...created,
+        template,
+      };
+    })
+);
+
+// ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 
