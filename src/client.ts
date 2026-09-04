@@ -1,8 +1,18 @@
 /**
- * Overleaf API Client
+ * Overleaf client
  *
- * Provides programmatic access to Overleaf's REST APIs for project
- * management, file operations, and LaTeX compilation.
+ * Project management, file operations and LaTeX compilation against an
+ * Overleaf instance.
+ *
+ * These are not Overleaf's public APIs - there are none for the free tier.
+ * This client authenticates as a logged-in browser session and calls the same
+ * endpoints the web editor's own JavaScript calls: a session cookie plus a
+ * CSRF token scraped from the page, project data parsed out of `ol-*` meta
+ * tags, and the file tree recovered over the collaboration socket. Nothing
+ * here is versioned or documented by Overleaf, so the layered fallbacks below
+ * are not defensive habit - each one is a redesign that already happened.
+ *
+ * Read docs/ARCHITECTURE.md before changing anything in this file.
  */
 
 import * as cheerio from 'cheerio';
@@ -391,6 +401,22 @@ export class OverleafClient {
     return new OverleafClient({ cookies: bootstrapClient.cookies, csrf: projectCsrf, baseUrl });
   }
 
+  /**
+   * Pull the CSRF token out of a rendered Overleaf page.
+   *
+   * Overleaf requires this on every state-changing request, which is what
+   * stops another site from using your session cookie against it. It is not a
+   * secret - the web editor needs it in the page to make its own requests - so
+   * reading it back out of the HTML is the intended way for a session to
+   * obtain one. See docs/ARCHITECTURE.md.
+   *
+   * The three lookups are not belt-and-braces. Each is where the token lived
+   * at some point: the `ol-csrfToken` meta tag is current, the hidden form
+   * input is what older releases shipped, and the inline-script scrape catches
+   * self-hosted instances older still. Removing the later ones breaks
+   * self-hosted users without breaking anything on overleaf.com, so the
+   * failure would not show up here.
+   */
   private static extractCsrfToken($: cheerio.CheerioAPI): string | undefined {
     let csrf = $('meta[name="ol-csrfToken"]').attr('content');
     if (!csrf) {
@@ -571,7 +597,11 @@ export class OverleafClient {
     const html = response.body as string;
     const $ = cheerio.load(html);
 
-    // Try new Overleaf structure first (PR #82)
+    // There is no projects API; the list is server-rendered into a meta tag,
+    // so this parses Overleaf's own HTML. The three methods below are three
+    // successive shapes that tag has had - newest first, oldest last. A
+    // self-hosted instance can be running any of them, which is why the older
+    // ones stay. See docs/ARCHITECTURE.md.
     let projectsData: any[] = [];
 
     // Method 1: ol-prefetchedProjectsBlob (newest Overleaf)
@@ -757,6 +787,17 @@ export class OverleafClient {
    * Fetch the full project object via the collaboration socket.
    * Returns the `project` field of the joinProjectResponse, which contains
    * the rootFolder tree and other metadata that used to live in ol-project.
+   *
+   * This is a hand-written Socket.IO 0.9 client: handshake for a session id,
+   * `xhr-polling` for packets, decode the frames, answer the `2::` heartbeats,
+   * disconnect with `0::`. No library - the protocol is old enough that
+   * depending on one to speak it would cost more than the forty lines below.
+   *
+   * It is the most fragile surface in the repository and the least obvious,
+   * because it reimplements an undocumented internal protocol rather than
+   * calling an endpoint. It exists because the file tree left the meta tags
+   * and this payload is where it went; there is no HTTP route that returns it.
+   * When the tree is what broke, suspect this method first.
    */
   private async getProjectFromSocket(projectId: string): Promise<any | null> {
     let sid: string | null = null;
@@ -1630,6 +1671,22 @@ export class OverleafClient {
    * Upload a file to a project.
    * If folderTree is provided and fileName contains a path (e.g. 'figures/img.png'),
    * the file will be uploaded into the correct subfolder, creating it if needed.
+   */
+  /**
+   * Upload a file, replacing any file of the same name.
+   *
+   * This **overwrites**; it does not edit. Typing in the Overleaf editor sends
+   * character-level operations over the collaboration socket, and those merge
+   * with concurrent edits. This posts a whole file to the upload endpoint -
+   * the same thing as dragging a same-named file into the web UI - so whatever
+   * was there is gone.
+   *
+   * That is why `push` has no merge semantics and cannot grow any: there is no
+   * three-way merge available, only a file replacing a file. It is also why
+   * `olcli diff` exists, and why it fetches the remote fresh rather than
+   * comparing against the last pull - previewing what a push will overwrite is
+   * the only thing standing between a collaborator's edit and its replacement.
+   * See docs/ARCHITECTURE.md.
    */
   async uploadFile(
     projectId: string,

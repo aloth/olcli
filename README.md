@@ -399,6 +399,9 @@ import {
 
 Contributions are welcome! Please open an issue or submit a pull request.
 
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how the client works —
+there is no public Overleaf API, so it authenticates as a browser session.
+
 ## License
 
 MIT © [Alexander Loth](https://alexloth.com)
