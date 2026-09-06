@@ -2,7 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.12.0] - 2026-09-06
+
+### Added
+- **`CONTRIBUTING.md`** ([#52](https://github.com/aloth/olcli/pull/52)) - the setup facts that were previously only discoverable by reading the workflow file: `npm ci` rather than `npm install`, the exact Node floor rather than the major, why `test/e2e*.sh` sits outside `npm test`, and how to run the e2e suite against your own project
+  - Records two repository behaviours that look like a broken pull request and are not: CI from a first-time contributor waits at `action_required` until a maintainer approves it, and "Update branch" only appears when the branch merges cleanly
+  - ⚠️ `test/e2e-ignore.sh` and `test/e2e-issue7.sh` have a project ID hardcoded and only run against that one project. Documented rather than changed, since making them configurable is a code change
+- **`docs/ARCHITECTURE.md`** ([#53](https://github.com/aloth/olcli/pull/53)) - why the client looks the way it does. There is no public Overleaf API, so it authenticates as a logged-in browser session and calls the endpoints the web editor's own JavaScript calls
+  - The numbered fallbacks in `extractCsrfToken` and `listProjects` are successive Overleaf redesigns rather than defensive clutter, and `client.ts` now says so at the lines themselves
+  - `uploadFile` replaces whole files rather than sending edit operations, which is why `push` has no merge semantics and why `diff` needed to exist at all
+  - The module map is organised by whether something needs an Overleaf account, since that is the question that decides where new logic goes
+  - Corrects the `client.ts` file header, which claimed to provide programmatic access to Overleaf's REST APIs
 
 ### Fixed
 - **`olcli logout` left `.olauth` behind and reported success anyway** ([#50](https://github.com/aloth/olcli/issues/50)) - it cleared the global config and printed `Credentials cleared`, while the `.olauth` file in the current directory survived. That file is consulted *ahead* of the global config, so the user stayed authenticated in that directory - and in `olcli-mcp`, which reads it too. `logout` now clears both and lists what it actually removed
@@ -16,6 +26,9 @@ All notable changes to this project will be documented in this file.
 - **`olcli auth --password` is now optional and prompts instead** ([#50](https://github.com/aloth/olcli/issues/50)) - passing it puts the password in shell history, so `olcli auth --email you@example.com` now reads it from the terminal without echoing. The flag still works and warns; with no terminal available, the error names `OVERLEAF_EMAIL`/`OVERLEAF_PASSWORD`, which every command already reads
   - Keystroke handling is a pure reducer so it can be tested without a pty. Driving the real prompt over one is what surfaced the bug it now guards: filtering only the ESC of an arrow key left the printable `[` and `A` behind and silently appended them to the password
 - **`olcli check` now reports whether a password is stored** and whether a `.olauth` file is present, never the values. Answering "is my password on disk?" previously meant opening the config file
+
+### Contributors
+- [@Waynting](https://github.com/Waynting) - credential handling ([#51](https://github.com/aloth/olcli/pull/51)), `CONTRIBUTING.md` ([#52](https://github.com/aloth/olcli/pull/52)), `docs/ARCHITECTURE.md` ([#53](https://github.com/aloth/olcli/pull/53))
 
 ## [0.11.0] - 2026-09-04
 
