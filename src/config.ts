@@ -3,7 +3,7 @@
  */
 
 import Conf from 'conf';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 interface OlcliConfig {
@@ -136,9 +136,66 @@ export function getConfigPath(): string {
 }
 
 /**
+ * Where a `.olauth` file would live for a given directory.
+ *
+ * Defaults to the current working directory, which is what `saveOlAuth` and
+ * `getSessionCookie` both use.
+ */
+export function getOlAuthPath(dir?: string): string {
+  return join(dir || process.cwd(), '.olauth');
+}
+
+/**
  * Save session cookie in .olauth format for compatibility
  */
 export function saveOlAuth(cookie: string, path?: string): void {
-  const authPath = path || join(process.cwd(), '.olauth');
+  const authPath = path || getOlAuthPath();
   writeFileSync(authPath, `${getSessionCookieName()}=${cookie}`, 'utf-8');
+}
+
+/**
+ * Delete the `.olauth` file for a directory, if there is one.
+ *
+ * Returns the path that was removed, or null when there was nothing to
+ * remove. `logout` needs the distinction to report what it actually did.
+ */
+export function clearOlAuth(dir?: string): string | null {
+  const authPath = getOlAuthPath(dir);
+  if (!existsSync(authPath)) return null;
+  rmSync(authPath);
+  return authPath;
+}
+
+/**
+ * What credentials exist right now, and where.
+ *
+ * Deliberately reports every source `getSessionCookie` and
+ * `getPasswordCredentials` consult, including the two that no command can
+ * clear. `logout` used to clear the global config and announce success while
+ * a `.olauth` file - which takes precedence over it - stayed on disk and kept
+ * the user authenticated. Reporting per source is what stops that message
+ * from being wrong again. See issue #50.
+ */
+export interface StoredCredentials {
+  /** Session cookie in the global config file. */
+  sessionCookie: boolean;
+  /** Email/password pair in the global config file. */
+  password: boolean;
+  /** Path of the `.olauth` file, when one exists. Takes precedence over the config. */
+  olAuthPath: string | null;
+  /** `OVERLEAF_SESSION` is set. Takes precedence over everything, and logout cannot unset it. */
+  envSession: boolean;
+  /** `OVERLEAF_EMAIL`/`OVERLEAF_PASSWORD` are set. Same caveat. */
+  envPassword: boolean;
+}
+
+export function inspectStoredCredentials(dir?: string): StoredCredentials {
+  const authPath = getOlAuthPath(dir);
+  return {
+    sessionCookie: Boolean(config.get('sessionCookie')),
+    password: Boolean(config.get('loginEmail') || config.get('loginPassword')),
+    olAuthPath: existsSync(authPath) ? authPath : null,
+    envSession: Boolean(process.env.OVERLEAF_SESSION),
+    envPassword: Boolean(process.env.OVERLEAF_EMAIL && process.env.OVERLEAF_PASSWORD)
+  };
 }
