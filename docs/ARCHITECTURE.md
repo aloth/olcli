@@ -121,7 +121,7 @@ should go.
 |---|---|
 | `diff.ts` | Compare two file trees; render unified diffs |
 | `ignore.ts` | The three ignore layers and the `.pdf`-next-to-`.tex` rule |
-| `paths.ts` | Remote path normalisation; zip-slip containment |
+| `paths.ts` | Remote path normalization; zip-slip containment |
 | `rename-plan.ts` | Plan bulk project renames before applying any |
 | `prompt.ts` | Keystroke handling for the password prompt |
 | `scan.ts` | Walk a local directory, applying ignore rules |

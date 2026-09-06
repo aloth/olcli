@@ -114,6 +114,12 @@ Say what changed and why it was worth changing; the existing entries are the
 length to aim for. The maintainer folds `Unreleased` into a version at release
 time.
 
+**American English in prose.** `behavior`, `organize`, `normalize`, `color`.
+The changelog and the docs use it throughout, so matching it keeps a single
+release note from switching spelling halfway through. Identifiers are exempt:
+`src/` already contains `colourizeDiffLine` and `colour` locals, and code
+reads better consistent with itself than with the prose around it.
+
 Then the usual: branch, commit, push to your fork, open the pull request.
 
 ### What to expect from CI
@@ -144,6 +150,11 @@ bumps the Homebrew formula in `aloth/homebrew-tap`. Nothing publishes from
 That is the reason for the CHANGELOG entry: at release time your `Unreleased`
 lines become the release notes, and a change that arrived without one has to
 be reconstructed from its diff.
+
+A release bumps the version in three places, and `CITATION.cff` is the one
+that has no test to catch it: `package.json`, `package-lock.json` and the
+`version` field in `CITATION.cff`. A stale citation file quietly tells
+someone to cite a version they are not running.
 
 ## Reporting bugs
 

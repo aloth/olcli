@@ -6,13 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - **`CONTRIBUTING.md`** ([#52](https://github.com/aloth/olcli/pull/52)) - the setup facts that were previously only discoverable by reading the workflow file: `npm ci` rather than `npm install`, the exact Node floor rather than the major, why `test/e2e*.sh` sits outside `npm test`, and how to run the e2e suite against your own project
-  - Records two repository behaviours that look like a broken pull request and are not: CI from a first-time contributor waits at `action_required` until a maintainer approves it, and "Update branch" only appears when the branch merges cleanly
+  - Records two repository behaviors that look like a broken pull request and are not: CI from a first-time contributor waits at `action_required` until a maintainer approves it, and "Update branch" only appears when the branch merges cleanly
   - ⚠️ `test/e2e-ignore.sh` and `test/e2e-issue7.sh` have a project ID hardcoded and only run against that one project. Documented rather than changed, since making them configurable is a code change
 - **`docs/ARCHITECTURE.md`** ([#53](https://github.com/aloth/olcli/pull/53)) - why the client looks the way it does. There is no public Overleaf API, so it authenticates as a logged-in browser session and calls the endpoints the web editor's own JavaScript calls
   - The numbered fallbacks in `extractCsrfToken` and `listProjects` are successive Overleaf redesigns rather than defensive clutter, and `client.ts` now says so at the lines themselves
   - `uploadFile` replaces whole files rather than sending edit operations, which is why `push` has no merge semantics and why `diff` needed to exist at all
-  - The module map is organised by whether something needs an Overleaf account, since that is the question that decides where new logic goes
+  - The module map is organized by whether something needs an Overleaf account, since that is the question that decides where new logic goes
   - Corrects the `client.ts` file header, which claimed to provide programmatic access to Overleaf's REST APIs
+- **`SECURITY.md`** - a private route for credential bugs. Private vulnerability reporting is enabled on the repository, so the file points there first and gives an email address as the fallback. It also records which parts of the credential handling are deliberate: the config directory holds plain JSON by design and `olcli check` prints its path, so only credentials appearing somewhere *else* are a defect
+- **`CITATION.cff`** - makes the package citable through GitHub's own citation control rather than leaving a reader to assemble the fields from `package.json`
 
 ### Fixed
 - **`olcli logout` left `.olauth` behind and reported success anyway** ([#50](https://github.com/aloth/olcli/issues/50)) - it cleared the global config and printed `Credentials cleared`, while the `.olauth` file in the current directory survived. That file is consulted *ahead* of the global config, so the user stayed authenticated in that directory - and in `olcli-mcp`, which reads it too. `logout` now clears both and lists what it actually removed
@@ -22,10 +24,15 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - **The account password is no longer persisted by default** ([#50](https://github.com/aloth/olcli/issues/50)) - it is written only when you ask for it with `--save-password`. The session cookie is stored either way and is what every later command uses; the password only bought an automatic re-login after that cookie expired. A cookie is scoped to olcli and rotates, a password is reusable everywhere and cannot be revoked without changing it
   - `--no-save-password` still parses and still means "do not save", so existing scripts keep working - it is simply the default now
-  - **Behaviour change for self-hosted users:** an expired session no longer re-logs in silently. Re-run `olcli auth`, pass `--save-password` to keep the old behaviour, or set `OVERLEAF_EMAIL`/`OVERLEAF_PASSWORD`
+  - **Behavior change for self-hosted users:** an expired session no longer re-logs in silently. Re-run `olcli auth`, pass `--save-password` to keep the old behavior, or set `OVERLEAF_EMAIL`/`OVERLEAF_PASSWORD`
 - **`olcli auth --password` is now optional and prompts instead** ([#50](https://github.com/aloth/olcli/issues/50)) - passing it puts the password in shell history, so `olcli auth --email you@example.com` now reads it from the terminal without echoing. The flag still works and warns; with no terminal available, the error names `OVERLEAF_EMAIL`/`OVERLEAF_PASSWORD`, which every command already reads
   - Keystroke handling is a pure reducer so it can be tested without a pty. Driving the real prompt over one is what surfaced the bug it now guards: filtering only the ESC of an arrow key left the printable `[` and `A` behind and silently appended them to the password
 - **`olcli check` now reports whether a password is stored** and whether a `.olauth` file is present, never the values. Answering "is my password on disk?" previously meant opening the config file
+
+### Internal
+- CI status badge in the README, reporting what `ci.yml` has been running since 0.10.0
+- Spelling normalized to American English across the changelog and `docs/ARCHITECTURE.md`: `behaviour`, `organised`, `colourized`, `normalisation`. Identifiers in `src/` are untouched - `colourizeDiffLine` and the `colour` locals are code, and renaming them belongs in a change that touches that code anyway
+- `CONTRIBUTING.md` now states the spelling rule rather than leaving it to be discovered in review, and names `CITATION.cff` as the third place a release bumps alongside `package.json` and `package-lock.json`. It is the one with no test behind it
 
 ### Contributors
 - [@Waynting](https://github.com/Waynting) - credential handling ([#51](https://github.com/aloth/olcli/pull/51)), `CONTRIBUTING.md` ([#52](https://github.com/aloth/olcli/pull/52)), `docs/ARCHITECTURE.md` ([#53](https://github.com/aloth/olcli/pull/53))
@@ -59,7 +66,7 @@ All notable changes to this project will be documented in this file.
   - Registration verified over a real MCP handshake rather than by reading the source: `tools/list` returns 18 tools including `diff_project`, with `project_id` and `local_dir` required
 - **`olcli diff [project] [dir]`** ([#45](https://github.com/aloth/olcli/issues/45)) - content-level preview of what a push would change
   - `push --dry-run` answers *which files*; there was no way to see *what changed inside them* short of pulling into a scratch directory and running `diff(1)` by hand
-  - Unified diff to stdout, colourized when stdout is a TTY. `--name-only` for paths only, `--file <path>` for a single file, `-U <n>` for context width
+  - Unified diff to stdout, colorized when stdout is a TTY. `--name-only` for paths only, `--file <path>` for a single file, `-U <n>` for context width
   - **The remote side is fetched fresh on every run**, and the command says so in `--help` and in its output footer. `.olcli.json` records remote *paths*, never remote *contents*, so there is no stored snapshot to compare against - "diff against the last pull" would have meant inventing a content cache, not reusing one. Fetching fresh is also what makes the diff describe what a subsequent `push` will overwrite, which is the question the command exists to answer
   - Cost of fetching fresh is one request: `downloadProject` returns the whole project as a single archive, the same call `pull` and `sync` already make. Per-file fetching would have been one request per file and still could not have identified which files differ without downloading them
   - `a/` is the remote and `b/` is local, so a `+` line is content `push` would upload and a `-` line is content it would overwrite
@@ -121,7 +128,7 @@ All notable changes to this project will be documented in this file.
   - Deletion candidates come from `pushManifest` in `.olcli.json` (what this directory last uploaded), **never** from the remote listing - files uploaded by collaborators through the web editor are left alone
   - Skipped entirely when no baseline manifest exists (first push from a directory), since "deleted locally" and "never existed here" cannot be told apart
   - Deletions run *after* uploads, so a rename never leaves the remote without the file
-  - Opt-in: default `push` behaviour is unchanged
+  - Opt-in: default `push` behavior is unchanged
 - **`olcli project rename <newname> [project]`** - rename the project itself
   - `olcli rename` targets a doc/file/folder *inside* a project; there was no way to rename the project
   - `--dry-run` prints the change without applying it
