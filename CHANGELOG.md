@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **`olcli logout` left `.olauth` behind and reported success anyway** ([#50](https://github.com/aloth/olcli/issues/50)) - it cleared the global config and printed `Credentials cleared`, while the `.olauth` file in the current directory survived. That file is consulted *ahead* of the global config, so the user stayed authenticated in that directory - and in `olcli-mcp`, which reads it too. `logout` now clears both and lists what it actually removed
+  - Environment variables cannot be unset by a child process, so `OVERLEAF_SESSION` and `OVERLEAF_EMAIL`/`OVERLEAF_PASSWORD` are now reported instead of ignored. They outrank everything on disk, and a logout that stays silent about them repeats the original mistake in a different place
+- **`olcli auth` claimed `Password login saved.` even under `--no-save-password`** - the same class of bug: a message stating an outcome that did not happen. It now reports what was actually stored
+
+### Changed
+- **The account password is no longer persisted by default** ([#50](https://github.com/aloth/olcli/issues/50)) - it is written only when you ask for it with `--save-password`. The session cookie is stored either way and is what every later command uses; the password only bought an automatic re-login after that cookie expired. A cookie is scoped to olcli and rotates, a password is reusable everywhere and cannot be revoked without changing it
+  - `--no-save-password` still parses and still means "do not save", so existing scripts keep working - it is simply the default now
+  - **Behaviour change for self-hosted users:** an expired session no longer re-logs in silently. Re-run `olcli auth`, pass `--save-password` to keep the old behaviour, or set `OVERLEAF_EMAIL`/`OVERLEAF_PASSWORD`
+- **`olcli auth --password` is now optional and prompts instead** ([#50](https://github.com/aloth/olcli/issues/50)) - passing it puts the password in shell history, so `olcli auth --email you@example.com` now reads it from the terminal without echoing. The flag still works and warns; with no terminal available, the error names `OVERLEAF_EMAIL`/`OVERLEAF_PASSWORD`, which every command already reads
+  - Keystroke handling is a pure reducer so it can be tested without a pty. Driving the real prompt over one is what surfaced the bug it now guards: filtering only the ESC of an arrow key left the printable `[` and `A` behind and silently appended them to the password
+- **`olcli check` now reports whether a password is stored** and whether a `.olauth` file is present, never the values. Answering "is my password on disk?" previously meant opening the config file
+
 ## [0.11.0] - 2026-09-04
 
 ### Added

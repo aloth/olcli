@@ -38,8 +38,11 @@ import {
   setTimeout,
   getPasswordCredentials,
   setPasswordCredentials,
+  clearOlAuth,
+  inspectStoredCredentials,
   type PasswordCredentials
 } from './config.js';
+import { promptHidden, PromptCancelled, NotATerminal } from './prompt.js';
 
 const program = new Command();
 
@@ -158,9 +161,18 @@ program
   .description('Authenticate with Overleaf using a session cookie or email/password')
   .option('--cookie <session>', 'Session cookie (overleaf_session2 value)')
   .option('--email <email>', 'Account email for password login')
-  .option('--password <password>', 'Account password for password login')
-  .option('--no-save-password', 'Do not persist email/password credentials')
+  .option('--password <password>', 'Account password (omit to be prompted; see warning below)')
+  .option('--save-password', 'Persist the password in the config file, in plaintext')
+  .option('--no-save-password', 'Do not persist the password (the default; kept for existing scripts)')
   .option('--save-local', 'Save to .olauth in current directory')
+  .addHelpText('after', `
+The password is not stored unless you ask for it with --save-password. A
+session cookie is stored either way, and that is what later commands use; the
+password only buys an automatic re-login once the cookie expires.
+
+Passing --password puts the password in your shell history. Omit it to be
+prompted instead, or set OVERLEAF_EMAIL and OVERLEAF_PASSWORD, which every
+command reads without needing 'auth' at all.`)
   .action(async (options) => {
     if (!options.cookie && !options.email && !options.password) {
       console.log(chalk.yellow('To authenticate, provide a session cookie:'));
@@ -173,7 +185,8 @@ program
       console.log(chalk.cyan('  olcli auth --cookie "your_session_cookie_value"'));
       console.log();
       console.log('Or log in with email/password:');
-      console.log(chalk.cyan('  olcli auth --email "you@example.com" --password "your_password"'));
+      console.log(chalk.cyan('  olcli auth --email "you@example.com"'));
+      console.log(chalk.dim('  (prompts for the password, so it stays out of your shell history)'));
       console.log();
       console.log('Or set OVERLEAF_SESSION environment variable');
       return;
@@ -184,9 +197,39 @@ program
       process.exit(1);
     }
 
-    if (!options.cookie && (!options.email || !options.password)) {
-      console.error(chalk.red('Both --email and --password are required for password login.'));
+    if (!options.cookie && !options.email) {
+      console.error(chalk.red('--email is required for password login.'));
       process.exit(1);
+    }
+
+    // Resolve the password before the spinner starts: a prompt and a spinner
+    // both own the terminal, and ora would redraw over the prompt line.
+    let password: string | undefined = options.password;
+    if (!options.cookie) {
+      if (password) {
+        console.log(chalk.yellow('⚠ --password is now in your shell history.'));
+        console.log(chalk.dim('  Omit it to be prompted, or set OVERLEAF_EMAIL/OVERLEAF_PASSWORD.'));
+      } else {
+        try {
+          password = await promptHidden(`Password for ${options.email}: `);
+        } catch (error: any) {
+          if (error instanceof NotATerminal) {
+            console.error(chalk.red('No terminal available to prompt for a password.'));
+            console.error('Set OVERLEAF_EMAIL and OVERLEAF_PASSWORD instead — every command reads them,');
+            console.error("so a scripted run does not need 'olcli auth' at all.");
+            process.exit(1);
+          }
+          if (error instanceof PromptCancelled) {
+            console.error(chalk.red('Cancelled.'));
+            process.exit(1);
+          }
+          throw error;
+        }
+        if (!password) {
+          console.error(chalk.red('Password must not be empty.'));
+          process.exit(1);
+        }
+      }
     }
 
     const spinner = ora('Verifying session...').start();
@@ -208,15 +251,30 @@ program
         }
       } else {
         spinner.text = 'Logging in with email/password...';
-        const client = await OverleafClient.fromPasswordLogin(options.email, options.password, baseUrl);
+        const client = await OverleafClient.fromPasswordLogin(options.email, password!, baseUrl);
         const projects = await client.listProjects();
         persistClientSession(client, cookieName);
         setBaseUrl(baseUrl);
-        if (options.savePassword !== false) {
-          setPasswordCredentials(options.email, options.password);
+
+        // Opt-in, not opt-out. The session cookie persisted just above is what
+        // later commands actually use; the password only buys an automatic
+        // re-login after that cookie expires, and it is stored in plaintext.
+        // A cookie is scoped to olcli and rotates; a password is reusable
+        // everywhere and cannot be revoked without changing it. See issue #50.
+        const savePassword = options.savePassword === true;
+        if (savePassword) {
+          setPasswordCredentials(options.email, password!);
         }
 
-        spinner.succeed(`Authenticated! Found ${projects.length} projects. Password login saved.`);
+        // The old message said "Password login saved." unconditionally - even
+        // under --no-save-password, which had just prevented exactly that.
+        spinner.succeed(`Authenticated! Found ${projects.length} projects.`);
+        if (savePassword) {
+          console.log(chalk.yellow('Password stored in plaintext in the config file.'));
+        } else {
+          console.log(chalk.dim('Session cookie stored. The password was not saved; re-run'));
+          console.log(chalk.dim('olcli auth when the session expires, or use --save-password.'));
+        }
       }
 
       console.log(chalk.dim(`Config saved to: ${getConfigPath()}`));
@@ -251,9 +309,41 @@ program
 program
   .command('logout')
   .description('Clear stored credentials')
+  .addHelpText('after', `
+Clears the global config and the .olauth file in the current directory, and
+reports each one separately. Environment variables cannot be cleared by a
+child process, so OVERLEAF_SESSION and OVERLEAF_EMAIL/OVERLEAF_PASSWORD are
+reported instead of silently ignored - both take precedence over anything on
+disk.`)
   .action(() => {
+    // Read before clearing: afterwards there is nothing left to report on.
+    const before = inspectStoredCredentials();
+
     clearConfig();
-    console.log(chalk.green('Credentials cleared'));
+    const removedOlAuth = clearOlAuth();
+
+    const cleared: string[] = [];
+    if (before.sessionCookie) cleared.push('session cookie (global config)');
+    if (before.password) cleared.push('saved password (global config)');
+    if (removedOlAuth) cleared.push(removedOlAuth);
+
+    if (cleared.length === 0) {
+      console.log('Nothing stored to clear.');
+    } else {
+      console.log(chalk.green('Cleared:'));
+      for (const item of cleared) console.log(`  ${item}`);
+    }
+
+    // The reason this command was wrong before: it announced success while a
+    // higher-precedence source kept the user authenticated. Anything olcli
+    // cannot clear has to be said out loud, or the message is a lie again.
+    if (before.envSession || before.envPassword) {
+      console.log();
+      console.log(chalk.yellow('Still authenticated in this shell:'));
+      if (before.envSession) console.log('  OVERLEAF_SESSION is set');
+      if (before.envPassword) console.log('  OVERLEAF_EMAIL and OVERLEAF_PASSWORD are set');
+      console.log(chalk.dim('  These outrank anything on disk. Unset them to finish logging out.'));
+    }
   });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1960,6 +2050,22 @@ program
       console.log(chalk.dim(`  Value: ${cookie.substring(0, 20)}...`));
     } else {
       console.log(chalk.yellow('✗ No session cookie found'));
+    }
+
+    // A stored password is a credential source this command used to omit,
+    // which made it impossible to answer "is my password on disk?" without
+    // opening the config file. Never print the value - only whether it exists
+    // and which source it came from.
+    const stored = inspectStoredCredentials();
+    if (stored.envPassword) {
+      console.log(chalk.yellow('⚠ Password set via OVERLEAF_EMAIL/OVERLEAF_PASSWORD'));
+    } else if (stored.password) {
+      console.log(chalk.yellow('⚠ Password stored in plaintext in the config file'));
+      console.log(chalk.dim("  Remove it with 'olcli logout', then re-auth without --save-password."));
+    }
+
+    if (stored.olAuthPath) {
+      console.log(chalk.dim(`  .olauth present: ${stored.olAuthPath}`));
     }
   });
 
