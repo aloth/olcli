@@ -426,6 +426,9 @@ Contributions are welcome! Please open an issue or submit a pull request.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, which tests need a real
 Overleaf account, and what to expect from CI on a pull request.
 
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how the client works —
+there is no public Overleaf API, so it authenticates as a browser session.
+
 ## License
 
 MIT © [Alexander Loth](https://alexloth.com)
