@@ -217,3 +217,39 @@ export function statusLetter(status: FileStatus): string {
     case 'unchanged': return ' ';
   }
 }
+
+/**
+ * Exit statuses for `diff --exit-code`, following diff(1) rather than the
+ * plain success/failure every other olcli command reports.
+ *
+ * The 1-vs-2 split is the entire point of the flag. A gate that cannot
+ * separate "the project differs" from "the run failed" reads an expired
+ * cookie or a typo'd flag as a content change, and a pipeline that fails for
+ * the wrong reason is worse than one that does not fail at all - it sends
+ * whoever reads the log looking for a diff that was never computed.
+ *
+ * Only `--exit-code` moves failures to 2. Without it every failure stays 1,
+ * so existing scripts that check `olcli diff` for success keep working.
+ */
+export const DIFF_EXIT_CLEAN = 0;
+export const DIFF_EXIT_DIFFERENCES = 1;
+export const DIFF_EXIT_FAILURE = 2;
+
+/**
+ * The status `diff --exit-code` should finish with, given the comparison it
+ * just rendered.
+ *
+ * Takes the entries rather than a count so an unfiltered `compareTrees`
+ * result answers the same as the filtered list the command prints from: a
+ * gate that fired because every *unchanged* file was counted would report a
+ * difference on every run and be switched off within a day.
+ *
+ * The entries passed in are whatever was reported, so `--file main.tex`
+ * narrows the question to that file, the same way `git diff --exit-code`
+ * narrows to its pathspec.
+ */
+export function differencesExitCode(entries: FileDiff[]): number {
+  return entries.some((e) => e.status !== 'unchanged')
+    ? DIFF_EXIT_DIFFERENCES
+    : DIFF_EXIT_CLEAN;
+}

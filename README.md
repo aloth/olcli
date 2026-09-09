@@ -218,6 +218,7 @@ olcli diff                 # every changed file, as patches
 olcli diff --name-only     # just the changed paths
 olcli diff --file main.tex # one file
 olcli diff -U 8            # wider context
+olcli diff --exit-code     # exit 1 if anything differs, for CI
 ```
 
 **The remote side is fetched fresh on every run.** The diff describes the
@@ -280,6 +281,40 @@ working directory, so anything the markup needs must already be on Overleaf. A
 written next to the marked-up source when that happens. A *figure* you added
 locally does not fail it; Overleaf draws a placeholder box naming the missing
 file and the rest of the PDF is fine.
+
+#### Using `diff` as a CI gate
+
+`--exit-code` turns the command into a check, with the statuses `diff(1)` uses:
+
+| Status | Meaning |
+|--------|---------|
+| `0` | Nothing differs |
+| `1` | Something differs |
+| `2` | The run failed — bad flags, no session, project unreachable |
+
+```yaml
+- name: Fail if the paper on Overleaf has drifted from the repo
+  run: olcli diff --exit-code --name-only
+  env:
+    OVERLEAF_SESSION: ${{ secrets.OVERLEAF_SESSION }}
+```
+
+**The `1` versus `2` split is the point of the flag.** Without it a pipeline
+cannot tell a changed file from an expired session cookie, and a job that goes
+red for the second reason sends whoever reads the log hunting for a diff that
+was never computed. Every other olcli command reports failure as `1`, and
+`olcli diff` still does when `--exit-code` is absent, so adding the flag does
+not change what existing scripts see.
+
+The gate covers whatever was compared: `--file main.tex` narrows it to one
+file, the way a `git diff --exit-code` pathspec does, and a `--file` that
+matches nothing is `0` rather than an error. Under `--latexdiff` it still
+reports on the project as a whole — a changed figure is a real difference even
+though a marked-up root document cannot show it.
+
+Note that this compares against Overleaf **now**, not against your last pull,
+so the check is "has anyone drifted from what is committed here", which is what
+makes it worth running on a schedule as well as on a push.
 
 #### How deletion propagation works
 
