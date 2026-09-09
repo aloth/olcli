@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **`olcli diff --latexdiff` marks the revision up inside the document** ([#55](https://github.com/aloth/olcli/issues/55)) - the follow-up left open when the core `diff` command shipped in 0.10.0. A unified diff is the right artifact for a developer and the wrong one for a thesis advisor, who expects deletions struck through and additions underlined. It runs on the two sides `diff` has already fetched, so the markup describes exactly what the patch output does - struck through is what a push would overwrite, underlined is what it would upload - and costs no extra request
+  - Requires `latexdiff` on PATH, which ships with TeX Live and MacTeX. A missing binary is reported as a setup problem with the install command for the platform, not as a failure of `diff`; nothing else in the command needs an external tool
+  - `\input` and `\include` are inlined before comparing, with `--no-flatten` to opt out. Without it a remote compile resolves those against the files in the project - the *old* content - and produces a PDF marking up the root document while showing every input file as unchanged. Wrong in a way that is very hard to notice
+  - Output goes to `.olcli-diff/`, dotted because `scanLocalFiles` skips dotted entries before any ignore rule is consulted. A plain `main-diff.tex` next to the document would be uploaded to Overleaf by the next `push`
+  - The root document is the `.tex` file declaring `\documentclass`. Several candidates are reported and listed rather than resolved by preferring `main.tex`: marking up the wrong document produces a plausible PDF describing the wrong revision
+  - `--latexdiff-opt` passes options straight through (`--latexdiff-opt --math-markup=0`), since the remote tree is on disk only for the duration of the run and cannot be handed to `latexdiff` by hand afterwards
+- **`--pdf` compiles the marked-up document on Overleaf**, so a reviewable PDF needs no local TeX installation - the reason the flag was proposed in [#45](https://github.com/aloth/olcli/issues/45)
+  - Overleaf's compile endpoint takes a path that must already be in the project; there is no way to compile a document that is not. So the markup is uploaded as `olcli-latexdiff.tex` next to the root document, compiled, downloaded, and removed. That is a real mutation of the project for the duration of one compile, and the command says so before it does it
+  - It refuses rather than overwrites if a file of that name already exists, deletes from a `finally` with nothing in between able to terminate the process first, and prints the exact `olcli rm` command if the delete itself fails or the run is interrupted
+  - Placed next to the root document rather than at the project root, so relative `\includegraphics` and `\bibliography` paths resolve exactly as they do for the document it was built from
+  - A compile failure writes the CLSI log next to the marked-up source instead of reporting only a status, and deletes a PDF left by an earlier run rather than leaving one that describes a different revision. The compile runs against the project, so a `.sty` or `.cls` that exists only locally is the usual cause and the message says so. A missing *figure* is not: Overleaf draws a placeholder box naming the file and still reports success
+- **`src/latexdiff.ts`** - root document detection, argument construction, output naming and failure interpretation are functions over data, unit-tested with no Overleaf account and no `latexdiff` binary. 21 tests, in the suite CI already runs
+
 ## [0.12.0] - 2026-09-06
 
 ### Added

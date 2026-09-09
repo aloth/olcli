@@ -115,11 +115,13 @@ Which files need an Overleaf account to exercise, and which do not. This is the
 main thing to know before adding a feature, because it decides where the logic
 should go.
 
-**Pure — data in, data out. No network, no filesystem, unit-tested:**
+**Needs no Overleaf account, so unit-tested directly. Data in, data out;
+`scan.ts` and `latexdiff.ts` also touch the local filesystem:**
 
 | Module | Responsibility |
 |---|---|
 | `diff.ts` | Compare two file trees; render unified diffs |
+| `latexdiff.ts` | Root document detection; build and run the `latexdiff` command |
 | `ignore.ts` | The three ignore layers and the `.pdf`-next-to-`.tex` rule |
 | `paths.ts` | Remote path normalization; zip-slip containment |
 | `rename-plan.ts` | Plan bulk project renames before applying any |
@@ -146,6 +148,11 @@ New logic belongs in the pure column wherever it can go. That is why `scan.ts`
 exists at all: `push` and `sync` each carried their own copy of the same walk
 loop and had already drifted apart, and `diff` would have made a third. The
 same reasoning produced `rename-plan.ts` and `diff.ts`.
+
+`latexdiff.ts` is the one module that shells out to something olcli does not
+ship. That is confined to a single `execFile` call with an argv array — never a
+shell — and a missing binary is reported as a setup problem with a fix rather
+than as a failure of the command.
 
 `client.ts` request *construction* can also be tested without an account, by
 pointing the client at a local HTTP server that captures the outgoing request —
