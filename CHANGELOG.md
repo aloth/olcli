@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.13.0] - 2026-09-11
 
 ### Added
 - **`olcli diff --latexdiff` marks the revision up inside the document** ([#55](https://github.com/aloth/olcli/issues/55)) - the follow-up left open when the core `diff` command shipped in 0.10.0. A unified diff is the right artifact for a developer and the wrong one for a thesis advisor, who expects deletions struck through and additions underlined. It runs on the two sides `diff` has already fetched, so the markup describes exactly what the patch output does - struck through is what a push would overwrite, underlined is what it would upload - and costs no extra request
@@ -23,6 +23,9 @@ All notable changes to this project will be documented in this file.
   - The status is *set* rather than exited on. `process.exit` discards whatever is still buffered on a non-TTY stdout, and `olcli diff --exit-code > patch.txt` is exactly a large patch going into a pipe: measured here, exiting outright truncated a 1.5 MB patch to the 128 KB pipe buffer and lost 91% of it mid-hunk. Returning lets node flush first
   - The gate covers whatever was compared, so `--file` narrows it to one file the way a `git diff --exit-code` pathspec does, and a `--file` matching nothing is `0` rather than an error. Under `--latexdiff` it reports on the project rather than on the markup - a changed figure is a real difference even though a marked-up root document cannot show one
   - Exit statuses and the "unchanged files are not differences" rule are pinned by unit tests in `test/diff.test.ts`; `test/e2e.sh` gains eight cases covering the clean tree, a difference, `--file` narrowing, the redirected-output case and both failure statuses
+
+### Contributors
+- [@Waynting](https://github.com/Waynting) - `--latexdiff` and `--pdf` ([#56](https://github.com/aloth/olcli/pull/56)), `--exit-code` ([#57](https://github.com/aloth/olcli/pull/57))
 
 ## [0.12.0] - 2026-09-06
 
