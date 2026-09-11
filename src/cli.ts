@@ -9,14 +9,28 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { OverleafClient } from './client.js';
 import { resolveRemotePath, resolveWithin, normalizeRemotePath } from './paths.js';
 import { planProjectRenames } from './rename-plan.js';
 import { scanLocalFiles } from './scan.js';
-import { compareTrees, filterRemoteTree, renderFileDiff, statusLetter } from './diff.js';
+import { compareTrees, filterRemoteTree, renderFileDiff, statusLetter, type FileDiff } from './diff.js';
+import {
+  DIFF_OUTPUT_DIR,
+  LatexdiffError,
+  RootDocumentError,
+  buildLatexdiffArgs,
+  diffOutputPath,
+  isTexPath,
+  latexdiffInstallHint,
+  materializeTree,
+  remoteScratchPath,
+  resolveRootDocument,
+  runLatexdiff,
+} from './latexdiff.js';
 import { loadIgnore } from './ignore.js';
 
 // Read version from package.json
@@ -1786,6 +1800,13 @@ program
   .option('--name-only', 'List changed paths instead of printing patches')
   .option('--file <path>', 'Diff a single file')
   .option('-U, --unified <n>', 'Lines of context around each hunk (default: 3)', parseInt)
+  .option('--latexdiff', 'Mark the revision up inside the document with latexdiff (requires latexdiff on PATH)')
+  .option('--pdf', 'Compile the marked-up document on Overleaf and download the PDF (implies --latexdiff)')
+  .option('--main <path>', 'Root .tex document to mark up (default: the only file declaring \\documentclass)')
+  .option('-o, --output <path>', `Where to write the marked-up .tex (default: ${DIFF_OUTPUT_DIR}/<root>-diff.tex)`)
+  .option('--no-flatten', 'Leave \\input/\\include in place instead of inlining them')
+  .option('--latexdiff-opt <opt>', 'Pass an option straight through to latexdiff (repeatable)',
+    (value: string, previous: string[] = []) => [...previous, value])
   .option('--no-default-ignore', 'Disable built-in LaTeX artifact ignore list (only .olignore applies)')
   .option('--no-ignore', 'Disable all ignore filtering')
   .option('--cookie <session>', 'Session cookie override')
@@ -1794,13 +1815,48 @@ The remote side is fetched fresh on every run, so the diff describes the
 project as it is right now - which is what a subsequent push would overwrite.
 It is not a comparison against the last pull. A collaborator editing between
 diff and push can still change the outcome; the fetch time is printed for that
-reason.`)
+reason.
+
+--latexdiff hands those same two sides to latexdiff and marks the revision up
+inside the document instead: struck through is what a push would overwrite,
+underlined is what it would upload. --pdf additionally uploads the marked-up
+document to the project for one compile, downloads the PDF, and removes it
+again - so a reviewable PDF needs no local TeX installation.`)
   .action(async (project, dir, options) => {
     const targetDir = dir || '.';
 
     if (!existsSync(targetDir)) {
       console.error(chalk.red(`Directory not found: ${targetDir}`));
       process.exit(1);
+    }
+
+    // Checked before connecting: an unusable combination of flags should not
+    // cost a login and a full project download first.
+    const latexdiffMode = Boolean(options.latexdiff || options.pdf);
+    const conflicting = [
+      options.nameOnly ? '--name-only' : null,
+      options.file ? '--file' : null,
+      options.unified !== undefined ? '-U/--unified' : null,
+    ].filter(Boolean);
+
+    if (latexdiffMode && conflicting.length > 0) {
+      console.error(chalk.red(`--latexdiff cannot be combined with ${conflicting.join(', ')}`));
+      console.error('It marks up one root document; those options select and shape unified patch output.');
+      process.exit(1);
+    }
+
+    if (!latexdiffMode) {
+      // Accepting these silently would produce a normal patch and no markup,
+      // with nothing in the output saying the flag was dropped.
+      const latexdiffOnly = [
+        options.main ? '--main' : null,
+        options.output ? '--output' : null,
+        options.latexdiffOpt?.length ? '--latexdiff-opt' : null,
+      ].filter(Boolean);
+      if (latexdiffOnly.length > 0) {
+        console.error(chalk.red(`${latexdiffOnly.join(', ')} only applies with --latexdiff`));
+        process.exit(1);
+      }
     }
 
     const spinner = ora('Connecting...').start();
@@ -1849,6 +1905,23 @@ reason.`)
       }
 
       let entries = compareTrees(localFiles, remoteFiles).filter((e) => e.status !== 'unchanged');
+
+      if (latexdiffMode) {
+        await runLatexdiffMode({
+          client,
+          projectId,
+          projectName,
+          targetDir,
+          localFiles,
+          remoteFiles,
+          entries,
+          fetchedAt,
+          options,
+          spinner,
+        });
+        setLastProject(projectId);
+        return;
+      }
 
       if (options.file) {
         const wanted = normalizeRemotePath(options.file);
@@ -1916,6 +1989,246 @@ reason.`)
       process.exit(1);
     }
   });
+
+/**
+ * `--latexdiff` / `--pdf`: mark the revision up inside the document.
+ *
+ * Runs on the two sides `diff` has already fetched, so the semantics are the
+ * ones documented for the command - old is the remote as of this run, new is
+ * the working directory - and no extra request is made to produce the markup.
+ *
+ * The remote side has to reach the filesystem before `latexdiff` can read it,
+ * and the whole tree is written rather than the root document alone, because
+ * `--flatten` resolves each `\input` relative to its own side.
+ */
+async function runLatexdiffMode(params: {
+  client: OverleafClient;
+  projectId: string;
+  projectName: string;
+  targetDir: string;
+  localFiles: Map<string, Buffer>;
+  remoteFiles: Map<string, Buffer>;
+  entries: FileDiff[];
+  fetchedAt: Date;
+  /** Only the flags this mode reads; the rest of `diff`'s options are rejected. */
+  options: {
+    main?: string;
+    output?: string;
+    pdf?: boolean;
+    flatten?: boolean;
+    latexdiffOpt?: string[];
+  };
+  spinner: ReturnType<typeof ora>;
+}): Promise<void> {
+  const {
+    client, projectId, projectName, targetDir,
+    localFiles, remoteFiles, entries, fetchedAt, options, spinner,
+  } = params;
+
+  let root = '';
+  try {
+    root = resolveRootDocument(localFiles, options.main ? normalizeRemotePath(options.main) : undefined);
+  } catch (error) {
+    if (!(error instanceof RootDocumentError)) throw error;
+    spinner.stop();
+    console.error(chalk.red(error.message));
+    for (const candidate of error.candidates) {
+      console.error(chalk.dim(`    ${candidate}`));
+    }
+    process.exit(1);
+  }
+
+  // latexdiff needs two versions of the same document. A root document that
+  // only exists locally has one, and diffing it against an empty file would
+  // mark up the entire paper as an addition.
+  if (!remoteFiles.has(root)) {
+    spinner.stop();
+    console.error(chalk.red(`${root} is not in "${projectName}" yet, so there is no earlier version to mark up.`));
+    console.error(chalk.dim('  Push it first, or use --main to name a document that exists on both sides.'));
+    process.exit(1);
+  }
+
+  if (!entries.some((e) => isTexPath(e.path))) {
+    spinner.info(`No .tex file differs from "${projectName}" - the markup will show no changes`);
+  }
+
+  const tmpRoot = mkdtempSync(join(tmpdir(), 'olcli-latexdiff-'));
+  const cleanupTmp = () => rmSync(tmpRoot, { recursive: true, force: true });
+
+  try {
+    spinner.start('Writing the remote side to a temporary directory...');
+    materializeTree(tmpRoot, remoteFiles);
+
+    spinner.text = `Running latexdiff on ${root}...`;
+    let markup = '';
+    let warnings = '';
+    try {
+      const result = await runLatexdiff(buildLatexdiffArgs(
+        join(tmpRoot, root),
+        join(targetDir, root),
+        { flatten: options.flatten !== false, extra: options.latexdiffOpt },
+      ));
+      markup = result.markup;
+      warnings = result.stderr.trim();
+    } catch (error) {
+      if (!(error instanceof LatexdiffError)) throw error;
+      spinner.fail(error.message);
+      if (error.missing) {
+        console.error(chalk.dim(`  ${latexdiffInstallHint()}`));
+        console.error(chalk.dim('  Everything else in olcli diff needs no external tools.'));
+      } else if (error.stderr) {
+        console.error(error.stderr);
+      }
+      cleanupTmp();
+      process.exit(1);
+    }
+
+    // An explicit --output is a path the user chose, so it is taken relative to
+    // the current directory; the default belongs to the project directory being
+    // diffed. Either way the PDF sits next to the source it was built from.
+    const texPath = options.output || join(targetDir, diffOutputPath(root, 'tex'));
+    const pdfPath = texPath.replace(/\.(tex|ltx)$/i, '') + '.pdf';
+
+    mkdirSync(dirname(texPath), { recursive: true });
+    writeFileSync(texPath, markup, 'utf-8');
+    spinner.succeed(`Marked up ${root} (${(Buffer.byteLength(markup) / 1024).toFixed(1)} KB)`);
+
+    if (warnings) {
+      for (const line of warnings.split('\n')) {
+        console.log(chalk.yellow(`  latexdiff: ${line}`));
+      }
+    }
+
+    if (options.pdf) {
+      await compileMarkupOnOverleaf({ client, projectId, projectName, root, markup, texPath, pdfPath, spinner });
+    }
+
+    console.log();
+    console.log(chalk.bold(`Revision of ${root} against "${projectName}"`));
+    console.log(`  ${texPath}`);
+    if (options.pdf) console.log(`  ${pdfPath}`);
+    console.log(chalk.dim(
+      `  struck through = remote as of ${fetchedAt.toISOString()}, underlined = local`,
+    ));
+    if (options.flatten !== false) {
+      console.log(chalk.dim('  \\input/\\include were inlined; pass --no-flatten to keep them'));
+    }
+  } finally {
+    cleanupTmp();
+  }
+}
+
+/**
+ * Compile a marked-up document with Overleaf's compiler and download the PDF.
+ *
+ * The compile endpoint takes a `rootResourcePath` that has to already exist in
+ * the project - there is no way to compile a document that is not in it. So
+ * the markup is uploaded, compiled, and removed again, which is a real
+ * mutation of someone's project for the duration of one compile and is
+ * announced before it happens.
+ *
+ * Three things follow from that and are not incidental:
+ *
+ * - The upload refuses to overwrite. If the scratch path is taken, that file
+ *   belongs to the user, and clobbering it to produce a diff would be a worse
+ *   outcome than not producing one.
+ * - The delete runs from a `finally`, and nothing between the upload and it
+ *   calls `process.exit` - that would terminate before the cleanup and leave
+ *   the file on the project. Failures are collected and reported afterwards.
+ * - An interrupt cannot be cleaned up after reliably, so it prints the exact
+ *   command that removes the file rather than leaving it to be discovered.
+ */
+async function compileMarkupOnOverleaf(params: {
+  client: OverleafClient;
+  projectId: string;
+  projectName: string;
+  root: string;
+  markup: string;
+  texPath: string;
+  pdfPath: string;
+  spinner: ReturnType<typeof ora>;
+}): Promise<void> {
+  const { client, projectId, projectName, root, markup, texPath, pdfPath, spinner } = params;
+  const scratch = remoteScratchPath(root);
+
+  spinner.start(`Checking ${scratch} is free...`);
+  if (await client.findEntityByPath(projectId, scratch)) {
+    spinner.fail(`"${projectName}" already has a file named ${scratch}`);
+    console.error(chalk.dim('  --pdf uploads the marked-up document under that name for one compile and'));
+    console.error(chalk.dim('  removes it again; it will not overwrite a file that is already there.'));
+    console.error(chalk.dim(`  The marked-up source was still written: ${texPath}`));
+    process.exit(1);
+  }
+
+  spinner.stop();
+  console.log(chalk.dim(`  uploading ${scratch} to "${projectName}" for one compile, then removing it`));
+
+  const onInterrupt = () => {
+    console.error(chalk.yellow(`\nInterrupted with ${scratch} still in "${projectName}".`));
+    console.error(chalk.yellow(`Remove it with: olcli rm ${scratch}`));
+    process.exit(130);
+  };
+
+  spinner.start('Uploading the marked-up document...');
+  await client.uploadFile(projectId, null, scratch, Buffer.from(markup, 'utf-8'));
+  process.once('SIGINT', onInterrupt);
+
+  let failure: string[] | null = null;
+
+  try {
+    spinner.text = 'Compiling on Overleaf...';
+    const compile = await client.compileWithOutputs(projectId, scratch);
+
+    if (compile.status !== 'success' || !compile.pdfUrl) {
+      failure = [`Overleaf reported "${compile.status}" compiling ${scratch}`];
+
+      // The log is the only thing that explains a LaTeX failure, and it stops
+      // being reachable as soon as the scratch file is removed below.
+      const logFile = compile.outputFiles.find((f) => f.path === 'output.log');
+      if (logFile) {
+        const logPath = pdfPath.replace(/\.pdf$/, '.log');
+        writeFileSync(logPath, await client.downloadOutputFile(logFile.url));
+        failure.push(`  compiler log: ${logPath}`);
+      }
+      failure.push(`  marked-up source: ${texPath}`);
+      // A .sty or .cls that only exists locally is the common one: Overleaf
+      // compiles against the project, so anything the markup needs has to be
+      // in the project. A missing *figure* does not fail - Overleaf draws a
+      // placeholder box naming the file and reports success.
+      failure.push('  A class, style or input file that exists only locally is the usual cause;');
+      failure.push('  Overleaf compiles against the project, not against your working directory.');
+
+      // A PDF from an earlier run would otherwise sit next to the log, dated
+      // now by the directory listing and describing a different revision.
+      rmSync(pdfPath, { force: true });
+    } else {
+      spinner.text = 'Downloading the PDF...';
+      const pdf = await client.downloadOutputFile(compile.pdfUrl);
+      writeFileSync(pdfPath, pdf);
+      spinner.succeed(`Compiled ${basename(pdfPath)} (${(pdf.length / 1024).toFixed(1)} KB)`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    failure = [`Compiling ${scratch} failed: ${message}`, `  marked-up source: ${texPath}`];
+  } finally {
+    process.off('SIGINT', onInterrupt);
+    spinner.start(`Removing ${scratch} from "${projectName}"...`);
+    try {
+      await client.deleteByPath(projectId, scratch);
+      spinner.stop();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      spinner.warn(`${scratch} is still in "${projectName}": ${message}`);
+      console.error(chalk.yellow(`  remove it with: olcli rm ${scratch}`));
+    }
+  }
+
+  if (failure) {
+    spinner.fail(failure[0]);
+    for (const line of failure.slice(1)) console.error(chalk.dim(line));
+    process.exit(1);
+  }
+}
 
 /**
  * Colourize one line of a rendered patch. chalk already no-ops when stdout is

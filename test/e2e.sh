@@ -608,6 +608,76 @@ run_test "diff is clean again after restoring the tree" \
 sleep 1  # Rate limit
 
 #######################################
+# Test: latexdiff
+#######################################
+
+log_section "latexdiff Tests"
+
+if ! command -v latexdiff >/dev/null 2>&1; then
+  log_warn "latexdiff not on PATH - skipping the --latexdiff section"
+else
+  # A root document of our own, so the section does not depend on what the
+  # target project happens to contain, and --main keeps it unambiguous even in
+  # a project that already has one.
+  LD_NAME="${TEST_ID}_ld.tex"
+  LD_FILE="$PULL_DIR/$LD_NAME"
+  cat > "$LD_FILE" <<TEX
+\documentclass{article}
+\begin{document}
+The preliminary results were inconclusive.
+\end{document}
+TEX
+  CLEANUP_REMOTE_FILES+=("$LD_NAME")
+
+  run_test "upload the latexdiff root document" \
+    "olcli upload '$LD_FILE' '$PROJECT_ID' --to '$LD_NAME'"
+
+  sleep 2  # Give Overleaf a moment
+
+  # Now both sides hold the same file; edit only the local one.
+  sed -i.bak 's/preliminary results were inconclusive/results are statistically significant/' "$LD_FILE"
+  rm -f "$LD_FILE.bak"
+
+  run_test "diff --latexdiff writes a marked-up document" \
+    "cd '$PULL_DIR' && olcli diff --latexdiff --main '$LD_NAME' && test -s '.olcli-diff/${TEST_ID}_ld-diff.tex'"
+
+  run_test "the markup strikes through the remote wording" \
+    "grep -q 'DIFdel{.*preliminary' '$PULL_DIR/.olcli-diff/${TEST_ID}_ld-diff.tex'"
+
+  run_test "the markup underlines the local wording" \
+    "grep -q 'DIFadd{.*significant' '$PULL_DIR/.olcli-diff/${TEST_ID}_ld-diff.tex'"
+
+  # Dotted output directory, so nothing it holds can reach a later push.
+  run_test "the marked-up output is invisible to push" \
+    "cd '$PULL_DIR' && ! olcli push --dry-run | grep -q 'olcli-diff'"
+
+  run_test "--latexdiff refuses to combine with --name-only" \
+    "cd '$PULL_DIR' && olcli diff --latexdiff --name-only" \
+    "false"
+
+  run_test "--main outside --latexdiff is refused rather than ignored" \
+    "cd '$PULL_DIR' && olcli diff --main '$LD_NAME'" \
+    "false"
+
+  run_test "diff --latexdiff --pdf downloads a compiled PDF" \
+    "cd '$PULL_DIR' && olcli diff --latexdiff --pdf --main '$LD_NAME' && test -s '.olcli-diff/${TEST_ID}_ld-diff.pdf'"
+
+  run_test "the PDF is a PDF" \
+    "head -c 4 '$PULL_DIR/.olcli-diff/${TEST_ID}_ld-diff.pdf' | grep -q '%PDF'"
+
+  # The scratch file --pdf uploads must be gone. A remote-only file is exactly
+  # what diff reports as D, so the command checks its own cleanup.
+  run_test "--pdf removes the file it uploaded to compile" \
+    "cd '$PULL_DIR' && ! olcli diff --name-only | grep -q 'olcli-latexdiff'"
+
+  rm -rf "$PULL_DIR/.olcli-diff" "$LD_FILE"
+  run_test "delete the latexdiff root document from the project" \
+    "olcli delete '$LD_NAME' '$PROJECT_ID'"
+
+  sleep 1  # Rate limit
+fi
+
+#######################################
 # Test: Push
 #######################################
 

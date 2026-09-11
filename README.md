@@ -23,6 +23,7 @@ Work with Overleaf projects directly from your command line. Edit locally with y
 - ⬆️ **Push** local changes back to Overleaf
 - 🔄 **Sync** bidirectionally with smart conflict detection
 - 🔍 **Diff** local files against the live remote before pushing
+- 📝 **Marked-up revisions** — `diff --latexdiff` produces the struck-through/underlined PDF advisors and journals ask for
 - 🔀 **Git remote** — use Overleaf as a native git remote ([docs](docs/GIT-REMOTE.md))
 - ✌️ **Two-way deletions** — files removed locally are deleted on Overleaf on next sync
 - 🗑️ **Delete** and ✏️ **rename** remote files by path
@@ -239,6 +240,46 @@ disagree. `push --dry-run` lists files whose **modification time** is newer
 than the last pull, because that is what `push` uploads; `diff` lists files
 whose **contents** actually differ. A file you touched without editing appears
 in the first and not the second.
+
+#### Marked-up revisions with latexdiff
+
+A unified diff is the right artifact for a developer and the wrong one for a
+thesis advisor. `--latexdiff` marks the same revision up inside the document
+instead — deletions struck through, additions underlined — which is what
+advisors and journals ask for.
+
+```bash
+olcli diff --latexdiff          # write .olcli-diff/main-diff.tex
+olcli diff --latexdiff --pdf    # ...and compile it, download .olcli-diff/main-diff.pdf
+```
+
+Requires `latexdiff` on your PATH. It ships with TeX Live and MacTeX; nothing
+else in `olcli diff` needs an external tool.
+
+**`--pdf` compiles on Overleaf, so you do not need a local TeX installation.**
+The compile endpoint can only build a file that is in the project, so the
+marked-up document is uploaded as `olcli-latexdiff.tex` next to your root
+document, compiled, downloaded, and then removed. The command says so before it
+does it, refuses to overwrite a file of that name if one already exists, and
+prints the exact `olcli rm` command if the cleanup itself fails.
+
+`\input` and `\include` are inlined before comparing (`--no-flatten` to opt
+out). Without that, a remote compile would resolve those against the files
+sitting in the project — the old content — and quietly produce a PDF showing
+every input file as unchanged.
+
+Output goes to `.olcli-diff/`, which is dotted so that `push` and `sync` never
+pick it up; `-o <path>` puts it elsewhere. The root document is the `.tex` file
+declaring `\documentclass`; if several do, `--main <path>` picks one rather
+than the command guessing. `--latexdiff-opt` passes anything else straight
+through, e.g. `--latexdiff-opt --math-markup=0`.
+
+One limit worth knowing: `--pdf` compiles against the project, not against your
+working directory, so anything the markup needs must already be on Overleaf. A
+`.sty` or `.cls` you added locally fails the compile — the compiler log is
+written next to the marked-up source when that happens. A *figure* you added
+locally does not fail it; Overleaf draws a placeholder box naming the missing
+file and the rest of the PDF is fine.
 
 #### How deletion propagation works
 
