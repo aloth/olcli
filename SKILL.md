@@ -157,11 +157,18 @@ olcli sync --no-delete  # Sync without propagating local deletions to remote
 olcli diff                 # unified diff of every changed file
 olcli diff --name-only     # changed paths only
 olcli diff --file main.tex # a single file
+olcli diff --exit-code     # CI gate: 0 same, 1 differs, 2 failed
 ```
 
 The remote side is fetched fresh each run, so this shows what a subsequent
 `push` would overwrite — not a comparison against the last `pull`. `a/` is the
 remote, `b/` is local. Binary files are reported as differing without a patch.
+
+`--exit-code` uses `diff(1)`'s statuses so the command can gate a pipeline:
+`0` nothing differs, `1` something does, `2` the run itself failed. The last
+one matters — without it a job cannot tell a changed file from an expired
+session. Failures stay `1` when the flag is absent, so existing scripts are
+unaffected.
 
 ### Delete or rename remote files
 
@@ -304,6 +311,7 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 - **Auto-detect project**: Run commands from a synced directory (contains `.olcli.json`) to skip the project argument
 - **Dry run**: Use `olcli push --dry-run` or `olcli sync --dry-run` to preview before applying
 - **Preview content**: `push --dry-run` lists files by modification time; `olcli diff` compares actual contents, so the two lists can differ
+- **CI gate**: `olcli diff --exit-code` exits 1 when anything differs and 2 when the run failed, so a pipeline can distinguish drift from breakage
 - **Force overwrite**: Use `olcli pull --force` to overwrite local changes
 - **Two-way deletes**: `olcli sync` propagates *local* deletions to the remote; use `--no-delete` to opt out per run
 - **Build artifacts**: `.aux`, `.bbl`, `.log`, `.synctex.gz` etc. are filtered by default. Add custom patterns to a `.olignore` file (gitignore-style)

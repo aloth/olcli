@@ -2,6 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   compareTrees,
+  DIFF_EXIT_CLEAN,
+  DIFF_EXIT_DIFFERENCES,
+  DIFF_EXIT_FAILURE,
+  differencesExitCode,
   filterRemoteTree,
   renderFileDiff,
   isBinary,
@@ -216,4 +220,47 @@ test('renderFileDiff: a non-numeric context falls back to the default', () => {
 
   assert.equal(bad, good);
   assert.match(bad, /^\+line TEN$/m);
+});
+
+// ─── --exit-code ──────────────────────────────────────────────────────────────
+
+const entry = (status: 'added' | 'deleted' | 'modified' | 'unchanged') =>
+  ({ path: `${status}.tex`, status, binary: false });
+
+test('differencesExitCode: nothing to report is a clean gate', () => {
+  assert.equal(differencesExitCode([]), DIFF_EXIT_CLEAN);
+});
+
+test('differencesExitCode: unchanged files are not differences', () => {
+  // The command filters these out before printing, but the gate is fed
+  // whatever it is given: counting entries instead of inspecting their status
+  // would fire on every run of a project that matches its remote exactly.
+  const local = new Map([['a.tex', buf('same\n')], ['b.tex', buf('same\n')]]);
+  const unfiltered = compareTrees(local, new Map(local));
+
+  assert.equal(unfiltered.length, 2);
+  assert.equal(differencesExitCode(unfiltered), DIFF_EXIT_CLEAN);
+});
+
+test('differencesExitCode: every non-unchanged status is a difference', () => {
+  // A remote-only file included on purpose: plain `push` leaves it alone, but
+  // the two sides still do not match, and a gate that passed would be saying
+  // they do.
+  for (const status of ['added', 'deleted', 'modified'] as const) {
+    assert.equal(differencesExitCode([entry(status)]), DIFF_EXIT_DIFFERENCES, status);
+  }
+});
+
+test('differencesExitCode: one difference among unchanged files still fires', () => {
+  const entries = [entry('unchanged'), entry('modified'), entry('unchanged')];
+  assert.equal(differencesExitCode(entries), DIFF_EXIT_DIFFERENCES);
+});
+
+test('exit statuses follow diff(1), and failure is distinguishable', () => {
+  // The whole point of the flag: a CI job has to be able to tell a changed
+  // file from a run that never got as far as comparing anything.
+  assert.equal(DIFF_EXIT_CLEAN, 0);
+  assert.equal(DIFF_EXIT_DIFFERENCES, 1);
+  assert.equal(DIFF_EXIT_FAILURE, 2);
+  assert.notEqual(DIFF_EXIT_FAILURE, DIFF_EXIT_DIFFERENCES);
 });

@@ -17,7 +17,15 @@ import { OverleafClient } from './client.js';
 import { resolveRemotePath, resolveWithin, normalizeRemotePath } from './paths.js';
 import { planProjectRenames } from './rename-plan.js';
 import { scanLocalFiles } from './scan.js';
-import { compareTrees, filterRemoteTree, renderFileDiff, statusLetter, type FileDiff } from './diff.js';
+import {
+  compareTrees,
+  DIFF_EXIT_FAILURE,
+  differencesExitCode,
+  filterRemoteTree,
+  renderFileDiff,
+  statusLetter,
+  type FileDiff,
+} from './diff.js';
 import {
   DIFF_OUTPUT_DIR,
   LatexdiffError,
@@ -1800,6 +1808,7 @@ program
   .option('--name-only', 'List changed paths instead of printing patches')
   .option('--file <path>', 'Diff a single file')
   .option('-U, --unified <n>', 'Lines of context around each hunk (default: 3)', parseInt)
+  .option('--exit-code', 'Exit 1 if anything differs, 0 if nothing does, 2 on failure (for CI)')
   .option('--latexdiff', 'Mark the revision up inside the document with latexdiff (requires latexdiff on PATH)')
   .option('--pdf', 'Compile the marked-up document on Overleaf and download the PDF (implies --latexdiff)')
   .option('--main <path>', 'Root .tex document to mark up (default: the only file declaring \\documentclass)')
@@ -1821,13 +1830,26 @@ reason.
 inside the document instead: struck through is what a push would overwrite,
 underlined is what it would upload. --pdf additionally uploads the marked-up
 document to the project for one compile, downloads the PDF, and removes it
-again - so a reviewable PDF needs no local TeX installation.`)
+again - so a reviewable PDF needs no local TeX installation.
+
+--exit-code makes the command a CI gate, with diff(1)'s statuses: 0 when
+nothing differs, 1 when something does, and 2 when the run itself failed. The
+last one matters - without it a pipeline cannot tell a changed file from an
+expired session cookie. It applies to whatever was compared, so --file narrows
+the gate to one file, and it reports on the project even under --latexdiff,
+where the markup only covers the root document.`)
   .action(async (project, dir, options) => {
     const targetDir = dir || '.';
 
+    // Every way this command can fail, as opposed to finding differences.
+    // Under --exit-code that has to be distinguishable from status 1, or a
+    // pipeline reads "could not reach Overleaf" as "the paper changed"; with
+    // the flag absent it stays 1, which is what every other command exits.
+    const failureCode = options.exitCode ? DIFF_EXIT_FAILURE : 1;
+
     if (!existsSync(targetDir)) {
       console.error(chalk.red(`Directory not found: ${targetDir}`));
-      process.exit(1);
+      process.exit(failureCode);
     }
 
     // Checked before connecting: an unusable combination of flags should not
@@ -1842,7 +1864,7 @@ again - so a reviewable PDF needs no local TeX installation.`)
     if (latexdiffMode && conflicting.length > 0) {
       console.error(chalk.red(`--latexdiff cannot be combined with ${conflicting.join(', ')}`));
       console.error('It marks up one root document; those options select and shape unified patch output.');
-      process.exit(1);
+      process.exit(failureCode);
     }
 
     if (!latexdiffMode) {
@@ -1855,7 +1877,7 @@ again - so a reviewable PDF needs no local TeX installation.`)
       ].filter(Boolean);
       if (latexdiffOnly.length > 0) {
         console.error(chalk.red(`${latexdiffOnly.join(', ')} only applies with --latexdiff`));
-        process.exit(1);
+        process.exit(failureCode);
       }
     }
 
@@ -1869,7 +1891,7 @@ again - so a reviewable PDF needs no local TeX installation.`)
       } catch (error: any) {
         spinner.fail(error.message);
         console.error('Either run from a directory with .olcli.json or pass a project name/ID');
-        process.exit(1);
+        process.exit(failureCode);
       }
       const { id: projectId, name: projectName } = resolved;
 
@@ -1916,10 +1938,15 @@ again - so a reviewable PDF needs no local TeX installation.`)
           remoteFiles,
           entries,
           fetchedAt,
+          failureCode,
           options,
           spinner,
         });
         setLastProject(projectId);
+        // Reports on the comparison, not on the markup: a changed figure is a
+        // difference in the project even though a marked-up root document
+        // cannot show it. The `No .tex file differs` line above says as much.
+        if (options.exitCode) process.exitCode = differencesExitCode(entries);
         return;
       }
 
@@ -1984,9 +2011,14 @@ again - so a reviewable PDF needs no local TeX installation.`)
       console.log(chalk.dim(`  a/ = remote as of ${fetchedAt.toISOString()}, b/ = local`));
 
       setLastProject(projectId);
+      // Set rather than exited: `process.exit` drops whatever is still
+      // buffered on a non-TTY stdout, and `olcli diff --exit-code > patch.txt`
+      // is precisely a large patch going into a pipe. Returning lets node
+      // flush and then exit with this status on its own.
+      if (options.exitCode) process.exitCode = differencesExitCode(entries);
     } catch (error: any) {
       spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      process.exit(failureCode);
     }
   });
 
@@ -2010,6 +2042,8 @@ async function runLatexdiffMode(params: {
   remoteFiles: Map<string, Buffer>;
   entries: FileDiff[];
   fetchedAt: Date;
+  /** What to exit with when this mode fails; 2 under --exit-code, else 1. */
+  failureCode: number;
   /** Only the flags this mode reads; the rest of `diff`'s options are rejected. */
   options: {
     main?: string;
@@ -2022,7 +2056,7 @@ async function runLatexdiffMode(params: {
 }): Promise<void> {
   const {
     client, projectId, projectName, targetDir,
-    localFiles, remoteFiles, entries, fetchedAt, options, spinner,
+    localFiles, remoteFiles, entries, fetchedAt, failureCode, options, spinner,
   } = params;
 
   let root = '';
@@ -2035,7 +2069,7 @@ async function runLatexdiffMode(params: {
     for (const candidate of error.candidates) {
       console.error(chalk.dim(`    ${candidate}`));
     }
-    process.exit(1);
+    process.exit(failureCode);
   }
 
   // latexdiff needs two versions of the same document. A root document that
@@ -2045,7 +2079,7 @@ async function runLatexdiffMode(params: {
     spinner.stop();
     console.error(chalk.red(`${root} is not in "${projectName}" yet, so there is no earlier version to mark up.`));
     console.error(chalk.dim('  Push it first, or use --main to name a document that exists on both sides.'));
-    process.exit(1);
+    process.exit(failureCode);
   }
 
   if (!entries.some((e) => isTexPath(e.path))) {
@@ -2080,7 +2114,7 @@ async function runLatexdiffMode(params: {
         console.error(error.stderr);
       }
       cleanupTmp();
-      process.exit(1);
+      process.exit(failureCode);
     }
 
     // An explicit --output is a path the user chose, so it is taken relative to
@@ -2100,7 +2134,7 @@ async function runLatexdiffMode(params: {
     }
 
     if (options.pdf) {
-      await compileMarkupOnOverleaf({ client, projectId, projectName, root, markup, texPath, pdfPath, spinner });
+      await compileMarkupOnOverleaf({ client, projectId, projectName, root, markup, texPath, pdfPath, failureCode, spinner });
     }
 
     console.log();
@@ -2146,9 +2180,11 @@ async function compileMarkupOnOverleaf(params: {
   markup: string;
   texPath: string;
   pdfPath: string;
+  /** What to exit with when the compile fails; 2 under --exit-code, else 1. */
+  failureCode: number;
   spinner: ReturnType<typeof ora>;
 }): Promise<void> {
-  const { client, projectId, projectName, root, markup, texPath, pdfPath, spinner } = params;
+  const { client, projectId, projectName, root, markup, texPath, pdfPath, failureCode, spinner } = params;
   const scratch = remoteScratchPath(root);
 
   spinner.start(`Checking ${scratch} is free...`);
@@ -2157,7 +2193,7 @@ async function compileMarkupOnOverleaf(params: {
     console.error(chalk.dim('  --pdf uploads the marked-up document under that name for one compile and'));
     console.error(chalk.dim('  removes it again; it will not overwrite a file that is already there.'));
     console.error(chalk.dim(`  The marked-up source was still written: ${texPath}`));
-    process.exit(1);
+    process.exit(failureCode);
   }
 
   spinner.stop();
@@ -2226,7 +2262,7 @@ async function compileMarkupOnOverleaf(params: {
   if (failure) {
     spinner.fail(failure[0]);
     for (const line of failure.slice(1)) console.error(chalk.dim(line));
-    process.exit(1);
+    process.exit(failureCode);
   }
 }
 

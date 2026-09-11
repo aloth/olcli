@@ -574,6 +574,9 @@ log_section "Diff Tests"
 run_test "diff reports no changes on a freshly pulled directory" \
   "cd '$PULL_DIR' && olcli diff | grep -q 'No differences'"
 
+run_test "diff --exit-code exits 0 when nothing differs" \
+  "cd '$PULL_DIR' && olcli diff --exit-code >/dev/null"
+
 DIFF_TEST_FILE="$PULL_DIR/${TEST_ID}.txt"
 DIFF_ORIGINAL_CONTENT=$(cat "$DIFF_TEST_FILE")
 echo "diff test modification - $TIMESTAMP" >> "$DIFF_TEST_FILE"
@@ -586,6 +589,38 @@ run_test "diff shows the added line as a local addition" \
 
 run_test "diff --file limits output to the requested file" \
   "cd '$PULL_DIR' && test \$(olcli diff --file '${TEST_ID}.txt' | grep -c '^diff --olcli') -eq 1"
+
+run_test "diff --exit-code exits 1 when a file differs" \
+  "cd '$PULL_DIR' && olcli diff --exit-code >/dev/null; test \$? -eq 1"
+
+# The gate is opt-in: a script that checks plain `olcli diff` for success must
+# keep seeing success when the project simply has changes in it.
+run_test "diff without --exit-code still exits 0 when a file differs" \
+  "cd '$PULL_DIR' && olcli diff >/dev/null"
+
+run_test "diff --exit-code narrows the gate to --file" \
+  "cd '$PULL_DIR' && olcli diff --exit-code --file '${TEST_ID}.txt' >/dev/null; test \$? -eq 1"
+
+# Same as a git pathspec that matches nothing: no difference was found, so the
+# gate is green rather than an error.
+run_test "diff --exit-code exits 0 for a --file that differs in nothing" \
+  "cd '$PULL_DIR' && olcli diff --exit-code --file 'no-such-file-here.tex' >/dev/null"
+
+# A large patch redirected to a file is the case the gate is written for, and
+# the case where exiting outright would truncate stdout mid-hunk. The capture
+# file is dotted so the diff it is capturing does not report it.
+run_test "diff --exit-code writes its whole patch when redirected" \
+  "cd '$PULL_DIR' && { olcli diff --exit-code > '$PULL_DIR/.diff-gate.out'; test \$? -eq 1; } && tail -1 '$PULL_DIR/.diff-gate.out' | grep -q 'b/ = local'"
+
+# The distinction the flag exists for: a run that failed must not look like a
+# run that found changes. No network needed - a bad directory fails early.
+run_test "diff --exit-code exits 2 when the run itself fails" \
+  "olcli diff someproject /nonexistent-olcli-dir --exit-code >/dev/null 2>&1; test \$? -eq 2"
+
+run_test "diff without --exit-code still reports failure as 1" \
+  "olcli diff someproject /nonexistent-olcli-dir >/dev/null 2>&1; test \$? -eq 1"
+
+rm -f "$PULL_DIR/.diff-gate.out"
 
 # Restore, so the push tests below see the tree they expect.
 printf '%s\n' "$DIFF_ORIGINAL_CONTENT" > "$DIFF_TEST_FILE"
