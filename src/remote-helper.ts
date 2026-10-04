@@ -185,8 +185,8 @@ async function parseFastExport(rl: AsyncIterableIterator<string>): Promise<Parse
   let commitSection = false;
   for await (const line of rl) {
     if (state === 'data') {
-      // Accumulate data — readline splits on \n so we rejoin
-      const lineBytes = Buffer.from(line + '\n', 'binary');
+      // Accumulate data as UTF-8 — readline splits on \n so we rejoin
+      const lineBytes = Buffer.from(line + '\n', 'utf-8');
       dataBuffer = Buffer.concat([dataBuffer, lineBytes]);
       if (dataBuffer.length >= pendingDataBytes) {
         // Trim to exact length
