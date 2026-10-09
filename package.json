@@ -1,7 +1,7 @@
 {
   "name": "@aloth/olcli",
-  "version": "0.13.0",
-  "description": "Command-line interface for Overleaf \u2014 Sync, manage, and compile LaTeX projects from your terminal",
+  "version": "0.13.1",
+  "description": "Command-line interface for Overleaf — Sync, manage, and compile LaTeX projects from your terminal",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

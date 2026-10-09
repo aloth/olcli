@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.13.1] - 2026-10-09
+
+### Fixed
+- **`git push` through `git-remote-overleaf` no longer drops or corrupts files** ([#59](https://github.com/aloth/olcli/pull/59)) - the fast-export parser counted `data <N>` blocks as latin1 bytes while Git counts UTF-8 bytes. Any file with non-ASCII characters left the parser short of the announced length, so it swallowed the following lines as file content: files after it were silently skipped, deletions were missed, and the content that did arrive was mangled, while the push still reported success
+- **Binary files such as images and PDFs now push byte for byte** - the remote helper read the stream with `readline`, which decodes every payload as text and cannot give the original bytes back, so a pushed PNG or PDF arrived at the right size but corrupted. Commands are now read as lines and `data <N>` payloads as exactly N raw bytes, which also removes the text-decoding problem above at its root
+  - Quoted paths, which Git emits for names with spaces or non-ASCII characters, are now unquoted before upload
+  - `parseFastExport` moves to `src/fast-export.ts`; `test/fast-export.test.ts` covers all 256 byte values, UTF-8, CRLF, a quoted path, a deletion, and payloads split across chunk boundaries
+  - `git pull` and `git fetch` were not affected. Overleaf itself normalizes CRLF line endings in text files to LF
+
+### Contributors
+- [@am009](https://github.com/am009) - found and fixed the UTF-8 byte counting in the remote helper ([#59](https://github.com/aloth/olcli/pull/59))
+
 ## [0.13.0] - 2026-09-11
 
 ### Added
