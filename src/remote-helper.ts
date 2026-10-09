@@ -13,7 +13,6 @@
  * State stored in .git/overleaf/ (manifest).
  */
 
-import { createInterface } from 'node:readline';
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -26,6 +25,7 @@ import {
   getPasswordCredentials,
 } from './config.js';
 import { loadIgnore, shouldIgnore } from './ignore.js';
+import { ByteReader, parseFastExport, type ParsedExport } from './fast-export.js';
 
 // ─── Logging (stderr only — stdout is the git protocol channel) ───
 
@@ -148,134 +148,6 @@ async function getClient(baseUrl: string): Promise<OverleafClient> {
 
 // ─── fast-export parsing (push) ───
 
-interface ExportedFile {
-  path: string;
-  content: Buffer;
-}
-
-interface ExportedDelete {
-  path: string;
-}
-
-interface ParsedExport {
-  files: ExportedFile[];
-  deletes: ExportedDelete[];
-}
-
-/**
- * Read fast-export stream from stdin and extract file modifications/deletions.
- *
- * The stream comes after we respond to the "export" command. Git sends
- * fast-export data terminated by "done\n".
- */
-async function parseFastExport(rl: AsyncIterableIterator<string>): Promise<ParsedExport> {
-  const files: ExportedFile[] = [];
-  const deletes: ExportedDelete[] = [];
-  const blobData = new Map<string, Buffer>(); // mark → data
-
-  let currentMark = '';
-  let dataBuffer = Buffer.alloc(0);
-
-  // State machine for parsing the fast-export stream.
-  // readline gives us lines; for binary `data <N>` sections we accumulate bytes.
-
-  let state: 'command' | 'data' = 'command';
-  let pendingDataBytes = 0;
-  let pendingMark = '';
-  let commitSection = false;
-  for await (const line of rl) {
-    if (state === 'data') {
-      // Accumulate data as UTF-8 — readline splits on \n so we rejoin
-      const lineBytes = Buffer.from(line + '\n', 'utf-8');
-      dataBuffer = Buffer.concat([dataBuffer, lineBytes]);
-      if (dataBuffer.length >= pendingDataBytes) {
-        // Trim to exact length
-        const finalData = dataBuffer.subarray(0, pendingDataBytes);
-        if (pendingMark) {
-          blobData.set(pendingMark, finalData);
-        }
-        state = 'command';
-        dataBuffer = Buffer.alloc(0);
-        pendingMark = '';
-      }
-      continue;
-    }
-
-    // Command mode
-    if (line === 'done' || line === '') {
-      if (line === 'done') break;
-      continue;
-    }
-
-    if (line.startsWith('blob')) {
-      commitSection = false;
-      continue;
-    }
-
-    if (line.startsWith('mark :')) {
-      currentMark = line.slice(6);
-      continue;
-    }
-
-    if (line.startsWith('data ')) {
-      pendingDataBytes = parseInt(line.slice(5), 10);
-      pendingMark = commitSection ? '' : currentMark;
-      state = 'data';
-      dataBuffer = Buffer.alloc(0);
-      continue;
-    }
-
-    if (line.startsWith('commit ')) {
-      commitSection = true;
-      continue;
-    }
-
-    if (line.startsWith('committer ') || line.startsWith('author ')) {
-      continue;
-    }
-
-    if (line.startsWith('from ') || line.startsWith('merge ')) {
-      continue;
-    }
-
-    // File modification: M <mode> <dataref> <path>
-    const mMatch = line.match(/^M \d+ :(\S+) (.+)$/);
-    if (mMatch) {
-      const [, markRef, path] = mMatch;
-      const content = blobData.get(markRef);
-      if (content) {
-        files.push({ path, content });
-      }
-      continue;
-    }
-
-    // Inline modification: M <mode> inline <path>
-    const mInline = line.match(/^M \d+ inline (.+)$/);
-    if (mInline) {
-      // Next will be a data line
-      currentMark = `__inline_${mInline[1]}`;
-      continue;
-    }
-
-    // Deletion: D <path>
-    const dMatch = line.match(/^D (.+)$/);
-    if (dMatch) {
-      deletes.push({ path: dMatch[1] });
-      continue;
-    }
-  }
-
-  // Resolve any inline blobs
-  for (const [mark, data] of blobData) {
-    if (mark.startsWith('__inline_')) {
-      const path = mark.slice(9);
-      files.push({ path, content: data });
-    }
-  }
-
-  return { files, deletes };
-}
-
 // ─── Push logic ───
 
 async function pushChanges(
@@ -326,14 +198,13 @@ async function main(): Promise<void> {
   ensureStateDir();
   const state = loadState();
 
-  const rl = createInterface({
-    input: process.stdin,
-    terminal: false,
-  });
+  // Byte-exact reader: fast-export blobs are raw bytes, which a line reader
+  // such as readline would decode as text and corrupt.
+  const reader = new ByteReader(process.stdin);
 
-  const iterator = rl[Symbol.asyncIterator]();
-
-  for await (const line of rl) {
+  for (;;) {
+    const line = await reader.readLine();
+    if (line === null) break;
     const trimmed = line.trim();
     debug(`< ${trimmed}`);
 
@@ -399,7 +270,9 @@ async function main(): Promise<void> {
       const refs: string[] = [trimmed.slice(7)];
 
       // Consume additional import lines until blank
-      for await (const nextLine of rl) {
+      for (;;) {
+        const nextLine = await reader.readLine();
+        if (nextLine === null) break;
         const next = nextLine.trim();
         if (next === '') break;
         if (next.startsWith('import ')) {
@@ -489,7 +362,7 @@ async function main(): Promise<void> {
       debug('Export (push) starting — reading fast-export stream...');
 
       const client = await getClient(baseUrl);
-      const parsed = await parseFastExport(iterator);
+      const parsed = await parseFastExport(reader);
 
       debug(`Parsed export: ${parsed.files.length} modifications, ${parsed.deletes.length} deletions`);
 
@@ -532,7 +405,6 @@ async function main(): Promise<void> {
     fatal(`Unsupported command: ${trimmed}`);
   }
 
-  rl.close();
 }
 
 // Gracefully handle EPIPE (git closed the pipe before we finished writing)
