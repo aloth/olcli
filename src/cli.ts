@@ -13,7 +13,8 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync
 import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { OverleafClient, resolveCommentConcurrency } from './client.js';
+import { OverleafClient, resolveCommentConcurrency, type TrackedChange } from './client.js';
+import { formatAuthor } from './tracked-changes.js';
 import { resolveRemotePath, resolveWithin, normalizeRemotePath } from './paths.js';
 import { planProjectRenames } from './rename-plan.js';
 import { scanLocalFiles } from './scan.js';
@@ -476,12 +477,30 @@ function printCommentContext(comment: any): void {
   }
 }
 
+function printTrackedChanges(changes: TrackedChange[]): void {
+  if (changes.length === 0) {
+    console.log(chalk.yellow('No tracked changes found\n'));
+    return;
+  }
+  console.log(chalk.bold(`Found ${changes.length} tracked change(s):\n`));
+  for (const change of changes) {
+    const kind = change.kind === 'insert' ? chalk.green('insert') : chalk.red('delete');
+    console.log(`${chalk.cyan(change.id)} ${kind}`);
+    console.log(`  ${change.path}:${change.line}:${change.column}`);
+    console.log(`  ${chalk.dim('Author:')} ${formatAuthor(change.author)}${change.timestamp ? chalk.dim(` (${change.timestamp})`) : ''}`);
+    console.log(`  ${chalk.dim('Text:')} ${JSON.stringify(change.text)}`);
+    printCommentContext(change);
+    console.log();
+  }
+}
+
 commentsCmd
   .command('list [project]')
   .description('List project comments with selected source text and location')
   .option('--status <status>', 'Filter by status: open, resolved, or all (default: all)', 'all')
   .option('--context <n>', 'Include N lines of source context around each comment', parseInt)
   .option('--concurrency <n>', 'Sockets used to fetch docs in parallel, 1-8 (default: OLCLI_CONCURRENCY or 4)')
+  .option('--changes', 'Also list tracked changes (suggested insertions and deletions); with --json the output becomes { comments, changes }')
   .option('--json', 'Output as JSON')
   .option('--cookie <session>', 'Session cookie override')
   .action(async (project, options) => {
@@ -497,17 +516,26 @@ commentsCmd
       if (!Number.isInteger(contextLines) || contextLines < 0) {
         throw new Error('--context must be a non-negative integer');
       }
-      const comments = await client.listComments(proj.id, {
+      const listOptions = {
         status: status as 'all' | 'open' | 'resolved',
         contextLines,
         concurrency: options.concurrency === undefined ? undefined : resolveCommentConcurrency(options.concurrency)
-      });
+      };
+      let comments;
+      let changes: TrackedChange[] | undefined;
+      if (options.changes) {
+        ({ comments, changes } = await client.listReview(proj.id, listOptions));
+      } else {
+        comments = await client.listComments(proj.id, listOptions);
+      }
       spinner.stop();
 
       if (options.json) {
-        console.log(JSON.stringify(comments, null, 2));
+        console.log(JSON.stringify(changes ? { comments, changes } : comments, null, 2));
         return;
       }
+
+      if (changes) printTrackedChanges(changes);
 
       if (comments.length === 0) {
         console.log(chalk.yellow('No comments found'));
@@ -673,6 +701,75 @@ commentsCmd
 // ─────────────────────────────────────────────────────────────────────────────
 // DOWNLOAD COMMANDS
 // ─────────────────────────────────────────────────────────────────────────────
+
+const changesCmd = program
+  .command('changes')
+  .description('Review Overleaf tracked changes (suggested edits). Requires a project whose owner has an Overleaf premium plan; collaborators on any plan can then use it');
+
+changesCmd
+  .command('accept <ids...>')
+  .description('Accept tracked changes by id (ids from: olcli comments list --changes)')
+  .option('--project <project>', 'Project name or ID (default: last used project)')
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (ids: string[], options) => {
+    const spinner = ora('Accepting tracked changes...').start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, options.project);
+      const accepted = await client.acceptTrackedChanges(proj.id, ids);
+      spinner.stop();
+      if (options.json) {
+        console.log(JSON.stringify(accepted, null, 2));
+      } else {
+        console.log(chalk.green(`Accepted ${accepted.length} tracked change(s):`));
+        for (const change of accepted) {
+          console.log(`  ${chalk.cyan(change.id)} ${change.kind} ${change.path}:${change.line}:${change.column} ${JSON.stringify(change.text)}`);
+        }
+      }
+      setLastProject(proj.id);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+changesCmd
+  .command('reject <ids...>')
+  .description('Reject tracked changes by id: removes suggested insertions, restores suggested deletions. Shows a preview and writes nothing unless --yes is given')
+  .option('--project <project>', 'Project name or ID (default: last used project)')
+  .option('--yes', 'Apply the rejection after showing the preview')
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .action(async (ids: string[], options) => {
+    const spinner = ora('Planning rejection...').start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, options.project);
+      const plan = await client.planTrackedChangeRejection(proj.id, ids);
+      spinner.stop();
+
+      if (!options.json) {
+        for (const doc of plan.docs) console.log(doc.diff);
+      }
+      if (!options.yes) {
+        if (options.json) console.log(JSON.stringify({ applied: false, ...plan }, null, 2));
+        else console.log(chalk.yellow(`Preview only: ${plan.changes.length} tracked change(s) would be rejected. Run again with --yes to apply.`));
+        setLastProject(proj.id);
+        return;
+      }
+
+      const applying = ora('Rejecting tracked changes...').start();
+      await client.rejectTrackedChanges(proj.id, plan);
+      applying.stop();
+      if (options.json) console.log(JSON.stringify({ applied: true, ...plan }, null, 2));
+      else console.log(chalk.green(`Rejected ${plan.changes.length} tracked change(s).`));
+      setLastProject(proj.id);
+    } catch (error: any) {
+      spinner.fail(`Failed: ${error.message}`);
+      process.exit(1);
+    }
+  });
 
 program
   .command('download <file> [project]')

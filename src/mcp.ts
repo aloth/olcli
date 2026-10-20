@@ -308,14 +308,70 @@ server.tool(
       .optional()
       .default(false)
       .describe('Include surrounding text context for each comment'),
+    include_changes: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Also return tracked changes (suggested insertions and deletions). The result then becomes { comments, changes }. Track changes is an Overleaf premium feature: only projects whose owner has a premium plan have them. An empty list in other projects is expected'),
   },
-  async ({ project_id, status, include_context }) =>
+  async ({ project_id, status, include_context, include_changes }) =>
     wrapTool(async () => {
       const client = await getClient();
-      return client.listComments(project_id, {
-        status,
-        contextLines: include_context ? 3 : 0,
-      });
+      const options = { status, contextLines: include_context ? 3 : 0 };
+      if (include_changes) {
+        return client.listReview(project_id, options);
+      }
+      return client.listComments(project_id, options);
+    })
+);
+
+// ---------------------------------------------------------------------------
+// Tool: accept_tracked_changes
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'accept_tracked_changes',
+  'Accept tracked changes (suggested edits) by id: the suggested text stays and the suggestion markers are removed. Nothing is sent if any id is unknown. Track changes is an Overleaf premium feature: only projects whose owner has a premium plan have them.',
+  {
+    project_id: z.string().describe('The Overleaf project ID'),
+    change_ids: z.array(z.string()).min(1).describe('Tracked change ids (from list_comments with include_changes)'),
+  },
+  async ({ project_id, change_ids }) =>
+    wrapTool(async () => {
+      const client = await getClient();
+      const accepted = await client.acceptTrackedChanges(project_id, change_ids);
+      return { accepted };
+    })
+);
+
+// ---------------------------------------------------------------------------
+// Tool: reject_tracked_changes
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'reject_tracked_changes',
+  'Reject tracked changes by id: suggested insertions are removed, suggested deletions are restored. Returns a unified diff preview and writes nothing unless apply is true. Nothing is written if any id is unknown or a doc changed since the preview. Track changes is an Overleaf premium feature: only projects whose owner has a premium plan have them.',
+  {
+    project_id: z.string().describe('The Overleaf project ID'),
+    change_ids: z.array(z.string()).min(1).describe('Tracked change ids (from list_comments with include_changes)'),
+    apply: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Apply the rejection. Default false returns the preview only'),
+  },
+  async ({ project_id, change_ids, apply }) =>
+    wrapTool(async () => {
+      const client = await getClient();
+      const plan = await client.planTrackedChangeRejection(project_id, change_ids);
+      if (apply) {
+        await client.rejectTrackedChanges(project_id, plan);
+      }
+      return {
+        applied: apply,
+        changes: plan.changes,
+        diffs: plan.docs.map(doc => ({ path: doc.path, diff: doc.diff })),
+      };
     })
 );
 

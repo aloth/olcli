@@ -21,6 +21,19 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as https from 'node:https';
 import * as http from 'node:http';
+import {
+  RejectConflictError,
+  buildUserDirectory,
+  planRejection,
+  renderRejectionDiff,
+  describeAuthor,
+  parseHistoryOtChanges,
+  parseShareJsChanges,
+  type DocTrackedChange,
+  type ShareJsTextOp,
+  type TrackedChangeAuthor,
+  type TrackedChangeKind
+} from './tracked-changes.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -134,6 +147,54 @@ export function resolveCommentConcurrency(value?: number | string, env: NodeJS.P
   }
   return parsed;
 }
+
+/** A tracked change (suggested edit) with its project location. */
+export interface TrackedChange {
+  id: string;
+  docId: string;
+  path: string;
+  kind: TrackedChangeKind;
+  /** Offset into the visible text of the doc, tracked deletes excluded. */
+  position: number;
+  line: number;
+  column: number;
+  /** Inserted text for an insert, removed text for a delete. */
+  text: string;
+  author: TrackedChangeAuthor;
+  timestamp?: string;
+  context?: CommentContext;
+}
+
+export interface ListTrackedChangesOptions {
+  contextLines?: number;
+  /** Sockets used to join docs in parallel (1-8). Defaults to OLCLI_CONCURRENCY, else 4. */
+  concurrency?: number;
+}
+
+/** Comments and tracked changes from a single pass over the project's docs. */
+export interface ProjectReview {
+  comments: ProjectComment[];
+  changes: TrackedChange[];
+}
+
+export interface RejectionDocPlan {
+  docId: string;
+  path: string;
+  /** Doc version the plan was computed at. */
+  version: number;
+  changes: TrackedChange[];
+  /** ShareJS ops in the order they are sent, highest position first. */
+  ops: ShareJsTextOp[];
+  /** Unified diff of the doc before and after the rejection. */
+  diff: string;
+}
+
+export interface RejectionPlan {
+  changes: TrackedChange[];
+  docs: RejectionDocPlan[];
+}
+
+export { RejectConflictError };
 
 export interface AddCommentOptions {
   filePath: string;
@@ -1283,6 +1344,10 @@ export class OverleafClient {
         comment.op.c = this.decodeOverleafUtf8(comment.op.c);
       }
     }
+    for (const change of decodedRanges.changes || []) {
+      if (typeof change?.op?.i === 'string') change.op.i = this.decodeOverleafUtf8(change.op.i);
+      if (typeof change?.op?.d === 'string') change.op.d = this.decodeOverleafUtf8(change.op.d);
+    }
 
     return {
       docId,
@@ -2122,14 +2187,34 @@ export class OverleafClient {
   }
 
   async listComments(projectId: string, options: ListCommentsOptions = {}): Promise<ProjectComment[]> {
-    const status = options.status || 'all';
+    const projectInfo = await this.getProjectInfo(projectId);
+    const docs = this.collectProjectDocs(projectInfo);
+    const threads = await this.getCommentThreads(projectId);
+    const joinedDocs = await this.joinDocuments(projectId, docs, resolveCommentConcurrency(options.concurrency));
+    return this.commentsFromDocs(docs, joinedDocs, threads, options.status || 'all', options.contextLines || 0);
+  }
+
+  /** Comments and tracked changes from a single pass over the project's docs. */
+  async listReview(projectId: string, options: ListCommentsOptions = {}): Promise<ProjectReview> {
     const contextLines = options.contextLines || 0;
     const projectInfo = await this.getProjectInfo(projectId);
     const docs = this.collectProjectDocs(projectInfo);
     const threads = await this.getCommentThreads(projectId);
-    const comments: ProjectComment[] = [];
     const joinedDocs = await this.joinDocuments(projectId, docs, resolveCommentConcurrency(options.concurrency));
+    return {
+      comments: this.commentsFromDocs(docs, joinedDocs, threads, options.status || 'all', contextLines),
+      changes: await this.changesFromDocs(projectId, projectInfo, docs, joinedDocs, contextLines)
+    };
+  }
 
+  private commentsFromDocs(
+    docs: ProjectDoc[],
+    joinedDocs: JoinedDocument[],
+    threads: Record<string, { messages: CommentMessage[]; resolved?: boolean }>,
+    status: CommentStatus,
+    contextLines: number
+  ): ProjectComment[] {
+    const comments: ProjectComment[] = [];
     for (const [index, doc] of docs.entries()) {
       const joinedDoc = joinedDocs[index];
 
@@ -2191,6 +2276,197 @@ export class OverleafClient {
         return status === 'resolved' ? comment.resolved : !comment.resolved;
       })
       .sort((a, b) => a.path.localeCompare(b.path) || a.position - b.position);
+  }
+
+  /**
+   * Users who made tracked changes, including people no longer on the
+   * project. Best effort: an error here only costs author names.
+   */
+  private async getChangesUsers(projectId: string): Promise<unknown[]> {
+    try {
+      const response = await this.httpRequest(`${this.baseUrl}/project/${projectId}/changes/users`, {
+        headers: this.getHeaders(),
+        expect: 'json'
+      });
+      if (!response.ok || !Array.isArray(response.body)) return [];
+      return response.body as unknown[];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Tracked changes of one joined doc, with the visible text their positions refer to. */
+  private docTrackedChanges(joinedDoc: JoinedDocument): { changes: DocTrackedChange[]; visibleContent: string } {
+    if (joinedDoc.type === 'history-ot') return parseHistoryOtChanges(joinedDoc.ranges);
+    return { changes: parseShareJsChanges(joinedDoc.ranges), visibleContent: joinedDoc.content };
+  }
+
+  /**
+   * List tracked changes (suggested insertions and deletions) across the
+   * project, sorted by path and position.
+   */
+  async listTrackedChanges(projectId: string, options: ListTrackedChangesOptions = {}): Promise<TrackedChange[]> {
+    const projectInfo = await this.getProjectInfo(projectId);
+    const docs = this.collectProjectDocs(projectInfo);
+    const joinedDocs = await this.joinDocuments(projectId, docs, resolveCommentConcurrency(options.concurrency));
+    return this.changesFromDocs(projectId, projectInfo, docs, joinedDocs, options.contextLines || 0);
+  }
+
+  private async changesFromDocs(
+    projectId: string,
+    projectInfo: ProjectInfo,
+    docs: ProjectDoc[],
+    joinedDocs: JoinedDocument[],
+    contextLines: number
+  ): Promise<TrackedChange[]> {
+    const perDoc = joinedDocs.map(doc => this.docTrackedChanges(doc));
+    const anyChanges = perDoc.some(doc => doc.changes.length > 0);
+    const users = buildUserDirectory(projectInfo, anyChanges ? await this.getChangesUsers(projectId) : []);
+
+    const result: TrackedChange[] = [];
+    for (const [index, doc] of docs.entries()) {
+      const { changes, visibleContent } = perDoc[index];
+      for (const change of changes) {
+        const location = this.positionToLineColumn(visibleContent, change.position);
+        result.push({
+          id: change.id,
+          docId: doc.id,
+          path: doc.path,
+          kind: change.kind,
+          position: change.position,
+          line: location.line,
+          column: location.column,
+          text: change.text,
+          author: describeAuthor(change.userId, users),
+          ...(change.timestamp ? { timestamp: change.timestamp } : {}),
+          ...(contextLines > 0 ? { context: this.buildCommentContext(visibleContent, location.line, contextLines) } : {})
+        });
+      }
+    }
+    return result.sort((a, b) => a.path.localeCompare(b.path) || a.position - b.position);
+  }
+
+  /**
+   * Accept tracked changes: the suggested text stays and the suggestion
+   * markers go. Ids come from `listTrackedChanges`. Every id must resolve
+   * before anything is sent; changes are accepted per doc with one request
+   * each (POST /project/<id>/doc/<doc>/changes/accept, the editor's route).
+   * Afterwards the project is re-read and any id still present is an error.
+   */
+  async acceptTrackedChanges(projectId: string, ids: string[]): Promise<TrackedChange[]> {
+    const selected = this.selectTrackedChanges(await this.listTrackedChanges(projectId), ids);
+
+    const byDoc = new Map<string, TrackedChange[]>();
+    for (const change of selected) byDoc.set(change.docId, [...(byDoc.get(change.docId) ?? []), change]);
+    for (const [docId, changes] of byDoc) {
+      const response = await this.httpRequest(`${this.baseUrl}/project/${projectId}/doc/${docId}/changes/accept`, {
+        method: 'POST',
+        headers: this.getHeaders(true),
+        body: JSON.stringify({ change_ids: changes.map(change => change.id) }),
+        expect: 'text'
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to accept tracked changes in ${changes[0].path}: ${response.status}`);
+      }
+      this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+    }
+
+    const after = await this.listTrackedChanges(projectId);
+    const remaining = selected.filter(change => after.some(other => other.docId === change.docId && other.id === change.id));
+    if (remaining.length > 0) {
+      throw new Error(`Overleaf did not accept: ${remaining.map(change => change.id).join(', ')}`);
+    }
+    return selected;
+  }
+
+  private selectTrackedChanges(all: TrackedChange[], ids: string[]): TrackedChange[] {
+    const wanted = [...new Set(ids)];
+    if (wanted.length === 0) throw new Error('No tracked change id given');
+    const selected: TrackedChange[] = [];
+    const missing: string[] = [];
+    for (const id of wanted) {
+      const matches = all.filter(change => change.id === id);
+      if (matches.length === 0) missing.push(id);
+      else if (matches.length > 1) throw new Error(`Tracked change id ${id} is ambiguous: it occurs in ${matches.map(m => m.path).join(', ')}`);
+      else selected.push(matches[0]);
+    }
+    if (missing.length > 0) {
+      const hint = all.length === 0
+        ? ' (this project has no tracked changes; track changes requires the project owner to have an Overleaf premium plan)'
+        : '';
+      throw new Error(`Tracked change${missing.length === 1 ? '' : 's'} not found: ${missing.join(', ')}${hint}`);
+    }
+    return selected;
+  }
+
+  /**
+   * Work out what rejecting `ids` would do, without writing anything:
+   * per doc the ops to send and a diff of the result. Fails with
+   * RejectConflictError if a change no longer matches the text, and refuses
+   * history-ot docs, whose rejection path is not implemented.
+   */
+  async planTrackedChangeRejection(projectId: string, ids: string[]): Promise<RejectionPlan> {
+    const projectInfo = await this.getProjectInfo(projectId);
+    const docs = this.collectProjectDocs(projectInfo);
+    const joinedDocs = await this.joinDocuments(projectId, docs);
+    const all = await this.changesFromDocs(projectId, projectInfo, docs, joinedDocs, 0);
+    const selected = this.selectTrackedChanges(all, ids);
+
+    const plans: RejectionDocPlan[] = [];
+    for (const [index, doc] of docs.entries()) {
+      const changes = selected.filter(change => change.docId === doc.id);
+      if (changes.length === 0) continue;
+      const joinedDoc = joinedDocs[index];
+      if (joinedDoc.type !== 'sharejs-text-ot') {
+        throw new Error(`Rejecting tracked changes is not supported for ${doc.path} (doc type ${joinedDoc.type}); nothing was changed`);
+      }
+      // Keep the tracker's order: filter the parsed list rather than the sorted one.
+      const wantedIds = new Set(changes.map(change => change.id));
+      const ordered = parseShareJsChanges(joinedDoc.ranges).filter(change => wantedIds.has(change.id));
+      const result = planRejection(joinedDoc.content, ordered);
+      plans.push({
+        docId: doc.id,
+        path: doc.path,
+        version: joinedDoc.version,
+        changes,
+        ops: result.ops,
+        diff: renderRejectionDiff(doc.path, joinedDoc.content, result.content)
+      });
+    }
+    return { changes: selected, docs: plans };
+  }
+
+  /**
+   * Reject tracked changes: inserted text is removed, deleted text is put
+   * back. The plan is recomputed per doc right before writing, and a doc
+   * whose version moved since `plan` was made is refused, so the user never
+   * applies something other than the preview they saw. Afterwards the
+   * project is re-read and any id still present is an error.
+   */
+  async rejectTrackedChanges(projectId: string, plan: RejectionPlan): Promise<RejectionPlan> {
+    for (const docPlan of plan.docs) {
+      const session = await this.openProjectSocket(projectId);
+      try {
+        const joinedDoc = await this.joinDocument(session, docPlan.docId);
+        if (joinedDoc.version !== docPlan.version) {
+          throw new RejectConflictError(`${docPlan.path} changed since the preview (version ${docPlan.version} -> ${joinedDoc.version}); nothing more was written, run the command again`);
+        }
+        await this.socketRpc(session, 'applyOtUpdate', [docPlan.docId, {
+          doc: docPlan.docId,
+          op: docPlan.ops,
+          v: docPlan.version
+        }]);
+      } finally {
+        await this.closeProjectSocket(session);
+      }
+    }
+
+    const after = await this.listTrackedChanges(projectId);
+    const remaining = plan.changes.filter(change => after.some(other => other.docId === change.docId && other.id === change.id));
+    if (remaining.length > 0) {
+      throw new Error(`Overleaf did not reject: ${remaining.map(change => change.id).join(', ')}`);
+    }
+    return plan;
   }
 
   async resolveComment(projectId: string, threadId: string): Promise<ProjectComment> {

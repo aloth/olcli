@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Tracked changes** ([#58](https://github.com/aloth/olcli/issues/58)) - `olcli comments list --changes` lists suggested insertions and deletions next to comments, and `olcli changes accept <ids...>` and `olcli changes reject <ids...>` accept or reject them. `reject` shows a diff and writes nothing unless `--yes` is given. The MCP server gains `include_changes` on `list_comments` and the tools `accept_tracked_changes` and `reject_tracked_changes`. Track changes is an Overleaf premium feature: it is only available in projects whose owner has a premium plan, and invited collaborators on any plan can then use it
+
 ## [0.14.0] - 2026-10-15
 
 ### Added

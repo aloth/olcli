@@ -12,12 +12,14 @@
 | `push_file` | Upload a local file to a project |
 | `compile` | Compile a project and get the PDF URL |
 | `download_pdf` | Compile a project and save the PDF locally |
-| `list_comments` | List review comments (filter: all / open / resolved) |
+| `list_comments` | List review comments (filter: all / open / resolved); with `include_changes` also tracked changes, returned as `{ comments, changes }` |
 | `get_entities` | Get a flat list of all files in a project |
 | `download_file` | Download a specific file by its remote path |
 | `add_comment` | Add a review comment to a document |
 | `reply_to_comment` | Reply to an existing comment thread |
 | `resolve_comment` | Mark a comment thread as resolved |
+| `accept_tracked_changes` | Accept tracked changes by id; sends nothing if any id is unknown |
+| `reject_tracked_changes` | Reject tracked changes by id; returns a diff preview and writes only with `apply: true` |
 | `delete_entity` | Delete a file or document by path |
 | `rename_entity` | Rename a file or document |
 | `rename_project` | Rename the project itself (not a file inside it) |
@@ -25,6 +27,8 @@
 | `compile_with_outputs` | Compile and return all output files (PDF, BBL, logs…) |
 | `diff_project` | Content-level diff of a local directory against the live remote — **read-only** |
 | `create_project` | Create a new blank or example project |
+
+> **Tracked changes need a premium project.** Track changes is an Overleaf premium feature: it is only available in projects whose owner has a premium plan, and invited collaborators can then use it regardless of their own plan. In other projects `list_comments` with `include_changes` returns no changes and `accept_tracked_changes`/`reject_tracked_changes` report the ids as not found. See the [Overleaf documentation](https://docs.overleaf.com/collaborating/track-changes).
 
 > **What `diff_project` compares.** The remote side is fetched fresh on every call, so the result describes the project as it is right now, which is what a later push would overwrite. It is not a comparison against the last pull: the manifest records remote paths, never remote contents, so there is no stored snapshot. Every response carries `remote_fetched_at` for that reason — a collaborator editing between the call and a push can still change the outcome. Patches are oriented `a/` = remote, `b/` = local, so a `+` line is content a push would upload. Pass `name_only` to get statuses without patch text.
 

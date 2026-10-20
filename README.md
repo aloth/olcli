@@ -155,7 +155,9 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli pdf [project]` | Compile and download PDF |
 | `olcli output [type]` | Download compile output files |
 | `olcli zip [project]` | Download project as zip archive |
-| `olcli comments list [project]` | List comments (`--status`, `--context`, `--concurrency`) |
+| `olcli comments list [project]` | List comments (`--status`, `--context`, `--concurrency`); `--changes` also lists tracked changes (with `--json` the output becomes `{ comments, changes }`) |
+| `olcli changes accept <ids...>` | Accept tracked changes by id (`--project`, `--json`) |
+| `olcli changes reject <ids...>` | Reject tracked changes by id; preview only unless `--yes` (`--project`, `--json`) |
 | `olcli comments add <file> <msg>` | Add a comment to selected text |
 | `olcli comments reply <id> <body>` | Reply to a comment thread |
 | `olcli comments resolve <id>` | Resolve a comment thread |
@@ -169,6 +171,8 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli config set-timeout <ms>` | Set default HTTP timeout |
 | `olcli config get-timeout` | Show the configured HTTP timeout |
 | `olcli check` | Show config paths and credential sources |
+
+> **Tracked changes are an Overleaf premium feature.** They are only available in projects whose owner has a premium plan; invited collaborators can then use them regardless of their own plan. In other projects there are no tracked changes, so `--changes` returns an empty list and `changes accept`/`changes reject` report the ids as not found. See the [Overleaf documentation](https://docs.overleaf.com/collaborating/track-changes) for details.
 
 ### Compile Options
 
