@@ -2,8 +2,8 @@ cff-version: 1.2.0
 title: "olcli: Command-line interface for Overleaf"
 message: "If you use olcli in your work, please cite it as below."
 type: software
-version: "0.14.0"
-date-released: "2026-10-15"
+version: "0.15.0"
+date-released: "2026-10-20"
 license: MIT
 repository-code: "https://github.com/aloth/olcli"
 url: "https://github.com/aloth/olcli"
