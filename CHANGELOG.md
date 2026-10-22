@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **MCP tools that change an Overleaf project ask the user before writing** - `push_file`, `delete_entity`, `rename_entity`, `rename_project`, `create_project`, `add_comment`, `reply_to_comment`, `resolve_comment`, `accept_tracked_changes`, and `reject_tracked_changes` with `apply: true` show a confirmation through MCP elicitation (form mode) and write only when the user checks "Confirm" and accepts. The dialog shows what will happen: for tracked changes each change with path, line, kind, author, and text plus a diff, for `push_file` the target path, size, and a diff against the current file, for comments and replies the exact text, for deletes and renames the resolved paths. Declining, dismissing, a timeout, or an error writes nothing, and the tool result says so. Previously `accept_tracked_changes` wrote immediately and `reject_tracked_changes` wrote as soon as the agent passed `apply: true`. Project content is written by collaborators and reaches the agent verbatim, so text in a comment or document could steer an agent into calling a write tool; the confirmation is answered by the user, not the agent. Input schemas are unchanged
+- **Behavior change for MCP clients without elicitation support** - when the client does not declare the elicitation capability, the tools above no longer write. They return a preview, the `olcli` command that makes the same change from a terminal, and the opt-out. Setting `OLCLI_MCP_UNCONFIRMED_WRITES=1` in the server environment restores the 0.15.0 behavior, writing without asking and relying on the client's own tool approval; it also skips the dialog in clients that support elicitation
+- **`accept_tracked_changes` writes only what was confirmed** - it refuses if a selected change no longer has the kind and text shown in the confirmation. `delete_entity` and `rename_entity` act on the entity shown in the confirmation
+
+### Added
+- **MCP tool annotations** - every tool declares `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint` as applicable
+- **Untrusted-content notice** - the MCP server sends `instructions` stating that project content (document text, comments, tracked changes, file and project names) is written by collaborators and is data, not instructions. Tools that return project content say so in their descriptions, and `list_comments` adds the notice as a second text block after the unchanged JSON block
+
+### Fixed
+- **The MCP server reported version 0.8.0** - it now reports the package version
+
 ## [0.15.0] - 2026-10-20
 
 ### Added

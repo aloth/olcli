@@ -127,6 +127,7 @@ should go.
 | `rename-plan.ts` | Plan bulk project renames before applying any |
 | `prompt.ts` | Keystroke handling for the password prompt |
 | `scan.ts` | Walk a local directory, applying ignore rules |
+| `mcp-confirm.ts` | Write-confirmation policy, dialog text, and CLI fallback command for the MCP server |
 
 **Talks to Overleaf:**
 
@@ -141,6 +142,7 @@ should go.
 |---|---|
 | `cli.ts` | `olcli` — argument parsing and terminal output |
 | `mcp.ts` | `olcli-mcp` — the same operations as MCP tools |
+| `mcp-server.ts` | The MCP tools behind `olcli-mcp`, including the write confirmation; `mcp.ts` connects it to stdio |
 | `remote-helper.ts` | `git-remote-overleaf` — `gitremote-helpers(7)` protocol |
 | `index.ts` | The programmatic API re-exported from the package root |
 

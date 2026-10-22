@@ -194,6 +194,29 @@ export interface RejectionPlan {
   docs: RejectionDocPlan[];
 }
 
+export interface AcceptanceDocPlan {
+  docId: string;
+  path: string;
+  changes: TrackedChange[];
+  /**
+   * Unified diff from the original text (every tracked change in the doc
+   * undone) to the text with only the selected suggestions applied. Other
+   * tracked changes in the doc stay pending, so they appear as undone on
+   * both sides. Null when the changes overlap in a way that cannot be undone
+   * for the preview; `diffError` then says why.
+   */
+  diff: string | null;
+  diffError?: string;
+  /** Tracked changes in this doc that are not selected and stay pending. */
+  pendingOthers: number;
+}
+
+/** What accepting a set of tracked changes would make final. Read-only. */
+export interface AcceptancePlan {
+  changes: TrackedChange[];
+  docs: AcceptanceDocPlan[];
+}
+
 export { RejectConflictError };
 
 export interface AddCommentOptions {
@@ -1943,16 +1966,21 @@ export class OverleafClient {
     id: string;
     type: 'doc' | 'file' | 'folder';
     name: string;
+    /**
+     * Full path of the entity found. It can differ from `targetPath`: an
+     * entity also matches by its bare name in any folder.
+     */
+    path: string;
   } | null> {
     const projectInfo = await this.getProjectInfo(projectId);
     const normalizedTarget = targetPath.replace(/^\//, '');
 
-    function searchFolder(folder: FolderEntry, currentPath: string): { id: string; type: 'doc' | 'file' | 'folder'; name: string } | null {
+    function searchFolder(folder: FolderEntry, currentPath: string): { id: string; type: 'doc' | 'file' | 'folder'; name: string; path: string } | null {
       // Check docs
       for (const doc of folder.docs || []) {
         const docPath = currentPath ? `${currentPath}/${doc.name}` : doc.name;
         if (docPath === normalizedTarget || doc.name === normalizedTarget) {
-          return { id: doc._id, type: 'doc', name: doc.name };
+          return { id: doc._id, type: 'doc', name: doc.name, path: docPath };
         }
       }
 
@@ -1960,7 +1988,7 @@ export class OverleafClient {
       for (const file of folder.fileRefs || []) {
         const filePath = currentPath ? `${currentPath}/${file.name}` : file.name;
         if (filePath === normalizedTarget || file.name === normalizedTarget) {
-          return { id: file._id, type: 'file', name: file.name };
+          return { id: file._id, type: 'file', name: file.name, path: filePath };
         }
       }
 
@@ -1968,7 +1996,7 @@ export class OverleafClient {
       for (const subfolder of folder.folders || []) {
         const folderPath = currentPath ? `${currentPath}/${subfolder.name}` : subfolder.name;
         if (folderPath === normalizedTarget || subfolder.name === normalizedTarget) {
-          return { id: subfolder._id, type: 'folder', name: subfolder.name };
+          return { id: subfolder._id, type: 'folder', name: subfolder.name, path: folderPath };
         }
         const found = searchFolder(subfolder, folderPath);
         if (found) return found;
@@ -2352,9 +2380,22 @@ export class OverleafClient {
    * before anything is sent; changes are accepted per doc with one request
    * each (POST /project/<id>/doc/<doc>/changes/accept, the editor's route).
    * Afterwards the project is re-read and any id still present is an error.
+   *
+   * With `expected` (the changes of an `AcceptancePlan` someone confirmed),
+   * nothing is sent unless every selected change still has the doc, kind,
+   * and text it had in that preview. history-ot ids are derived from
+   * positions, so after an edit the same id can name a different change.
    */
-  async acceptTrackedChanges(projectId: string, ids: string[]): Promise<TrackedChange[]> {
+  async acceptTrackedChanges(projectId: string, ids: string[], expected?: TrackedChange[]): Promise<TrackedChange[]> {
     const selected = this.selectTrackedChanges(await this.listTrackedChanges(projectId), ids);
+    if (expected) {
+      for (const change of selected) {
+        const previewed = expected.find(other => other.docId === change.docId && other.id === change.id);
+        if (!previewed || previewed.kind !== change.kind || previewed.text !== change.text) {
+          throw new Error(`Tracked change ${change.id} in ${change.path} changed since the preview; nothing was accepted, list the changes again`);
+        }
+      }
+    }
 
     const byDoc = new Map<string, TrackedChange[]>();
     for (const change of selected) byDoc.set(change.docId, [...(byDoc.get(change.docId) ?? []), change]);
@@ -2397,6 +2438,41 @@ export class OverleafClient {
       throw new Error(`Tracked change${missing.length === 1 ? '' : 's'} not found: ${missing.join(', ')}${hint}`);
     }
     return selected;
+  }
+
+  /**
+   * Work out what accepting `ids` would make final, without writing
+   * anything: per doc a diff from the original text to the text with only
+   * the selected suggestions applied. Both sides are computed by undoing
+   * tracked changes the way a rejection would: all of them for the original,
+   * the unselected ones for the result. It shows which insertions stay and
+   * which deletions become permanent, and nothing else.
+   */
+  async planTrackedChangeAcceptance(projectId: string, ids: string[]): Promise<AcceptancePlan> {
+    const projectInfo = await this.getProjectInfo(projectId);
+    const docs = this.collectProjectDocs(projectInfo);
+    const joinedDocs = await this.joinDocuments(projectId, docs);
+    const all = await this.changesFromDocs(projectId, projectInfo, docs, joinedDocs, 0);
+    const selected = this.selectTrackedChanges(all, ids);
+
+    const plans: AcceptanceDocPlan[] = [];
+    for (const [index, doc] of docs.entries()) {
+      const changes = selected.filter(change => change.docId === doc.id);
+      if (changes.length === 0) continue;
+      // Same order rule as planTrackedChangeRejection: filter the parsed list.
+      const { changes: parsed, visibleContent } = this.docTrackedChanges(joinedDocs[index]);
+      const wantedIds = new Set(changes.map(change => change.id));
+      const others = parsed.filter(change => !wantedIds.has(change.id));
+      try {
+        const original = planRejection(visibleContent, parsed).content;
+        const accepted = planRejection(visibleContent, others).content;
+        plans.push({ docId: doc.id, path: doc.path, changes, diff: renderRejectionDiff(doc.path, original, accepted), pendingOthers: others.length });
+      } catch (error) {
+        if (!(error instanceof RejectConflictError)) throw error;
+        plans.push({ docId: doc.id, path: doc.path, changes, diff: null, diffError: error.message, pendingOthers: others.length });
+      }
+    }
+    return { changes: selected, docs: plans };
   }
 
   /**

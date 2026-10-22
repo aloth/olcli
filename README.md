@@ -492,6 +492,7 @@ import {
 ## Further Documentation
 
 - [MCP Server](docs/MCP.md) — AI assistant integration (Claude, Cursor, Windsurf)
+  - Tools that change a project ask you to confirm through MCP elicitation and write nothing without it; clients without elicitation get a preview and the `olcli` command to run instead. `OLCLI_MCP_UNCONFIRMED_WRITES=1` turns this off. See [Write confirmation](docs/MCP.md#write-confirmation)
 - [Git Remote Helper](docs/GIT-REMOTE.md) — use Overleaf as a native git remote
 
 ## Troubleshooting
