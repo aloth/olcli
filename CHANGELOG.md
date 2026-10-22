@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.15.1] - 2026-10-22
 
 ### Changed
 - **MCP tools that change an Overleaf project ask the user before writing** - `push_file`, `delete_entity`, `rename_entity`, `rename_project`, `create_project`, `add_comment`, `reply_to_comment`, `resolve_comment`, `accept_tracked_changes`, and `reject_tracked_changes` with `apply: true` show a confirmation through MCP elicitation (form mode) and write only when the user checks "Confirm" and accepts. The dialog shows what will happen: for tracked changes each change with path, line, kind, author, and text plus a diff, for `push_file` the target path, size, and a diff against the current file, for comments and replies the exact text, for deletes and renames the resolved paths. Declining, dismissing, a timeout, or an error writes nothing, and the tool result says so. Previously `accept_tracked_changes` wrote immediately and `reject_tracked_changes` wrote as soon as the agent passed `apply: true`. Project content is written by collaborators and reaches the agent verbatim, so text in a comment or document could steer an agent into calling a write tool; the confirmation is answered by the user, not the agent. Input schemas are unchanged
