@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **`sync --verbose` prints the file list again** ([#7](https://github.com/aloth/olcli/issues/7)) - `sync` declared its own `--verbose` next to the global one, and the global one always took the flag, so the list of files deleted on the remote, skipped, or pushed never printed. `sync` now uses the global `--verbose`, and `olcli sync --dry-run --verbose` previews deletions as documented since 0.2.0. A test fails when a subcommand declares a flag that a parent command already declares
+- **Behavior change for scripts: `diff --exit-code` exits 2 when the run fails** - without a credential, and on an unknown option or a missing option value, `diff --exit-code` exited 1, the status for "something differs", so a CI job could read an expired session as a changed paper. It now exits 2, as README.md and `diff --help` document. Without `--exit-code`, `diff` and every other command still exit 1 on failure
+- **Behavior change for scripts: `whoami` exits 1 when not authenticated** - it printed "Not authenticated" or "Session invalid" and exited 0. It now exits 1 in both cases, so `olcli whoami || olcli auth` works
+- **The git remote helper names a command that exists** - when no credential is found or the session is rejected, it said "Run 'olcli login'", which is not a command. It now says `olcli auth` or `OVERLEAF_SESSION`
+
+### Changed
+- **Package metadata for the MCP registry** - `package.json` gains `mcpName` (`io.github.aloth/olcli`), and a `server.json` describes the MCP server for the official MCP registry: the `olcli-mcp` command of `@aloth/olcli`, with `OVERLEAF_SESSION` as a required secret and `OVERLEAF_BASE_URL` and `OVERLEAF_COOKIE_NAME` as optional. The author contact in `package.json` is now home@alexloth.com
+- **`changes accept` and `changes reject` help** - `--project` no longer claims to default to the last used project, which no command reads. Without it both commands use the project in `.olcli.json` in the current directory, as before
+
+### Documentation
+- **MCP setup with npx** - docs/MCP.md and SKILL.md started the server with `npx -y @aloth/olcli-mcp`, a package that does not exist. The examples now use `npx -y --package @aloth/olcli olcli-mcp`
+- **Git remote helper** - docs/GIT-REMOTE.md says the helper reads `.olauth` from the current directory (the repository top level), not `~/.olauth`. Its Limitations section now states that a push uploads your version of every file your commits changed, so an edit a coauthor made to one of those files on Overleaf after your last fetch is overwritten, and that running `git pull` right before `git push` avoids it
+- **Environment variables** - README.md lists every variable olcli reads, including the previously undocumented `OVERLEAF_COOKIE_NAME` and `OLCLI_CONCURRENCY`. docs/MCP.md names both session cookie names, `overleaf_session2` on overleaf.com and `overleaf.sid` on self-hosted instances, and shows `OVERLEAF_COOKIE_NAME`
+- **SKILL.md** lists the `accept_tracked_changes` and `reject_tracked_changes` MCP tools and the `project rename <newname> [project]` signature. A test fails when a registered MCP tool is missing from SKILL.md or docs/MCP.md
+- **Contributor credits** - the 0.6.0 entry credits [@Duccioo](https://github.com/Duccioo) (#31) and [@Littleor](https://github.com/Littleor) (#32), and the 0.4.1 entry thanks [@Seauagain](https://github.com/Seauagain) for #26. CONTRIBUTING.md states that a pull request the maintainer reimplements instead of merging is credited with a `Co-authored-by` trailer in the commit and in the CHANGELOG
+
 ## [0.15.1] - 2026-10-22
 
 ### Changed
