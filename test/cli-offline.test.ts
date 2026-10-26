@@ -262,3 +262,27 @@ test('diff --exit-code exits 2 on an invalid session and 0 or 1 on a real compar
     await live.close();
   }
 });
+
+test('whoami exits 1 when not authenticated or the session is invalid, 0 when valid', async () => {
+  const none = await olcli(['whoami']);
+  assert.equal(none.status, 1, none.stdout + none.stderr);
+  assert.match(none.stdout, /Not authenticated/);
+
+  const expired = await mockOverleaf({ loggedIn: false });
+  try {
+    const result = await olcli(['whoami'], { env: sessionEnv(expired) });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stdout + result.stderr, /Session invalid/);
+  } finally {
+    await expired.close();
+  }
+
+  const live = await mockOverleaf({ loggedIn: true });
+  try {
+    const result = await olcli(['whoami'], { env: sessionEnv(live) });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout + result.stderr, /Authenticated with access to 1 projects/);
+  } finally {
+    await live.close();
+  }
+});

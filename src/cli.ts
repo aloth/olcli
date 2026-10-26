@@ -315,9 +315,12 @@ program
   .command('whoami')
   .description('Show current authentication status')
   .action(async () => {
+    // Status 1 on both failure paths, so `olcli whoami || olcli auth` works.
+    // exitCode rather than exit(): the message still has to reach a pipe.
     const cookie = getSessionCookie();
     if (!cookie) {
       console.log(chalk.yellow('Not authenticated'));
+      process.exitCode = 1;
       return;
     }
 
@@ -330,6 +333,7 @@ program
       spinner.succeed(`Authenticated with access to ${projects.length} projects`);
     } catch (error: any) {
       spinner.fail(`Session invalid: ${error.message}`);
+      process.exitCode = 1;
     }
   });
 
