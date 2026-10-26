@@ -717,7 +717,7 @@ const changesCmd = program
 changesCmd
   .command('accept <ids...>')
   .description('Accept tracked changes by id (ids from: olcli comments list --changes)')
-  .option('--project <project>', 'Project name or ID (default: last used project)')
+  .option('--project <project>', 'Project name or ID (default: the project in .olcli.json in the current directory)')
   .option('--json', 'Output as JSON')
   .option('--cookie <session>', 'Session cookie override')
   .action(async (ids: string[], options) => {
@@ -745,7 +745,7 @@ changesCmd
 changesCmd
   .command('reject <ids...>')
   .description('Reject tracked changes by id: removes suggested insertions, restores suggested deletions. Shows a preview and writes nothing unless --yes is given')
-  .option('--project <project>', 'Project name or ID (default: last used project)')
+  .option('--project <project>', 'Project name or ID (default: the project in .olcli.json in the current directory)')
   .option('--yes', 'Apply the rejection after showing the preview')
   .option('--json', 'Output as JSON')
   .option('--cookie <session>', 'Session cookie override')
