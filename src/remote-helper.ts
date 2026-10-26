@@ -128,7 +128,7 @@ async function getClient(baseUrl: string): Promise<OverleafClient> {
       return client;
     } catch (err) {
       if (!passwordCredentials) {
-        fatal(`Authentication failed: ${(err as Error).message}\nRun 'olcli login' first.`);
+        fatal(`Authentication failed: ${(err as Error).message}\nRun 'olcli auth' or set OVERLEAF_SESSION.`);
       }
     }
   }
@@ -143,7 +143,7 @@ async function getClient(baseUrl: string): Promise<OverleafClient> {
     return client;
   }
 
-  fatal('No Overleaf credentials found. Run \'olcli login\' or set OVERLEAF_SESSION.');
+  fatal('No Overleaf credentials found. Run \'olcli auth\' or set OVERLEAF_SESSION.');
 }
 
 // ─── fast-export parsing (push) ───
