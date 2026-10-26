@@ -114,8 +114,8 @@ Built-in Model Context Protocol server for AI assistant integration.
 # Run standalone
 olcli-mcp
 
-# Or via npx
-npx @aloth/olcli-mcp
+# Or via npx (the server is the olcli-mcp command of the @aloth/olcli package)
+npx -y --package @aloth/olcli olcli-mcp
 ```
 
 Available MCP tools: `list_projects`, `get_project_info`, `pull_project`, `push_file`, `compile`, `download_pdf`, `list_comments`, `get_entities`, `download_file`, `add_comment`, `reply_to_comment`, `resolve_comment`, `delete_entity`, `rename_entity`, `rename_project`, `plan_project_renames`, `compile_with_outputs`, `diff_project`, `create_project`, `accept_tracked_changes`, `reject_tracked_changes`.

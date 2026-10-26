@@ -110,7 +110,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
   "mcpServers": {
     "overleaf": {
       "command": "npx",
-      "args": ["-y", "@aloth/olcli-mcp"],
+      "args": ["-y", "--package", "@aloth/olcli", "olcli-mcp"],
       "env": {
         "OVERLEAF_SESSION": "<your-overleaf-session-cookie>"
       }
@@ -143,7 +143,7 @@ Add to your Cursor MCP settings (`~/.cursor/mcp.json` or project `.cursor/mcp.js
   "mcpServers": {
     "overleaf": {
       "command": "npx",
-      "args": ["-y", "@aloth/olcli-mcp"],
+      "args": ["-y", "--package", "@aloth/olcli", "olcli-mcp"],
       "env": {
         "OVERLEAF_SESSION": "<your-overleaf-session-cookie>"
       }
@@ -161,7 +161,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
   "mcpServers": {
     "overleaf": {
       "command": "npx",
-      "args": ["-y", "@aloth/olcli-mcp"],
+      "args": ["-y", "--package", "@aloth/olcli", "olcli-mcp"],
       "env": {
         "OVERLEAF_SESSION": "<your-overleaf-session-cookie>"
       }
