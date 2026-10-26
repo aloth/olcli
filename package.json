@@ -1,6 +1,6 @@
 {
   "name": "@aloth/olcli",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "description": "Command-line interface for Overleaf — Sync, manage, and compile LaTeX projects from your terminal",
   "mcpName": "io.github.aloth/olcli",
   "type": "module",

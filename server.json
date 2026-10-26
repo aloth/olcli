@@ -9,13 +9,13 @@
     "id": "1147798916"
   },
   "websiteUrl": "https://github.com/aloth/olcli/blob/main/docs/MCP.md",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@aloth/olcli",
-      "version": "0.15.1",
+      "version": "0.15.2",
       "runtimeHint": "npx",
       "runtimeArguments": [
         { "type": "positional", "value": "-y" },

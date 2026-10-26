@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.15.2] - 2026-10-26
 
 ### Fixed
 - **`sync --verbose` prints the file list again** ([#7](https://github.com/aloth/olcli/issues/7)) - `sync` declared its own `--verbose` next to the global one, and the global one always took the flag, so the list of files deleted on the remote, skipped, or pushed never printed. `sync` now uses the global `--verbose`, and `olcli sync --dry-run --verbose` previews deletions as documented since 0.2.0. A test fails when a subcommand declares a flag that a parent command already declares
