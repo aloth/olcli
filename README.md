@@ -408,6 +408,21 @@ export OVERLEAF_TIMEOUT=60000           # env var
 
 Precedence: `--timeout` > `OVERLEAF_TIMEOUT` > config > default (10000ms).
 
+### Environment variables
+
+olcli reads these. The MCP server and the git remote helper read the same session, password and cookie name variables. Where a flag exists, the flag takes precedence over the variable, and the variable over the stored config.
+
+| Variable | Purpose |
+|---|---|
+| `OVERLEAF_SESSION` | Session cookie value |
+| `OVERLEAF_EMAIL`, `OVERLEAF_PASSWORD` | Password login, used when no session cookie is set or it is rejected |
+| `OVERLEAF_BASE_URL` | Instance URL, like `--base-url` (default: `https://www.overleaf.com`) |
+| `OVERLEAF_COOKIE_NAME` | Session cookie name, like `--cookie-name` (default: `overleaf_session2`; self-hosted instances often use `overleaf.sid`) |
+| `OVERLEAF_TIMEOUT` | HTTP timeout in milliseconds, like `--timeout` |
+| `OLCLI_CONCURRENCY` | Documents fetched in parallel by `comments list`, 1 to 8 (default: 4); `--concurrency` takes precedence |
+| `OLCLI_MCP_UNCONFIRMED_WRITES` | MCP server only: `1` turns off write confirmation, see [docs/MCP.md](docs/MCP.md#write-confirmation) |
+| `GIT_REMOTE_OVERLEAF_DEBUG` | Git remote helper only: `1` prints protocol debug output, see [docs/GIT-REMOTE.md](docs/GIT-REMOTE.md#debugging) |
+
 ## Examples
 
 ```bash

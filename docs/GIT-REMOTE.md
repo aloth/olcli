@@ -32,8 +32,10 @@ State is stored in `.git/overleaf/` (marks file + manifest).
 The helper reads credentials in this order:
 
 1. **`OVERLEAF_SESSION` environment variable** (recommended for scripting)
-2. **`~/.olauth` file** — written by `olcli auth`
+2. **`.olauth` file in the current directory** — written by `olcli auth --save-local`
 3. **Stored config** — written by `olcli auth`
+
+Git runs the helper from the top level of the repository, and for `git clone` from the directory you run the clone in, so that is where `.olauth` is looked up. A `~/.olauth` is only read when git runs in your home directory.
 
 ```bash
 # Option A: environment variable
@@ -70,5 +72,5 @@ GIT_REMOTE_OVERLEAF_DEBUG=1 git push origin main
 ## Limitations
 
 - Overleaf has no native revision history exposed via API, so each clone creates a single "Import from Overleaf" commit (no history replay).
-- Concurrent edits on Overleaf between your fetch and push may cause conflicts — push uploads your version of changed files.
+- **A push can overwrite a coauthor's edits.** A push uploads your version of every file your commits changed. If a coauthor edited one of those files in Overleaf after your last fetch, their edit is overwritten without a warning or a conflict; the helper does not check what changed on Overleaf in between. The workaround is to fetch right before you push: run `git pull`, which fetches from Overleaf and merges, resolve any conflicts locally, then `git push` right away, so the push contains their edits.
 - Binary files are supported but large files may be slow (uploaded individually via the Overleaf API).

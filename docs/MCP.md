@@ -96,7 +96,7 @@ The MCP server reads credentials in this order:
 
 1. **`OVERLEAF_SESSION` environment variable** — set in your MCP config (recommended)
 2. **`OVERLEAF_EMAIL` + `OVERLEAF_PASSWORD` environment variables** — for password login (self-hosted)
-3. **`.olauth` file in cwd** — written by `olcli auth`
+3. **`.olauth` file in cwd** — written by `olcli auth --save-local`
 4. **Stored config** — written by `olcli auth` (including saved password credentials)
 
 When a session cookie expires and password credentials are available, the MCP server automatically re-authenticates.
@@ -174,18 +174,21 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 
 1. Open Overleaf in your browser and log in
 2. Open DevTools → Application (Chrome) or Storage (Firefox) → Cookies
-3. Find `overleaf_session2` (or `sharelatex.sid` for self-hosted)
+3. Find `overleaf_session2` on overleaf.com, or `overleaf.sid` on self-hosted Overleaf (very old self-hosted versions use `sharelatex.sid`)
 4. Copy the value — that's your `OVERLEAF_SESSION`
 
 Or run `olcli auth` and then the MCP server will pick it up automatically.
 
 ## Self-hosted Overleaf
 
-Set `OVERLEAF_BASE_URL` in your MCP env:
+Set `OVERLEAF_BASE_URL` in your MCP env. If your instance names its session cookie `overleaf.sid` (or `sharelatex.sid`) instead of `overleaf_session2`, set `OVERLEAF_COOKIE_NAME` to that name as well:
 
 ```json
 "env": {
   "OVERLEAF_SESSION": "<cookie>",
-  "OVERLEAF_BASE_URL": "https://overleaf.yourcompany.com"
+  "OVERLEAF_BASE_URL": "https://overleaf.yourcompany.com",
+  "OVERLEAF_COOKIE_NAME": "overleaf.sid"
 }
 ```
+
+`list_comments` fetches up to 4 documents in parallel; set `OLCLI_CONCURRENCY` to a value from 1 to 8 to change that.

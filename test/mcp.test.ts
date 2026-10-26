@@ -546,3 +546,15 @@ test('acceptTrackedChanges with expected refuses a change whose text moved', asy
   await assert.rejects(client.acceptTrackedChanges('p', ['i'], plan.changes), /changed since the preview/);
   assert.equal(state.posts.length, 0);
 });
+
+test('every registered tool is documented in SKILL.md and docs/MCP.md', async () => {
+  const h = await connect(async () => fakeClient());
+  const { tools } = await h.client.listTools();
+  await h.close();
+  const root = join(import.meta.dirname, '..');
+  for (const doc of ['SKILL.md', 'docs/MCP.md']) {
+    const text = readFileSync(join(root, doc), 'utf-8');
+    const missing = tools.map((tool) => tool.name).filter((name) => !text.includes(`\`${name}\``));
+    assert.deepEqual(missing, [], `${doc} does not mention: ${missing.join(', ')}`);
+  }
+});

@@ -97,7 +97,7 @@ git push
 git pull
 ```
 
-Authentication: reads `OVERLEAF_SESSION` env var, `~/.olauth` file, or stored config (same as CLI).
+Authentication: reads `OVERLEAF_SESSION` env var, the `.olauth` file in the current directory, or stored config (same as CLI).
 
 For self-hosted instances, just use your instance URL:
 ```bash
@@ -118,7 +118,7 @@ olcli-mcp
 npx @aloth/olcli-mcp
 ```
 
-Available MCP tools: `list_projects`, `get_project_info`, `pull_project`, `push_file`, `compile`, `download_pdf`, `list_comments`, `get_entities`, `download_file`, `add_comment`, `reply_to_comment`, `resolve_comment`, `delete_entity`, `rename_entity`, `rename_project`, `plan_project_renames`, `compile_with_outputs`, `diff_project`, `create_project`.
+Available MCP tools: `list_projects`, `get_project_info`, `pull_project`, `push_file`, `compile`, `download_pdf`, `list_comments`, `get_entities`, `download_file`, `add_comment`, `reply_to_comment`, `resolve_comment`, `delete_entity`, `rename_entity`, `rename_project`, `plan_project_renames`, `compile_with_outputs`, `diff_project`, `create_project`, `accept_tracked_changes`, `reject_tracked_changes`.
 
 `compile`, `download_pdf` and `compile_with_outputs` accept an optional `resource_path` to compile a specific root document.
 
@@ -303,7 +303,7 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 | `olcli config get-cookie-name` | Show the configured cookie name |
 | `olcli config set-timeout <ms>` | Set HTTP timeout |
 | `olcli config get-timeout` | Show the configured HTTP timeout |
-| `olcli project rename <old> <new>` | Rename a project |
+| `olcli project rename <newname> [project]` | Rename a project |
 | `olcli project rename-bulk` | Rename many projects by pattern (dry-run unless `--apply`) |
 
 ## Tips
