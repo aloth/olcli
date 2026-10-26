@@ -1625,13 +1625,16 @@ program
   .command('sync [dir]')
   .description('Pull then push (bidirectional sync, propagates local deletions)')
   .option('--project <name>', 'Project name or ID')
-  .option('--verbose', 'Show detailed file operations')
   .option('--no-delete', 'Do not propagate local deletions to the remote (safer)')
   .option('--dry-run', 'Show what would change without applying')
   .option('--no-default-ignore', 'Disable built-in LaTeX artifact ignore list (only .olignore applies)')
   .option('--no-ignore', 'Disable all ignore filtering (escape hatch — uploads everything)')
   .option('--show-ignored', 'Print files skipped by ignore rules')
   .option('--cookie <session>', 'Session cookie override')
+  .addHelpText('after', `
+With the global --verbose, sync also lists each file it deleted on the remote,
+skipped, or pushed. Combine it with --dry-run to preview deletions:
+  olcli sync --dry-run --verbose`)
   .action(async (dir, options) => {
     const targetDir = dir || '.';
 
@@ -1867,7 +1870,10 @@ program
         console.log(chalk.yellow(`  ⚠ ${filesDeleteSkipped.length} deletion(s) failed (kept remote)`));
       }
 
-      if (options.verbose) {
+      // The program-level --verbose, not a sync option: commander assigns a
+      // flag declared on both levels to the program, so a local --verbose here
+      // could never be set and this block never printed.
+      if (program.opts().verbose) {
         if (filesDeletedRemote.length > 0) {
           console.log(chalk.red('\n  Deleted on remote (matched local deletion):'));
           for (const f of filesDeletedRemote) {
