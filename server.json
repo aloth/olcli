@@ -1,0 +1,52 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.aloth/olcli",
+  "title": "olcli",
+  "description": "Overleaf projects from an MCP client: files, compile and PDF, diff, comments and tracked changes",
+  "repository": {
+    "url": "https://github.com/aloth/olcli",
+    "source": "github",
+    "id": "1147798916"
+  },
+  "websiteUrl": "https://github.com/aloth/olcli/blob/main/docs/MCP.md",
+  "version": "0.15.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@aloth/olcli",
+      "version": "0.15.1",
+      "runtimeHint": "npx",
+      "runtimeArguments": [
+        { "type": "positional", "value": "-y" },
+        { "type": "positional", "value": "--package" }
+      ],
+      "packageArguments": [
+        { "type": "positional", "value": "olcli-mcp" }
+      ],
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "OVERLEAF_SESSION",
+          "description": "Overleaf session cookie value (overleaf_session2 on overleaf.com)",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "OVERLEAF_BASE_URL",
+          "description": "Base URL of a self-hosted Overleaf instance",
+          "default": "https://www.overleaf.com",
+          "isRequired": false
+        },
+        {
+          "name": "OVERLEAF_COOKIE_NAME",
+          "description": "Session cookie name, for self-hosted instances that use overleaf.sid",
+          "default": "overleaf_session2",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

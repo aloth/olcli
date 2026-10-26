@@ -2,6 +2,7 @@
   "name": "@aloth/olcli",
   "version": "0.15.1",
   "description": "Command-line interface for Overleaf — Sync, manage, and compile LaTeX projects from your terminal",
+  "mcpName": "io.github.aloth/olcli",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -46,7 +47,7 @@
     "typescript",
     "latex-tools"
   ],
-  "author": "Alexander Loth <alex@alexloth.com> (https://alexloth.com)",
+  "author": "Alexander Loth <home@alexloth.com> (https://alexloth.com)",
   "license": "MIT",
   "repository": {
     "type": "git",
