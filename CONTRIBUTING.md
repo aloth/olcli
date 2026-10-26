@@ -122,6 +122,10 @@ reads better consistent with itself than with the prose around it.
 
 Then the usual: branch, commit, push to your fork, open the pull request.
 
+### If your pull request is reimplemented
+
+Sometimes the maintainer reimplements a change instead of merging the pull request as is, for example to fold several pull requests into one release or to fit the change to code that moved in the meantime. You are still credited: the commit that lands the change carries a `Co-authored-by: Your Name <your-email>` trailer for you, using the name and email of your commits in the pull request, and the CHANGELOG entry names you and links the pull request.
+
 ### What to expect from CI
 
 **A first contribution sits at `action_required` until a maintainer approves

@@ -260,20 +260,20 @@ All notable changes to this project will be documented in this file.
 - **Reply to comment threads** ([#34](https://github.com/aloth/olcli/pull/34), closes [#33](https://github.com/aloth/olcli/issues/33)) — contributed by [@rarensu](https://github.com/rarensu)
   - `olcli comments reply [project]`
   - New `reply_to_comment` MCP tool for AI agents
-- **Password login for self-hosted instances** ([#32](https://github.com/aloth/olcli/pull/32)) — contributed by [@Li4nx](https://github.com/Li4nx)
+- **Password login for self-hosted instances** ([#32](https://github.com/aloth/olcli/pull/32)) — contributed by [@Littleor](https://github.com/Littleor)
   - `olcli auth --email --password ***`
   - Auto-refreshes expired sessions using stored credentials
   - `OverleafClient.fromPasswordLogin()` static factory method
   - MCP server automatically falls back to password login when cookie expires
   - Ideal for self-hosted Overleaf/ShareLaTeX without reCAPTCHA
-- **Session cookie persistence improvements** ([#31](https://github.com/aloth/olcli/pull/31)) — contributed by [@Li4nx](https://github.com/Li4nx)
+- **Session cookie persistence improvements** ([#31](https://github.com/aloth/olcli/pull/31)) — contributed by [@Duccioo](https://github.com/Duccioo)
   - `getSessionCookiePair()` for robust cookie name detection
   - Credential persistence helpers exported via library API
   - Supports varied cookie names across Overleaf versions (`overleaf_session2`, `overleaf.sid`, `sharelatex.sid`)
 
 ### Contributors
 - [@rarensu](https://github.com/rarensu) (Richard Lawrence) — timeout configuration, comment replies
-- [@Li4nx](https://github.com/Li4nx) — password login, session persistence
+- [@Littleor](https://github.com/Littleor), [@Duccioo](https://github.com/Duccioo) — password login, session persistence
 
 ## [0.5.0] - 2026-06-13
 
@@ -298,7 +298,7 @@ All notable changes to this project will be documented in this file.
 ## [0.4.1] - 2026-06-12
 
 ### Fixed
-- **PDF output selection** ([#26](https://github.com/aloth/olcli/issues/26), thanks [@drgmr](https://github.com/drgmr)!) — `olcli pdf` now correctly downloads the main compile output (`output.pdf`) instead of potentially picking up figure PDFs or `*-eps-converted-to.pdf` intermediates that appear earlier in the output file list.
+- **PDF output selection** ([#26](https://github.com/aloth/olcli/issues/26), thanks [@Seauagain](https://github.com/Seauagain)!) — `olcli pdf` now correctly downloads the main compile output (`output.pdf`) instead of potentially picking up figure PDFs or `*-eps-converted-to.pdf` intermediates that appear earlier in the output file list.
 
 ## [0.4.0] - 2026-06-01
 
