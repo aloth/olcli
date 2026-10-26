@@ -205,3 +205,60 @@ test('sync without --verbose prints only the summary', async () => {
     await mock.close();
   }
 });
+
+function projectDir(files: Record<string, string>): string {
+  const dir = mkdtempSync(join(home, 'project-'));
+  for (const [path, content] of Object.entries(files)) writeFileSync(join(dir, path), content);
+  writeFileSync(join(dir, '.olcli.json'), JSON.stringify({ projectId: PROJECT_ID, projectName: 'Paper' }));
+  return dir;
+}
+
+test('diff --exit-code exits 2 when no credential is found, 1 without the flag', async () => {
+  const gated = await olcli(['diff', '--exit-code']);
+  assert.equal(gated.status, 2, gated.stderr);
+  assert.match(gated.stderr, /No session cookie or password credentials found/);
+
+  const plain = await olcli(['diff']);
+  assert.equal(plain.status, 1, plain.stderr);
+});
+
+test('diff --exit-code exits 2 on usage errors, other commands keep 1', async () => {
+  const unknown = await olcli(['diff', '--exit-code', '--bogus']);
+  assert.equal(unknown.status, 2);
+  assert.match(unknown.stderr, /unknown option '--bogus'/);
+
+  const before = await olcli(['diff', '--bogus', '--exit-code']);
+  assert.equal(before.status, 2);
+
+  const missingValue = await olcli(['diff', '--exit-code', '-U']);
+  assert.equal(missingValue.status, 2);
+  assert.match(missingValue.stderr, /argument missing/);
+
+  assert.equal((await olcli(['diff', '--bogus'])).status, 1);
+  assert.equal((await olcli(['pull', '--bogus'])).status, 1);
+
+  const help = await olcli(['diff', '--exit-code', '--help']);
+  assert.equal(help.status, 0);
+  assert.match(help.stdout, /Usage: olcli diff/);
+});
+
+test('diff --exit-code exits 2 on an invalid session and 0 or 1 on a real comparison', async () => {
+  const expired = await mockOverleaf({ loggedIn: false });
+  try {
+    const result = await olcli(['diff', '--exit-code'], { cwd: projectDir({ 'main.tex': 'a\n' }), env: sessionEnv(expired) });
+    assert.equal(result.status, 2, result.stdout + result.stderr);
+  } finally {
+    await expired.close();
+  }
+
+  const live = await mockOverleaf({ loggedIn: true, files: { 'main.tex': 'a\n' } });
+  try {
+    const same = await olcli(['diff', '--exit-code'], { cwd: projectDir({ 'main.tex': 'a\n' }), env: sessionEnv(live) });
+    assert.equal(same.status, 0, same.stdout + same.stderr);
+    const changed = await olcli(['diff', '--exit-code', '--name-only'], { cwd: projectDir({ 'main.tex': 'b\n' }), env: sessionEnv(live) });
+    assert.equal(changed.status, 1, changed.stdout + changed.stderr);
+    assert.match(changed.stdout, /main\.tex/);
+  } finally {
+    await live.close();
+  }
+});

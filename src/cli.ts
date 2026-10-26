@@ -80,8 +80,12 @@ program
 
 /**
  * Helper to get authenticated client
+ *
+ * `failureCode` is the status when no credential is found at all. It is 1 for
+ * every command except `diff --exit-code`, which reserves 1 for "something
+ * differs" and reports a run that could not start as 2.
  */
-async function getClient(cookieOpt?: string, baseUrlOpt?: string): Promise<OverleafClient> {
+async function getClient(cookieOpt?: string, baseUrlOpt?: string, failureCode = 1): Promise<OverleafClient> {
   const baseUrl = baseUrlOpt || (program.opts().baseUrl as string | undefined) || getBaseUrl();
   const cookieName = (program.opts().cookieName as string | undefined) || getSessionCookieName();
   const cookie = cookieOpt || getSessionCookie();
@@ -108,7 +112,7 @@ async function getClient(cookieOpt?: string, baseUrlOpt?: string): Promise<Overl
   console.error('Or use: olcli auth --email <email> --password <password>');
   console.error('Or set OVERLEAF_SESSION environment variable');
   console.error('Or create .olauth file in current directory');
-  process.exit(1);
+  process.exit(failureCode);
 }
 
 async function loginWithSavedPassword(
@@ -1924,6 +1928,15 @@ program
   .option('--no-default-ignore', 'Disable built-in LaTeX artifact ignore list (only .olignore applies)')
   .option('--no-ignore', 'Disable all ignore filtering')
   .option('--cookie <session>', 'Session cookie override')
+  // Commander reports an unknown option or a missing option value with status
+  // 1, which under --exit-code means "something differs". Only this command's
+  // own usage errors are remapped; help and version still exit 0.
+  .exitOverride((error) => {
+    const args = process.argv.slice(2);
+    const end = args.indexOf('--');
+    const exitCodeRequested = (end === -1 ? args : args.slice(0, end)).includes('--exit-code');
+    process.exit(error.exitCode !== 0 && exitCodeRequested ? DIFF_EXIT_FAILURE : error.exitCode);
+  })
   .addHelpText('after', `
 The remote side is fetched fresh on every run, so the diff describes the
 project as it is right now - which is what a subsequent push would overwrite.
@@ -1988,7 +2001,7 @@ where the markup only covers the root document.`)
 
     const spinner = ora('Connecting...').start();
     try {
-      const client = await getClient(options.cookie);
+      const client = await getClient(options.cookie, undefined, failureCode);
 
       let resolved;
       try {
