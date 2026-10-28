@@ -22,6 +22,54 @@ jobs:
       - run: npm test --if-present
       - run: npm publish --access public
 
+  publish-mcp-registry:
+    needs: publish
+    runs-on: ubuntu-latest
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.4
+    steps:
+      - uses: actions/checkout@v4
+
+      # The registry entry must point at the version npm just published, so the
+      # version comes from package.json rather than from the tag name.
+      - name: Set version in server.json from package.json
+        run: |
+          VERSION=$(jq -r .version package.json)
+          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > server.tmp && mv server.tmp server.json
+          echo "server.json version: $VERSION"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Download and verify mcp-publisher
+        run: |
+          set -euo pipefail
+          archive="mcp-publisher_linux_amd64.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+          rm -f "$archive" "$archive.sigstore.json"
+
+      - name: Authenticate to the MCP registry
+        run: ./mcp-publisher login github-oidc
+
+      # The registry checks mcpName in the published npm package, which can
+      # take a minute to become visible after npm publish.
+      - name: Publish server to the MCP registry
+        run: |
+          for i in $(seq 1 6); do
+            ./mcp-publisher publish && exit 0
+            echo "Attempt $i failed, retrying in 30s..."
+            sleep 30
+          done
+          exit 1
+
   bump-homebrew:
     needs: publish
     runs-on: ubuntu-latest

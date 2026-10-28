@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **The MCP registry entry follows every release** - `publish.yml` gains a `publish-mcp-registry` job that runs after `npm publish` and publishes `server.json` to the official MCP registry, so `io.github.aloth/olcli` points at the version npm just shipped. Until now the entry was published by hand and would have stayed at 0.15.2. The job checks the `mcp-publisher` binary with cosign before running it and signs in through GitHub OIDC, so no registry token is stored in the repository.
+
 ## [0.15.2] - 2026-10-26
 
 ### Fixed
