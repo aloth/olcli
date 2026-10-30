@@ -176,7 +176,18 @@ unaffected.
 olcli delete chapters/old.tex          # remove a file from the project
 olcli rm figures/old.pdf               # alias
 olcli rename old.tex new.tex           # rename a file
-olcli mv chapters/draft.tex chapters/intro.tex   # alias
+olcli mv chapters/draft.tex intro.tex  # alias: moves draft.tex to the root as intro.tex
+```
+
+`delete` accepts a path. `rename` accepts a bare name, not a path: the entity
+keeps its content and ends up in the project root under the new name. A
+destination containing `/` is rejected with HTTP 400 (`invalid element name`),
+so a file cannot be moved into a folder in one step. Upload it to the new path
+and delete the old one instead:
+
+```bash
+olcli upload figures/old.pdf --to archive/old.pdf
+olcli delete figures/old.pdf
 ```
 
 ### Inspect ignore rules
