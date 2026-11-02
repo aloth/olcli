@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.15.3] - 2026-11-02
 
 ### Fixed
 - **`mv` and `rename_entity` move entities between folders** - `olcli rename` (alias `mv`) and the MCP tool `rename_entity` only renamed: a destination containing `/`, such as `olcli mv sub/x.txt chapters/x.txt`, failed with HTTP 400, although `mv` is documented as a move. The destination now decides what happens. A bare name renames in place and the entity keeps its folder, as before. A path with a folder part moves the entity into that folder through Overleaf's move endpoint and renames it if the last part differs, creating missing folders. A destination ending in `/` moves and keeps the name, and `/` alone or a leading `/` is the project root. Documents, files and folders can all be moved. The request is planned against the project tree first, so a destination that already exists, a missing source, or a folder moved into itself or one of its subfolders is refused with exit status 1 before any request that writes. When both the name and the folder change, olcli renames first and then moves, or moves first when the new name is already taken in the old folder, and undoes the first step if the second one fails. `rename_entity` accepts the same paths in `new_name`, its confirmation shows `From` and `To` and the folders it creates, and its result returns `old_path`, `new_path` and `created_folders`. Thanks to [@Wang-Chuming](https://github.com/Wang-Chuming) for reporting that the `mv` example could not move a file ([#61](https://github.com/aloth/olcli/pull/61))
