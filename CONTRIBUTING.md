@@ -75,7 +75,7 @@ project. Please do not "fix" their absence by widening the glob; CI has no
 account, and a pull request that made it try would fail for everyone.
 
 Prefer adding to the unit suite. Much of olcli is written so that it can be:
-`diff.ts`, `ignore.ts`, `paths.ts`, `rename-plan.ts` and `scan.ts` are pure
+`diff.ts`, `ignore.ts`, `move-plan.ts`, `paths.ts`, `rename-plan.ts` and `scan.ts` are pure
 functions over data, and `client.ts` request construction can be tested
 against a local HTTP server that captures the outgoing request — see
 `test/client.test.ts`. Reach for e2e only when the thing under test is the

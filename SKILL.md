@@ -175,20 +175,26 @@ unaffected.
 ```bash
 olcli delete chapters/old.tex          # remove a file from the project
 olcli rm figures/old.pdf               # alias
-olcli rename old.tex new.tex           # rename a file
-olcli mv chapters/draft.tex intro.tex  # alias: moves draft.tex to the root as intro.tex
+olcli rename old.tex new.tex           # rename a file, it stays in its folder
+olcli mv chapters/draft.tex chapters/intro.tex  # alias: rename inside chapters/
+olcli mv draft.tex chapters/intro.tex  # move into chapters/ and rename
+olcli mv figures/old.pdf archive/      # move into archive/, keep the name
+olcli mv chapters/notes.tex /          # move to the project root
 ```
 
-`delete` accepts a path. `rename` accepts a bare name, not a path: the entity
-keeps its content and ends up in the project root under the new name. A
-destination containing `/` is rejected with HTTP 400 (`invalid element name`),
-so a file cannot be moved into a folder in one step. Upload it to the new path
-and delete the old one instead:
+`delete` accepts a path. For `rename` (alias `mv`) the destination decides what
+happens. A bare name without `/` renames the entity in place: it keeps its
+folder. A path with a folder part moves the entity into that folder and gives
+it the last part as its name; missing folders are created. A destination ending
+in `/` moves the entity and keeps its name, and `/` alone or a leading `/` means
+the project root. Files, documents and folders can all be moved.
 
-```bash
-olcli upload figures/old.pdf --to archive/old.pdf
-olcli delete figures/old.pdf
-```
+Nothing is written, and the command exits 1, when the destination already
+exists, the source is not found, or a folder would be moved into itself or one
+of its subfolders. When both the folder and the name change, olcli renames
+first and then moves, or moves first when the new name is already taken in the
+old folder; every clash is checked against the project tree before the first
+request.
 
 ### Inspect ignore rules
 
@@ -296,7 +302,7 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 | `olcli upload <file> [project]` | Upload a single file (`--to <path>` sets the remote destination) |
 | `olcli download <file> [project]` | Download a single file |
 | `olcli delete <file> [project]` | Delete a remote file or folder (alias: `rm`) |
-| `olcli rename <old> <new> [project]` | Rename a remote file or folder (alias: `mv`) |
+| `olcli rename <old> <new> [project]` | Rename or move a remote file or folder (alias: `mv`); `<new>` with a folder part moves, a trailing `/` moves and keeps the name |
 | `olcli ignored [dir]` | List active ignore patterns |
 | `olcli zip [project]` | Download as zip archive |
 | `olcli compile [project]` | Trigger compilation |

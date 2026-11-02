@@ -78,7 +78,9 @@ does not repeat the whole dance for every file.
 | Read all files | `GET /project/<id>/download/zip` |
 | Write a file | `POST /project/<id>/upload?folder_id=<id>` (multipart, field `qqfile`) |
 | Delete | `DELETE /project/<id>/{doc,file,folder}/<entityId>` |
-| Rename an entity | `POST /project/<id>/<type>/<entityId>/rename` |
+| Rename an entity | `POST /project/<id>/<type>/<entityId>/rename` (JSON `{ name }`) |
+| Move an entity | `POST /project/<id>/<type>/<entityId>/move` (JSON `{ folder_id }`) |
+| Create a folder | `POST /project/<id>/folder` (JSON `{ parent_folder_id, name }`) |
 | Rename the project | `POST /project/<id>/rename` |
 | Compile | `POST /project/<id>/compile` |
 
@@ -125,6 +127,7 @@ should go.
 | `ignore.ts` | The three ignore layers and the `.pdf`-next-to-`.tex` rule |
 | `paths.ts` | Remote path normalization; zip-slip containment |
 | `rename-plan.ts` | Plan bulk project renames before applying any |
+| `move-plan.ts` | Plan `rename`/`mv` over the project tree: rename, move, folders to create, and every refusal, before any write |
 | `prompt.ts` | Keystroke handling for the password prompt |
 | `scan.ts` | Walk a local directory, applying ignore rules |
 | `mcp-confirm.ts` | Write-confirmation policy, dialog text, and CLI fallback command for the MCP server |

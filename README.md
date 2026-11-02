@@ -147,7 +147,7 @@ All commands auto-detect the project when run from a synced directory (contains 
 | `olcli upload <file> [project]` | Upload a single file (`--to <path>` sets the remote destination) |
 | `olcli download <file> [project]` | Download a single file |
 | `olcli delete <file> [project]` | Delete a remote file or folder (alias: `rm`) |
-| `olcli rename <old> <new> [project]` | Rename a remote file or folder (alias: `mv`) |
+| `olcli rename <old> <new> [project]` | Rename or move a remote file or folder (alias: `mv`); `<new>` with a folder part moves, a trailing `/` moves and keeps the name |
 | `olcli project create <name>` | Create a blank or example project (`--template blank\|example`) |
 | `olcli project rename <new> [project]` | Rename the project itself (`--dry-run`) |
 | `olcli project rename-bulk` | Rename many projects by pattern (dry-run unless `--apply`) |

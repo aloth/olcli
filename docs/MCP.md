@@ -23,7 +23,7 @@ Tools marked "asks first" change the Overleaf project. Before writing, the serve
 | `accept_tracked_changes` | Accept tracked changes by id; sends nothing if any id is unknown; asks first |
 | `reject_tracked_changes` | Reject tracked changes by id; returns a diff preview and writes only with `apply: true`, after asking |
 | `delete_entity` | Delete a file or document by path; asks first |
-| `rename_entity` | Rename a file or document; asks first |
+| `rename_entity` | Rename a file, document, or folder, or move it into another folder (`new_name` as a path, see below); asks first |
 | `rename_project` | Rename the project itself (not a file inside it); asks first |
 | `plan_project_renames` | Preview a bulk project rename — **plan only, never applies** |
 | `compile_with_outputs` | Compile and return all output files (PDF, BBL, logs…) |
@@ -33,6 +33,8 @@ Tools marked "asks first" change the Overleaf project. Before writing, the serve
 > **Tracked changes need a premium project.** Track changes is an Overleaf premium feature: it is only available in projects whose owner has a premium plan, and invited collaborators can then use it regardless of their own plan. In other projects `list_comments` with `include_changes` returns no changes and `accept_tracked_changes`/`reject_tracked_changes` report the ids as not found. See the [Overleaf documentation](https://docs.overleaf.com/collaborating/track-changes).
 
 > **What `diff_project` compares.** The remote side is fetched fresh on every call, so the result describes the project as it is right now, which is what a later push would overwrite. It is not a comparison against the last pull: the manifest records remote paths, never remote contents, so there is no stored snapshot. Every response carries `remote_fetched_at` for that reason — a collaborator editing between the call and a push can still change the outcome. Patches are oriented `a/` = remote, `b/` = local, so a `+` line is content a push would upload. Pass `name_only` to get statuses without patch text.
+
+> **What `new_name` of `rename_entity` accepts.** The same destinations as `olcli mv`: a bare name renames in place and the entity keeps its folder; `chapters/intro.tex` moves the entity into `chapters/` (created if missing) and renames it; `chapters/` moves it and keeps the name; `/` is the project root. The result returns `old_path`, `new_path` and `created_folders`.
 
 > **Why `plan_project_renames` cannot apply.** A bulk rename across an account is unrecoverable: Overleaf keeps no project-name history, and it tolerates duplicate names, so a bad pattern succeeds silently and leaves projects nobody can tell apart. The tool returns the planned renames, skipped projects and any collisions; executing them requires a human running `olcli project rename-bulk --apply` in a terminal.
 
@@ -48,7 +50,7 @@ The server also tells the client, in its MCP `instructions` and in the descripti
 |------|------------------|
 | `push_file` | Local file, size, target path in the project, and whether it replaces an existing file. For an existing text document also a diff against the current file on Overleaf |
 | `delete_entity` | The path that will be deleted and whether it is a doc, a file, or a folder |
-| `rename_entity` | Old and new path |
+| `rename_entity` | Old and new path (`From` / `To`), whether it is a rename, a move, or both, and any folders the move creates. A taken destination, a missing source, or a folder moved into itself is refused before the dialog |
 | `rename_project` | Old and new project name. If the name does not change, nothing is asked and nothing is written |
 | `create_project` | Name and template |
 | `add_comment` | Document, where the comment is anchored, and the exact comment text |
