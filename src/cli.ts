@@ -996,15 +996,38 @@ program
 program
   .command('rename <oldname> <newname> [project]')
   .alias('mv')
-  .description('Rename a file or folder in a project')
+  .description('Rename or move a file or folder in a project')
   .option('--cookie <session>', 'Session cookie override')
+  .addHelpText('after', `
+The destination decides what happens:
+  intro.tex             rename in place, the folder stays the same
+  chapters/intro.tex    move into chapters/ and rename; missing folders are created
+  chapters/             move into chapters/ and keep the name
+  /  or  /intro.tex     move to the project root
+
+Nothing is written when the destination already exists, the source is not
+found, or a folder would be moved into itself or one of its subfolders.
+
+Examples:
+  olcli mv draft.tex intro.tex
+  olcli mv chapters/draft.tex chapters/intro/intro.tex
+  olcli mv figures/old.png archive/
+  olcli mv sub/notes.txt /`)
   .action(async (oldname, newname, project, options) => {
     const spinner = ora('Renaming file...').start();
     try {
       const client = await getClient(options.cookie);
       const proj = await resolveProject(client, project);
-      await client.renameByPath(proj.id, oldname, newname);
-      spinner.succeed(`Renamed: ${oldname} → ${newname}`);
+      const plan = await client.planMove(proj.id, oldname, newname);
+      if (plan.noop) {
+        spinner.info(`Nothing to do: ${plan.from} is already at ${plan.to}`);
+        setLastProject(proj.id);
+        return;
+      }
+      const result = await client.applyMovePlan(proj.id, plan);
+      const verb = plan.move ? (plan.rename ? 'Moved and renamed' : 'Moved') : 'Renamed';
+      const created = result.createdFolders.length ? ` (created ${result.createdFolders.join(', ')})` : '';
+      spinner.succeed(`${verb}: ${result.from} → ${result.to || '/'}${created}`);
       setLastProject(proj.id);
     } catch (error: any) {
       spinner.fail(`Failed: ${error.message}`);

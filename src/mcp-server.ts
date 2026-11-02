@@ -965,11 +965,11 @@ export function createOlcliMcpServer(options: OlcliMcpServerOptions): McpServer 
   server.registerTool(
     'rename_entity',
     {
-      description: `Rename a file or document within an Overleaf project.${askNote}`,
+      description: `Rename a file, document, or folder within an Overleaf project, or move it into another folder. new_name without a slash renames in place. A path such as "chapters/intro.tex" moves the entity into that folder under that name, creating missing folders. A path ending in a slash, such as "chapters/", moves it and keeps the name; "/" is the project root. Nothing is written when the destination already exists, the source is not found, or a folder would move into itself.${askNote}`,
       inputSchema: {
         project_id: z.string().describe('The Overleaf project ID'),
-        remote_path: z.string().describe('Current path of the file/document within the project'),
-        new_name: z.string().describe('New filename (basename only, not a full path)'),
+        remote_path: z.string().describe('Current path of the file/document/folder within the project'),
+        new_name: z.string().describe('New name (renames in place), or a destination path: "folder/name.tex" moves and renames, "folder/" moves and keeps the name, "/" is the project root'),
       },
       // Not idempotent for the same reason as delete_entity.
       annotations: WRITE(true, false),
@@ -979,32 +979,38 @@ export function createOlcliMcpServer(options: OlcliMcpServerOptions): McpServer 
         extra,
         async () => {
           const client = await getClient();
-          await client.renameByPath(project_id, remote_path, new_name);
-          return { old_path: remote_path, new_name };
+          const result = await client.moveByPath(project_id, remote_path, new_name);
+          return { old_path: result.from, new_path: result.to, new_name, created_folders: result.createdFolders };
         },
         async () => {
           const client = await getClient();
-          // Resolved once: the entity shown is the entity renamed.
-          const entity = await client.findEntityByPath(project_id, remote_path);
-          if (!entity) throw new Error(`File not found: ${remote_path}`);
+          // Resolved once: the entity shown is the entity renamed or moved,
+          // and every refusal happens here, before the user is asked.
+          const plan = await client.planMove(project_id, remote_path, new_name);
+          if (plan.noop) {
+            return { noWrite: { applied: false, message: `Nothing to do: ${plan.from} is already at ${plan.to}`, old_path: plan.from, new_path: plan.to } };
+          }
           const name = await projectName(client, project_id);
-          const folder = entity.path.includes('/') ? entity.path.slice(0, entity.path.lastIndexOf('/') + 1) : '';
+          const action = plan.move ? (plan.rename ? 'Move and rename' : 'Move') : 'Rename';
           const lines = [
-            `Rename in Overleaf project ${projectLabel(project_id, name)}`,
+            `${action} in Overleaf project ${projectLabel(project_id, name)}`,
             '',
-            `From: ${inlineText(entity.path)} (${entity.type})`,
-            `To:   ${inlineText(folder + new_name)}`,
+            `From: ${inlineText(plan.from)} (${plan.entity.type})`,
+            `To:   ${inlineText(plan.to)}`,
           ];
-          if (entity.path !== normalizeRemotePath(remote_path)) {
+          if (plan.createFolders.length) {
+            lines.push(`Creates folder${plan.createFolders.length > 1 ? 's' : ''}: ${plan.createFolders.map(path => inlineText(path)).join(', ')}`);
+          }
+          if (plan.from !== normalizeRemotePath(remote_path)) {
             lines.push(`Requested as ${inlineText(remote_path)}; this is the entity that name matches.`);
           }
           return {
             message: lines.join('\n'),
-            cliCommand: cli({ command: ['rename'], args: [entity.path, new_name, project_id] }),
-            data: { old_path: entity.path, new_path: folder + new_name, type: entity.type },
+            cliCommand: cli({ command: ['rename'], args: [plan.from, new_name, project_id] }),
+            data: { old_path: plan.from, new_path: plan.to, type: plan.entity.type, created_folders: plan.createFolders },
             apply: async () => {
-              await client.renameEntity(project_id, entity.id, entity.type, new_name);
-              return { old_path: entity.path, new_name };
+              const result = await client.applyMovePlan(project_id, plan);
+              return { old_path: result.from, new_path: result.to, new_name, created_folders: result.createdFolders };
             },
           };
         },

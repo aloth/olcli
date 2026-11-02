@@ -34,6 +34,7 @@ import {
   type TrackedChangeAuthor,
   type TrackedChangeKind
 } from './tracked-changes.js';
+import { planEntityMove, type MovePlan } from './move-plan.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -2099,14 +2100,109 @@ export class OverleafClient {
   }
 
   /**
-   * Rename a file by path
+   * Move a file, doc, or folder into another folder, keeping its name.
+   * Overleaf answers 400 when the name is already taken in the target folder.
+   */
+  async moveEntity(
+    projectId: string,
+    entityId: string,
+    entityType: 'doc' | 'file' | 'folder',
+    folderId: string
+  ): Promise<void> {
+    const response = await this.httpRequest(`${this.baseUrl}/project/${projectId}/${entityType}/${entityId}/move`, {
+      method: 'POST',
+      headers: this.getHeaders(true),
+      body: JSON.stringify({ folder_id: folderId }),
+      expect: 'text'
+    });
+
+    if (!response.ok) {
+      const detail = typeof response.body === 'string' && response.body.trim() ? ` (${response.body.trim().slice(0, 200)})` : '';
+      throw new Error(`Failed to move entity: ${response.status}${detail}`);
+    }
+
+    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+  }
+
+  /**
+   * Work out what `rename|mv <source> <destination>` does, without writing.
+   * Throws MoveRefusedError when the request is refused. See move-plan.ts.
+   */
+  async planMove(projectId: string, source: string, destination: string): Promise<MovePlan> {
+    const projectInfo = await this.getProjectInfo(projectId);
+    const root = projectInfo.rootFolder?.[0];
+    if (!root?._id) throw new Error('Could not read the project file tree');
+    return planEntityMove(root, source, destination);
+  }
+
+  /**
+   * Carry out a plan from planMove. Missing folders are created right before
+   * the move. If the second of two writes fails, the first one is undone so
+   * the entity keeps its old path; folders created on the way stay.
+   */
+  async applyMovePlan(projectId: string, plan: MovePlan): Promise<{ from: string; to: string; createdFolders: string[] }> {
+    const { entity } = plan;
+    const createdFolders: string[] = [];
+    if (plan.noop) return { from: plan.from, to: plan.to, createdFolders };
+
+    const ensureTargetFolder = async (): Promise<string> => {
+      if (plan.targetFolderId) return plan.targetFolderId;
+      const known = { ...plan.knownFolders };
+      for (const path of plan.createFolders) {
+        const parentPath = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+        const name = path.slice(path.lastIndexOf('/') + 1);
+        known[path] = await this.createFolder(projectId, known[parentPath], name);
+        createdFolders.push(path);
+      }
+      return known[plan.targetFolderPath];
+    };
+
+    const doRename = () => this.renameEntity(projectId, entity.id, entity.type, plan.newName);
+    const doMove = async () => this.moveEntity(projectId, entity.id, entity.type, await ensureTargetFolder());
+
+    try {
+      if (!plan.move) {
+        await doRename();
+      } else if (!plan.rename) {
+        await doMove();
+      } else if (plan.order === 'rename-then-move') {
+        await doRename();
+        try {
+          await doMove();
+        } catch (error) {
+          await this.renameEntity(projectId, entity.id, entity.type, entity.name).catch(() => undefined);
+          throw error;
+        }
+      } else {
+        await doMove();
+        try {
+          await doRename();
+        } catch (error) {
+          await this.moveEntity(projectId, entity.id, entity.type, plan.sourceFolderId).catch(() => undefined);
+          throw error;
+        }
+      }
+    } finally {
+      this.invalidateFolderTree(projectId);
+    }
+    return { from: plan.from, to: plan.to, createdFolders };
+  }
+
+  /**
+   * Rename and/or move an entity by path. A destination without `/` renames
+   * in place; with a folder part it moves (creating missing folders); ending
+   * in `/` it moves and keeps the name; `/` alone is the project root.
+   */
+  async moveByPath(projectId: string, source: string, destination: string): Promise<{ from: string; to: string; createdFolders: string[] }> {
+    const plan = await this.planMove(projectId, source, destination);
+    return this.applyMovePlan(projectId, plan);
+  }
+
+  /**
+   * Rename a file by path. `newName` may be a path, see moveByPath.
    */
   async renameByPath(projectId: string, oldPath: string, newName: string): Promise<void> {
-    const entity = await this.findEntityByPath(projectId, oldPath);
-    if (!entity) {
-      throw new Error(`File not found: ${oldPath}`);
-    }
-    await this.renameEntity(projectId, entity.id, entity.type, newName);
+    await this.moveByPath(projectId, oldPath, newName);
   }
 
   /**

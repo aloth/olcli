@@ -18,8 +18,17 @@ import {
 } from '../src/mcp-confirm.js';
 import { OverleafClient } from '../src/client.js';
 import { applyTextOps } from '../src/tracked-changes.js';
+import { planEntityMove } from '../src/move-plan.js';
 
 const PROJECT = '6ad7a5fe455ae390791ca9ef';
+
+const FAKE_TREE = {
+  _id: 'root',
+  name: 'rootFolder',
+  docs: [{ _id: 'e-main', name: 'main.tex' }],
+  fileRefs: [],
+  folders: [{ _id: 'f-figures', name: 'figures', docs: [], fileRefs: [{ _id: 'e-fig', name: 'fig1.png' }], folders: [] }],
+};
 
 /** A fake OverleafClient: records every write, answers reads from fixed data. */
 function fakeClient() {
@@ -56,6 +65,15 @@ function fakeClient() {
     deleteEntity: record('deleteEntity'),
     renameByPath: record('renameByPath'),
     renameEntity: record('renameEntity'),
+    planMove: async (_p: string, source: string, destination: string) => planEntityMove(FAKE_TREE, source, destination),
+    applyMovePlan: async (...args: any[]) => {
+      writes.push({ method: 'applyMovePlan', args: [args[0], args[1].entity.id, args[1]] });
+      return { from: args[1].from, to: args[1].to, createdFolders: args[1].createFolders };
+    },
+    moveByPath: async (...args: unknown[]) => {
+      writes.push({ method: 'moveByPath', args });
+      return { from: String(args[1]), to: String(args[2]), createdFolders: [] };
+    },
     renameProject: record('renameProject'),
     createProject: async (...args: unknown[]) => {
       writes.push({ method: 'createProject', args });
@@ -432,7 +450,36 @@ test('delete_entity and rename_entity show the resolved path and act on that ent
   assert.match(h.dialogs[0].message, /Path: figures\/fig1\.png \(file\)/);
   assert.match(h.dialogs[0].message, /Requested as fig1\.png/);
   assert.match(h.dialogs[1].message, /From: figures\/fig1\.png \(file\)\nTo: {3}figures\/fig2\.png/);
-  assert.deepEqual(fake.writes.map(w => [w.method, w.args[1]]), [['deleteEntity', 'e-fig'], ['renameEntity', 'e-fig']]);
+  assert.deepEqual(fake.writes.map(w => [w.method, w.args[1]]), [['deleteEntity', 'e-fig'], ['applyMovePlan', 'e-fig']]);
+  await h.close();
+});
+
+test('rename_entity with a path shows the move from -> to and the folders it creates', async () => {
+  const fake = fakeClient();
+  const h = await connect(async () => fake);
+  const result = await h.call('rename_entity', { project_id: PROJECT, remote_path: 'main.tex', new_name: 'chapters/intro.tex' });
+  assert.match(h.dialogs[0].message, /^Move and rename in Overleaf project/);
+  assert.match(h.dialogs[0].message, /From: main\.tex \(doc\)\nTo: {3}chapters\/intro\.tex/);
+  assert.match(h.dialogs[0].message, /Creates folder: chapters/);
+  assert.equal(result.json.new_path, 'chapters/intro.tex');
+  await h.call('rename_entity', { project_id: PROJECT, remote_path: 'figures/fig1.png', new_name: '/' });
+  assert.match(h.dialogs[1].message, /^Move in Overleaf project/);
+  assert.match(h.dialogs[1].message, /To: {3}fig1\.png/);
+  assert.deepEqual(fake.writes.map(w => w.method), ['applyMovePlan', 'applyMovePlan']);
+  await h.close();
+});
+
+test('rename_entity refuses a taken destination before asking and writes nothing', async () => {
+  const fake = fakeClient();
+  const h = await connect(async () => fake);
+  const clash = await h.call('rename_entity', { project_id: PROJECT, remote_path: 'figures/fig1.png', new_name: '/main.tex' });
+  assert.equal(clash.isError, true);
+  assert.match(clash.text[0], /Destination already exists: main\.tex/);
+  const self = await h.call('rename_entity', { project_id: PROJECT, remote_path: 'figures', new_name: 'figures/inner/' });
+  assert.equal(self.isError, true);
+  assert.match(self.text[0], /Cannot move folder figures into its own subfolder figures\/inner/);
+  assert.equal(h.dialogs.length, 0);
+  assert.equal(fake.writes.length, 0);
   await h.close();
 });
 
@@ -483,7 +530,7 @@ test('env opt-out writes directly through every write tool, as in 0.15.0', async
   await h.call('rename_entity', { project_id: PROJECT, remote_path: 'main.tex', new_name: 'paper.tex' });
   await h.call('reply_to_comment', { project_id: PROJECT, thread_id: 't1', content: 'r' });
   assert.equal(h.dialogs.length, 0);
-  assert.deepEqual(fake.writes.map(w => w.method), ['uploadFile', 'deleteByPath', 'renameByPath', 'postCommentMessage']);
+  assert.deepEqual(fake.writes.map(w => w.method), ['uploadFile', 'deleteByPath', 'moveByPath', 'postCommentMessage']);
   await h.close();
 });
 
