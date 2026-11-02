@@ -7,6 +7,9 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - **The MCP registry entry follows every release** - `publish.yml` gains a `publish-mcp-registry` job that runs after `npm publish` and publishes `server.json` to the official MCP registry, so `io.github.aloth/olcli` points at the version npm just shipped. Until now the entry was published by hand and would have stayed at 0.15.2. The job checks the `mcp-publisher` binary with cosign before running it and signs in through GitHub OIDC, so no registry token is stored in the repository.
 
+### Documentation
+- **SKILL.md states what `rename` can do** - the example showed `olcli mv chapters/draft.tex chapters/intro.tex`, which the command cannot perform. `rename` takes a bare name rather than a path, so a destination containing `/` fails with HTTP 400 (`invalid element name`), and an entity renamed out of a folder lands in the project root. The section now says so and gives the workaround: `upload --to <new path>` followed by `delete <old path>`
+
 ## [0.15.2] - 2026-10-26
 
 ### Fixed
