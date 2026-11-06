@@ -43,6 +43,17 @@ export default tseslint.config(
       // visible and does not block, and new code can be held to a higher bar in
       // review. Revisit once the count is low enough to fix in one pass.
       "@typescript-eslint/no-explicit-any": "warn",
+
+      // A bare "Failed: <message>" names neither the cause nor the fix. Every
+      // command reports through failWith() in src/cli.ts, which formats the
+      // error via src/errors.ts. This keeps the old pattern from coming back.
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "TemplateLiteral[quasis.0.value.raw=/^Failed: $/]",
+          message: "Do not print a bare `Failed: ${error.message}`. Use failWith(spinner, error) or formatError() from src/errors.ts.",
+        },
+      ],
     },
   },
 );

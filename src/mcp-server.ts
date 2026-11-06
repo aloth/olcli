@@ -23,6 +23,7 @@ import { planProjectRenames } from './rename-plan.js';
 import { scanLocalFiles } from './scan.js';
 import { compareTrees, filterRemoteTree, isBinary, renderFileDiff } from './diff.js';
 import { loadIgnore } from './ignore.js';
+import { formatErrorText } from './errors.js';
 import {
   CONFIRM_SCHEMA,
   CONFIRMATION_TIMEOUT_MS,
@@ -122,7 +123,9 @@ function jsonResult(value: unknown, isError = false): ToolResult {
 }
 
 function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  // Same wording as the CLI: the cause and the command that fixes it first,
+  // the HTTP status after it. --verbose is a CLI flag, so it is not suggested.
+  return formatErrorText(err, { verbose: true });
 }
 
 function errorResult(err: unknown): ToolResult {

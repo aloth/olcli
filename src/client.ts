@@ -35,6 +35,7 @@ import {
   type TrackedChangeKind
 } from './tracked-changes.js';
 import { planEntityMove, type MovePlan } from './move-plan.js';
+import { HttpStatusError, SessionExpiredError, httpError, isAuthStatus } from './errors.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -43,6 +44,17 @@ const USER_AGENT = `olcli/${pkg.version}`;
 
 const DEFAULT_BASE_URL = 'https://www.overleaf.com';
 const RESOURCE_PATH_FAILURE_HINT = ' (Perhaps the resource file you specified does not exist in the project?)';
+
+/**
+ * True when a redirect from `fromUrl` points at Overleaf's login page. A
+ * request to /login itself is the password flow and is never treated as one.
+ */
+export function isLoginRedirect(fromUrl: string, location: string): boolean {
+  const from = new URL(fromUrl);
+  if (from.pathname === '/login') return false;
+  const target = new URL(location, fromUrl);
+  return target.pathname === '/login' || target.pathname.endsWith('/login');
+}
 
 export interface Project {
   id: string;
@@ -400,7 +412,7 @@ export class OverleafClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch projects page: ${response.status}`);
+      throw httpError('Failed to fetch projects page', response.status);
     }
 
     bootstrapClient.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -409,13 +421,13 @@ export class OverleafClient {
     const $ = cheerio.load(html);
 
     if (OverleafClient.isLoginPage($)) {
-      throw new Error('Authentication required. Session may have expired.');
+      throw new SessionExpiredError('Overleaf answered with its login page');
     }
 
     const csrf = OverleafClient.extractCsrfToken($);
 
     if (!csrf) {
-      throw new Error('Could not find CSRF token. Session may have expired.');
+      throw new SessionExpiredError('No CSRF token on the project page');
     }
 
     // Update cookies if the bootstrap request added anything
@@ -438,7 +450,7 @@ export class OverleafClient {
       expect: 'text'
     });
     if (!loginPage.ok) {
-      throw new Error(`Failed to fetch login page: ${loginPage.status}`);
+      throw new HttpStatusError('Failed to fetch login page', loginPage.status);
     }
     bootstrapClient.applySetCookieHeaders(loginPage.headers['set-cookie'] as string[] | undefined);
 
@@ -476,7 +488,7 @@ export class OverleafClient {
       if (loginFailure) {
         throw new Error('Password login failed. Email or password may be incorrect.');
       }
-      throw new Error(`Password login failed: ${loginResponse.status}`);
+      throw new HttpStatusError('Password login failed', loginResponse.status);
     }
 
     const projectUrl = new URL((loginResponse.headers.location as string | undefined) || '/project', baseUrl).toString();
@@ -488,7 +500,7 @@ export class OverleafClient {
       expect: 'text'
     });
     if (!projectPage.ok) {
-      throw new Error(`Failed to fetch projects page after login: ${projectPage.status}`);
+      throw httpError('Failed to fetch projects page after login', projectPage.status);
     }
     bootstrapClient.applySetCookieHeaders(projectPage.headers['set-cookie'] as string[] | undefined);
 
@@ -627,6 +639,17 @@ export class OverleafClient {
           const status = res.statusCode || 0;
           const resHeaders = res.headers as Record<string, string | string[]>;
 
+          // Overleaf answers an expired session on any page with a redirect to
+          // /login. Following it would hand an HTML login form to a caller
+          // that expected JSON or a zip, and the user would see a parse error.
+          if (status >= 300 && status < 400 && res.headers.location
+            && isLoginRedirect(reqUrl, res.headers.location)) {
+            this.logVerbose(`${method} ${reqUrl} -> ${status} redirect to login page`);
+            res.resume();
+            reject(new SessionExpiredError(`HTTP ${status} redirect to the login page from ${new URL(reqUrl).pathname}`, status));
+            return;
+          }
+
           if (status >= 300 && status < 400 && res.headers.location && redirectsLeft > 0) {
             this.logVerbose(`${method} ${reqUrl} -> ${status} redirect -> ${res.headers.location}`);
             const redirectUrl = new URL(res.headers.location, reqUrl).toString();
@@ -694,7 +717,7 @@ export class OverleafClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch projects: ${response.status}`);
+      throw httpError('Failed to fetch projects', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -806,7 +829,7 @@ export class OverleafClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to create project: ${response.status}`);
+      throw httpError('Failed to create project', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -834,7 +857,7 @@ export class OverleafClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch project info: ${response.status}`);
+      throw httpError('Failed to fetch project info', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -995,7 +1018,7 @@ export class OverleafClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Download failed: ${response.status}`);
+      throw httpError('Download failed', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -1025,7 +1048,7 @@ export class OverleafClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to compile project: ${response.status}`);
+      throw httpError('Failed to compile project', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -1082,7 +1105,7 @@ export class OverleafClient {
     }
 
     if (!response.ok) {
-      throw new Error(`Failed to create folder: ${response.status}`);
+      throw httpError('Failed to create folder', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -1226,9 +1249,7 @@ export class OverleafClient {
     });
 
     if (!handshakeResponse.ok) {
-      const error = new Error(`Failed to open project socket: ${handshakeResponse.status}`) as Error & { status?: number };
-      error.status = handshakeResponse.status;
-      throw error;
+      throw httpError('Failed to open project socket', handshakeResponse.status);
     }
 
     this.applySetCookieHeaders(handshakeResponse.headers['set-cookie'] as string[] | undefined);
@@ -1268,7 +1289,7 @@ export class OverleafClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Socket poll failed: ${response.status}`);
+      throw httpError('Socket poll failed', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -1308,7 +1329,7 @@ export class OverleafClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Socket post failed: ${response.status}`);
+      throw httpError('Socket post failed', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -1859,6 +1880,7 @@ export class OverleafClient {
       });
 
       if (!response.ok) {
+        if (isAuthStatus(response.status)) throw httpError('Failed to upload file', response.status);
         const text = response.body as string;
         // Overleaf returns folder_not_found as HTTP 422 JSON.
         // Parse the body first so caller can trigger folder probing fallback.
@@ -1935,7 +1957,7 @@ export class OverleafClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to delete entity: ${response.status}`);
+      throw httpError('Failed to delete entity', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -1951,7 +1973,7 @@ export class OverleafClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to get entities: ${response.status}`);
+      throw httpError('Failed to get entities', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -2023,7 +2045,7 @@ export class OverleafClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to download file: ${response.status}`);
+      throw httpError('Failed to download file', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -2055,7 +2077,7 @@ export class OverleafClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to rename entity: ${response.status}`);
+      throw httpError('Failed to rename entity', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -2082,7 +2104,7 @@ export class OverleafClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to rename project: ${response.status}`);
+      throw httpError('Failed to rename project', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -2118,7 +2140,7 @@ export class OverleafClient {
 
     if (!response.ok) {
       const detail = typeof response.body === 'string' && response.body.trim() ? ` (${response.body.trim().slice(0, 200)})` : '';
-      throw new Error(`Failed to move entity: ${response.status}${detail}`);
+      throw httpError('Failed to move entity', response.status, detail.trim());
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -2253,7 +2275,7 @@ export class OverleafClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch comment threads: ${response.status}`);
+      throw httpError('Failed to fetch comment threads', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -2503,7 +2525,7 @@ export class OverleafClient {
         expect: 'text'
       });
       if (!response.ok) {
-        throw new Error(`Failed to accept tracked changes in ${changes[0].path}: ${response.status}`);
+        throw httpError(`Failed to accept tracked changes in ${changes[0].path}`, response.status);
       }
       this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
     }
@@ -2655,7 +2677,7 @@ export class OverleafClient {
     );
 
     if (!response.ok) {
-      throw new Error(`Failed to resolve comment: ${response.status}`);
+      throw httpError('Failed to resolve comment', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -2676,7 +2698,7 @@ export class OverleafClient {
     );
 
     if (!response.ok) {
-      throw new Error(`Failed to reopen comment: ${response.status}`);
+      throw httpError('Failed to reopen comment', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -2697,7 +2719,7 @@ export class OverleafClient {
     );
 
     if (!response.ok) {
-      throw new Error(`Failed to delete comment: ${response.status}`);
+      throw httpError('Failed to delete comment', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -2817,7 +2839,7 @@ export class OverleafClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to post comment message: ${response.status}`);
+      throw httpError('Failed to post comment message', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
@@ -2847,7 +2869,7 @@ export class OverleafClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to compile project: ${response.status}`);
+      throw httpError('Failed to compile project', response.status);
     }
 
     this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);

@@ -8,7 +8,8 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import ora from 'ora';
+import ora, { type Ora } from 'ora';
+import { formatError, SessionExpiredError } from './errors.js';
 import { writeFileSync, readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -77,6 +78,20 @@ program
   .option('--cookie-name <name>', 'Session cookie name (default: overleaf_session2, use overleaf.sid for older instances)')
   .option('--timeout <ms>', 'HTTP request timeout in milliseconds', parseInt)
   .option('--verbose', 'Print every HTTP request, status, and error response body to stderr');
+
+/**
+ * The one way a command reports a failure: the cause (and the command that
+ * fixes it) on the spinner line, details such as the HTTP status on stderr
+ * after it. Exits with `code`, 1 unless the command reserves 1 for something
+ * else (`diff --exit-code`).
+ */
+function failWith(spinner: Ora, error: unknown, code = 1): never {
+  const verbose = Boolean(program.opts().verbose);
+  const [first, ...rest] = formatError(error, { verbose });
+  spinner.fail(first);
+  for (const line of rest) console.error(chalk.dim(`  ${line}`));
+  process.exit(code);
+}
 
 /**
  * Helper to get authenticated client
@@ -306,8 +321,7 @@ command reads without needing 'auth' at all.`)
 
       console.log(chalk.dim(`Config saved to: ${getConfigPath()}`));
     } catch (error: any) {
-      spinner.fail(`Authentication failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -332,7 +346,9 @@ program
       const projects = await client.listProjects();
       spinner.succeed(`Authenticated with access to ${projects.length} projects`);
     } catch (error: any) {
-      spinner.fail(`Session invalid: ${error.message}`);
+      const [first, ...rest] = formatError(error, { verbose: Boolean(program.opts().verbose) });
+      spinner.fail(error instanceof SessionExpiredError ? first : `Session invalid. ${first}`);
+      for (const line of rest) console.error(chalk.dim(`  ${line}`));
       process.exitCode = 1;
     }
   });
@@ -417,8 +433,7 @@ program
         console.log(`    ${chalk.dim(`Last updated: ${date}`)}`);
       }
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -459,8 +474,7 @@ program
 
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -566,8 +580,7 @@ commentsCmd
 
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -590,8 +603,7 @@ commentsCmd
       spinner.succeed(`Replied to ${threadId}`);
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -614,8 +626,7 @@ commentsCmd
       spinner.succeed(`Resolved ${threadId} at ${comment.path}:${comment.line}:${comment.column}`);
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -638,8 +649,7 @@ commentsCmd
       spinner.succeed(`Reopened ${threadId} at ${comment.path}:${comment.line}:${comment.column}`);
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -662,8 +672,7 @@ commentsCmd
       spinner.succeed(`Deleted ${threadId} from ${comment.path}:${comment.line}:${comment.column}`);
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -701,8 +710,7 @@ commentsCmd
       spinner.succeed(`Added ${comment.threadId} at ${comment.path}:${comment.line}:${comment.column}`);
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -737,8 +745,7 @@ changesCmd
       }
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -774,8 +781,7 @@ changesCmd
       else console.log(chalk.green(`Rejected ${plan.changes.length} tracked change(s).`));
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -798,8 +804,7 @@ program
 
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -822,8 +827,7 @@ program
 
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -848,8 +852,7 @@ program
 
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -916,8 +919,7 @@ program
 
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -963,8 +965,7 @@ program
 
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -988,8 +989,7 @@ program
       spinner.succeed(`Deleted: ${file}`);
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -1030,8 +1030,7 @@ Examples:
       spinner.succeed(`${verb}: ${result.from} → ${result.to || '/'}${created}`);
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -1073,8 +1072,7 @@ projectCmd
       console.log(`  ${chalk.cyan(created.id)}`);
       console.log(`  ${chalk.cyan(created.url)}`);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -1105,8 +1103,7 @@ projectCmd
       spinner.succeed(`Renamed project: ${proj.name} \u2192 ${newname}`);
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -1209,8 +1206,7 @@ projectCmd
         applySpinner.succeed(`Renamed ${renamed} project(s)`);
       }
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -1235,8 +1231,7 @@ program
 
       setLastProject(proj.id);
     } catch (error: any) {
-      spinner.fail(`Compilation failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -1389,8 +1384,7 @@ program
 
       setLastProject(projectId);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -1647,8 +1641,7 @@ program
 
       setLastProject(projectId!);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -1933,8 +1926,7 @@ skipped, or pushed. Combine it with --dry-run to preview deletions:
 
       setLastProject(projectId);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(1);
+      failWith(spinner, error);
     }
   });
 
@@ -2162,8 +2154,7 @@ where the markup only covers the root document.`)
       // flush and then exit with this status on its own.
       if (options.exitCode) process.exitCode = differencesExitCode(entries);
     } catch (error: any) {
-      spinner.fail(`Failed: ${error.message}`);
-      process.exit(failureCode);
+      failWith(spinner, error, failureCode);
     }
   });
 

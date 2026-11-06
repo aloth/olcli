@@ -17,6 +17,7 @@ import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { OverleafClient } from './client.js';
+import { formatErrorText } from './errors.js';
 import {
   getSessionCookie,
   getBaseUrl,
@@ -128,7 +129,7 @@ async function getClient(baseUrl: string): Promise<OverleafClient> {
       return client;
     } catch (err) {
       if (!passwordCredentials) {
-        fatal(`Authentication failed: ${(err as Error).message}\nRun 'olcli auth' or set OVERLEAF_SESSION.`);
+        fatal(`Authentication failed: ${formatErrorText(err, { verbose: true })}\nRun 'olcli auth' or set OVERLEAF_SESSION.`);
       }
     }
   }
@@ -414,5 +415,5 @@ process.stdout.on('error', (err: NodeJS.ErrnoException) => {
 });
 
 main().catch((err) => {
-  fatal(err.message || String(err));
+  fatal(formatErrorText(err, { verbose: true }));
 });

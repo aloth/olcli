@@ -103,7 +103,7 @@ test('createProject reports HTTP errors and malformed success responses', async 
     { status: 403, body: { message: 'forbidden' } },
     async baseUrl => {
       const client = new OverleafClient({ cookies: {}, csrf: 'csrf-token', baseUrl });
-      await assert.rejects(client.createProject('Paper'), /Failed to create project: 403/);
+      await assert.rejects(client.createProject('Paper'), /Session expired or invalid\. Run: olcli auth/);
     }
   );
 

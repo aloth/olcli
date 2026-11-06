@@ -272,7 +272,7 @@ test('whoami exits 1 when not authenticated or the session is invalid, 0 when va
   try {
     const result = await olcli(['whoami'], { env: sessionEnv(expired) });
     assert.equal(result.status, 1, result.stdout + result.stderr);
-    assert.match(result.stdout + result.stderr, /Session invalid/);
+    assert.match(result.stdout + result.stderr, /Session expired or invalid\. Run: olcli auth/);
   } finally {
     await expired.close();
   }
@@ -284,5 +284,20 @@ test('whoami exits 1 when not authenticated or the session is invalid, 0 when va
     assert.match(result.stdout + result.stderr, /Authenticated with access to 1 projects/);
   } finally {
     await live.close();
+  }
+});
+
+test('an expired session names the fix before the detail, on every command', async () => {
+  const expired = await mockOverleaf({ loggedIn: false });
+  try {
+    for (const args of [['list'], ['info', 'Paper'], ['pull', 'Paper']]) {
+      const result = await olcli(args, { env: sessionEnv(expired) });
+      assert.equal(result.status, 1, `${args.join(' ')}: ${result.stdout}${result.stderr}`);
+      const output = result.stdout + result.stderr;
+      assert.match(output, /Session expired or invalid\. Run: olcli auth/, args.join(' '));
+      assert.doesNotMatch(output, /Failed: /, args.join(' '));
+    }
+  } finally {
+    await expired.close();
   }
 });
