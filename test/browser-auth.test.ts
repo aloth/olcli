@@ -317,7 +317,9 @@ test('--browser cannot be combined with --cookie, --email or --password', async 
 test('--browser with a missing OLCLI_BROWSER names the variable and the cookie path', async () => {
   const result = await olcli(['auth', '--browser'], { OLCLI_BROWSER: '/nonexistent/olcli-test/Chrome.app' });
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /OLCLI_BROWSER/);
+  // Node 20 and 21 ship no WebSocket client, so the Node version check fires first there.
+  if ((globalThis as { WebSocket?: unknown }).WebSocket) assert.match(result.stderr, /OLCLI_BROWSER/);
+  else assert.match(result.stderr, /Node 22 or newer/);
   assert.match(result.stderr, /olcli auth --cookie/);
 });
 
