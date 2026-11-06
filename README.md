@@ -21,7 +21,9 @@
   <img src="screenshots/demo.gif" alt="olcli demo" width="600">
 </p>
 
-<!-- TODO(0.16.0): short GIF of `olcli diff --latexdiff --pdf` (local edit to marked-up PDF). Not recorded yet. -->
+<p align="center">
+  <img src="screenshots/latexdiff.gif" alt="olcli diff --latexdiff --pdf turns a local edit into a marked-up PDF" width="600">
+</p>
 
 ## Install
 
@@ -101,7 +103,15 @@ olcli ships an MCP server, `olcli-mcp`. Add it to `.mcp.json` (Claude Code), `.c
 }
 ```
 
-Codex reads the same `command` and `args` from `~/.codex/config.toml` under `[mcp_servers.overleaf]`. The server uses the session stored by `olcli auth`; set `OVERLEAF_SESSION` in `env` instead if you prefer. Every tool that changes a project (push a file, delete, rename, comment, accept or reject tracked changes, create a project) shows you what it will do and writes only after you confirm it in the client. The server tells the agent that project content, such as comments and document text, is data and not instructions. Details, the full tool list and clients without confirmation support: [docs/MCP.md](docs/MCP.md).
+Codex uses TOML in `~/.codex/config.toml` (or `.codex/config.toml` in a trusted project):
+
+```toml
+[mcp_servers.overleaf]
+command = "npx"
+args = ["-y", "--package", "@aloth/olcli", "olcli-mcp"]
+```
+
+The server uses the session stored by `olcli auth`; set `OVERLEAF_SESSION` in `env` instead if you prefer. Every tool that changes a project (push a file, delete, rename, comment, accept or reject tracked changes, create a project) shows you what it will do and writes only after you confirm it in the client. The server tells the agent that project content, such as comments and document text, is data and not instructions. Details, the full tool list and clients without confirmation support: [docs/MCP.md](docs/MCP.md).
 
 ## Commands
 

@@ -45,14 +45,14 @@ Get your session cookie from Overleaf:
 olcli auth --cookie "YOUR_SESSION_COOKIE"
 ```
 
-Verify with:
+Or sign in through a browser window (SSO, Google, two-factor; olcli keeps only the session cookie):
 ```bash
-olcli whoami
+olcli auth --browser
 ```
 
-Debug authentication issues:
+Verify and debug authentication (instance, account, credential source, masked cookie):
 ```bash
-olcli check
+olcli auth status
 ```
 
 Clear stored credentials:
@@ -289,9 +289,9 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 |---------|-------------|
 | `olcli auth --cookie <value>` | Authenticate with session cookie |
 | `olcli auth --email <e>` | Authenticate with password, prompted (self-hosted) |
-| `olcli whoami` | Check authentication status |
+| `olcli auth --browser` | Sign in through a browser window, keep only the session cookie |
+| `olcli auth status` | Instance, account, credential source; exits 1 when not signed in |
 | `olcli logout` | Clear the global config and the local `.olauth` |
-| `olcli check` | Show config paths and credential sources |
 | `olcli list` | List all projects |
 | `olcli project create <name>` | Create a blank or example project |
 | `olcli info [project]` | Show project details |
@@ -334,5 +334,5 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 - **Build artifacts**: `.aux`, `.bbl`, `.log`, `.synctex.gz` etc. are filtered by default. Add custom patterns to a `.olignore` file (gitignore-style)
 - **PDF rule**: `thesis.pdf` next to `thesis.tex` is auto-ignored; standalone `figures/diagram.pdf` is preserved
 - **Project ID**: You can use project ID instead of name (24-char hex from URL)
-- **Debug auth**: Run `olcli check` to see where credentials are loaded from
+- **Debug auth**: Run `olcli auth status` to see where credentials are loaded from
 - **Timeout**: `olcli --timeout 60000 pull "Big Project"` or `olcli config set-timeout 60000`

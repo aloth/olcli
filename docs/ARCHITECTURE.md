@@ -172,5 +172,5 @@ The usual failure is a redesign moving data somewhere else. Reliable order:
    and look for the `ol-*` meta tag. Add a fallback; keep the existing ones,
    since self-hosted instances run older versions.
 3. If the file tree is what broke, suspect `getProjectFromSocket()` first.
-4. `olcli check` reports which credential source is in play, without printing
+4. `olcli auth status` reports which credential source is in play, without printing
    any secret.
