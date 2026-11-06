@@ -23,6 +23,11 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - **The Nix flake builds again** ([#24](https://github.com/aloth/olcli/issues/24)) - `flake.nix` shipped with an empty `npmDepsHash`, so `nix build` failed before fetching anything, and it still declared version 0.7.0. It now pins the hash of the current lockfile, reads the version from `package.json` and builds with Node 24
 
+### Documentation
+- **README rewritten for the first run** - it opens with what olcli is for: coauthors keep the Overleaf web editor, olcli works on the free Overleaf plan and on self-hosted Community Edition, and it needs no git token. Install is one line each for Homebrew and npm, plus `nix run github:aloth/olcli` on Linux. The quick start signs in with `olcli auth --browser`, then the hidden cookie prompt or stdin, with a short section on finding the session cookie and a self-hosted quick start with `olcli config set-url`. Features list tracked changes (premium projects only), latexdiff, comments and the MCP server with write confirmation; a new section shows one MCP config for Claude Code, Codex and Cursor, and a short one covers proxy variables. The README is down from 533 to 224 lines
+- **Deep dives moved to docs/** - the Diff section, including latexdiff and the `--exit-code` CI gate, is now docs/DIFF.md. Credentials, environment variables, timeout, ignore rules and deletion propagation are in docs/CONFIGURATION.md, and the library exports in docs/LIBRARY.md
+- **Landing page updated** - https://aloth.github.io/olcli/ matches the new README: the npm description as title and meta description, browser sign-in, free plan and self-hosted, latexdiff, comments and tracked changes, and the MCP server asking before it writes. The test that checks every `olcli` command and flag on the page against the command tree now also fails on any em dash, with no exceptions
+
 ## [0.15.3] - 2026-11-02
 
 ### Fixed
