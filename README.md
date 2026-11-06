@@ -6,8 +6,10 @@
 [![npm version](https://img.shields.io/npm/v/@aloth/olcli.svg)](https://www.npmjs.com/package/@aloth/olcli)
 [![npm downloads](https://img.shields.io/npm/dm/@aloth/olcli.svg)](https://www.npmjs.com/package/@aloth/olcli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![AgentSkills](https://img.shields.io/badge/AgentSkills-compatible-blue)](https://agentskills.io)
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23896243.svg)](https://doi.org/10.5281/zenodo.23896243)
 [![Glama MCP server](https://glama.ai/mcp/servers/aloth/olcli/badges/score.svg)](https://glama.ai/mcp/servers/aloth/olcli)
+[![AgentSkills](https://img.shields.io/badge/AgentSkills-compatible-blue)](https://agentskills.io)
 
 Work with Overleaf projects directly from your command line. Edit locally with your favorite editor, version control with Git, and sync seamlessly with Overleaf's cloud compilation.
 
