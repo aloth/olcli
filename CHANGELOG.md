@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## [0.16.0] - 2026-11-06
 
 ### Added
 - **`olcli auth --browser`: sign in through a browser window** - opens the login page of the instance in the installed Chrome, Edge, Chromium or Brave with a new temporary profile (never your own), waits up to 5 minutes until you have signed in, and keeps only the session cookie. Works with SSO, Google, ORCID and two-factor logins, and olcli never sees your password. The browser is closed and the temporary profile deleted on success, error, timeout and Ctrl-C. Set `OLCLI_BROWSER` to the browser (an executable, or a macOS `.app` bundle) when it is not found in the usual places. Needs Node 22 or newer; no new dependency. `--browser` cannot be combined with `--cookie`, `--email` or `--password`. There is no MCP tool for sign-in, since an agent should not drive a login
