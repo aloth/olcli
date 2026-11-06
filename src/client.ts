@@ -35,6 +35,7 @@ import {
   type TrackedChangeKind
 } from './tracked-changes.js';
 import { planEntityMove, type MovePlan } from './move-plan.js';
+import { matchProject } from './project-match.js';
 import { HttpStatusError, SessionExpiredError, httpError, isAuthStatus } from './errors.js';
 
 // Read version from package.json
@@ -820,6 +821,19 @@ export class OverleafClient {
   async getProject(name: string): Promise<Project | undefined> {
     const projects = await this.listProjects();
     return projects.find(p => p.name === name);
+  }
+
+  /**
+   * Find a project by ID or by what a user typed for its name: exact name,
+   * then case-insensitive, then a unique prefix. Throws ProjectNotFoundError
+   * (with "Did you mean" suggestions) or AmbiguousProjectError.
+   * `getProject` keeps its exact-match contract for library callers.
+   */
+  async findProject(query: string): Promise<Project> {
+    const projects = await this.listProjects();
+    const byId = projects.find(p => p.id === query);
+    if (byId) return byId;
+    return matchProject(projects, query);
   }
 
   /**

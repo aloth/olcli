@@ -386,3 +386,18 @@ test('no error or hint suggests --password on the command line', async () => {
     assert.deepEqual(offenders, [], file);
   }
 });
+
+test('info finds a project case-insensitively and suggests names on a miss', async () => {
+  const live = await mockOverleaf({ loggedIn: true });
+  try {
+    const miss = await olcli(['info', 'Papr'], { env: sessionEnv(live) });
+    assert.equal(miss.status, 1, miss.stdout + miss.stderr);
+    assert.match(miss.stdout + miss.stderr, /Project not found: Papr/);
+    assert.match(miss.stdout + miss.stderr, /Did you mean: "Paper"/);
+
+    const pulled = await olcli(['pull', 'paper', join(home, 'pulled-lower')], { env: sessionEnv(live) });
+    assert.equal(pulled.status, 0, pulled.stdout + pulled.stderr);
+  } finally {
+    await live.close();
+  }
+});

@@ -191,10 +191,7 @@ async function resolveProject(
     }
     
     // Otherwise, look up by name
-    const proj = await client.getProject(projectArg);
-    if (!proj) {
-      throw new Error(`Project not found: ${projectArg}`);
-    }
+    const proj = await client.findProject(projectArg);
     return { id: proj.id, name: proj.name };
   }
 
@@ -1439,14 +1436,7 @@ program
 
       // Resolve project if needed
       if (!projectId) {
-        let proj = await client.getProjectById(project!);
-        if (!proj) {
-          proj = await client.getProject(project!);
-        }
-        if (!proj) {
-          spinner.fail(`Project not found: ${project}`);
-          process.exit(1);
-        }
+        const proj = await client.findProject(project!);
         projectId = proj.id;
         projectName = proj.name;
         // Default directory is project name (sanitized) if not specified
@@ -1616,14 +1606,7 @@ program
 
       // Resolve project if needed
       if (!projectId) {
-        let proj = await client.getProjectById(projectName!);
-        if (!proj) {
-          proj = await client.getProject(projectName!);
-        }
-        if (!proj) {
-          spinner.fail(`Project not found: ${projectName}`);
-          process.exit(1);
-        }
+        const proj = await client.findProject(projectName!);
         projectId = proj.id;
         projectName = proj.name;
       }
@@ -1861,14 +1844,7 @@ skipped, or pushed. Combine it with --dry-run to preview deletions:
 
       // Resolve project
       if (!projectId) {
-        let proj = await client.getProjectById(projectName!);
-        if (!proj) {
-          proj = await client.getProject(projectName!);
-        }
-        if (!proj) {
-          spinner.fail(`Project not found: ${projectName}`);
-          process.exit(1);
-        }
+        const proj = await client.findProject(projectName!);
         projectId = proj.id;
         projectName = proj.name;
       }
