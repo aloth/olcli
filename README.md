@@ -83,7 +83,7 @@ Or per command: `olcli --base-url https://latex.example.org list`. The MCP serve
 - **Review comments:** list, add, reply, resolve, reopen and delete comment threads
 - **Tracked changes:** list suggested insertions and deletions, accept or reject them. Track changes is an Overleaf premium feature: it is only available in projects whose owner has a premium plan, and invited collaborators on any plan can then use it. In other projects there are no tracked changes to list
 - **Projects:** create, rename, and bulk-rename by pattern (dry run unless `--apply`)
-- **Git remote:** `git clone overleaf::https://www.overleaf.com/project/<id>` ([docs/GIT-REMOTE.md](docs/GIT-REMOTE.md))
+- **Git remote:** `git clone overleaf::https://www.overleaf.com/project/<id>` ([docs/GIT-REMOTE.md](docs/GIT-REMOTE.md); known bug: `git pull` does not fetch coauthors' Overleaf edits yet, check with `olcli diff` before `git push`)
 - **MCP server** for AI agents; every tool that writes asks you first ([docs/MCP.md](docs/MCP.md))
 - **Forgiving project names:** case-insensitive, unique prefixes, "Did you mean" suggestions
 - **Scriptable:** `--json` on listings, plain output when piped, `NO_COLOR`, exit codes that mean something

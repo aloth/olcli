@@ -72,5 +72,11 @@ GIT_REMOTE_OVERLEAF_DEBUG=1 git push origin main
 ## Limitations
 
 - Overleaf has no native revision history exposed via API, so each clone creates a single "Import from Overleaf" commit (no history replay).
-- **A push can overwrite a coauthor's edits.** A push uploads your version of every file your commits changed. If a coauthor edited one of those files in Overleaf after your last fetch, their edit is overwritten without a warning or a conflict; the helper does not check what changed on Overleaf in between. The workaround is to fetch right before you push: run `git pull`, which fetches from Overleaf and merges, resolve any conflicts locally, then `git push` right away, so the push contains their edits.
+- **Known bug: `git fetch` and `git pull` do not pick up changes made on Overleaf after the clone.** The helper reports the commit you already have as the state of the remote, so git never downloads the project again. A `git push` then uploads your version of every file your commits changed and overwrites a coauthor's newer edits in those files without a warning. Running `git pull` before `git push` does not protect you. Until this is fixed, check the project before every push from the top level of the clone:
+
+  ```bash
+  olcli diff "<project name or id>" --name-only
+  ```
+
+  `olcli diff` downloads the project as it is on Overleaf right now. If it lists files you did not change, a coauthor edited them: pull those edits into your clone (for example with `olcli pull "<project>" --force` in a separate directory and copying the files over) before you push. For projects you edit together with others, `olcli pull` and `olcli push` with `olcli diff` are the safer workflow for now.
 - Binary files are supported but large files may be slow (uploaded individually via the Overleaf API).
