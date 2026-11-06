@@ -109,18 +109,9 @@ function check(program: Command, commandLine: string): string[] {
   return problems;
 }
 
-// Failures of the page as it is today. updated with the 0.16 landing page
-// rewrite: that change must make the page pass and empty this list. An entry
-// that no longer fails also fails the test, so the list cannot go stale.
-const KNOWN_FAILURES: string[] = [
-  'em dash on line 6',
-  'em dash on line 8',
-  'em dash on line 14',
-  'em dash on line 139',
-  'em dash on line 185',
-  'em dash on line 213',
-  'em dash on line 233',
-];
+// The page must match the command tree and contain no em dashes, with no
+// exceptions. Add nothing here; fix the page instead.
+const KNOWN_FAILURES: string[] = [];
 
 test('the landing page names only commands, subcommands and flags that exist, and has no em dashes', async () => {
   const program = await loadProgram();

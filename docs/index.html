@@ -3,16 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>olcli — Overleaf CLI: Sync, Compile & Manage LaTeX from Your Terminal</title>
-<meta name="description" content="Command-line interface for Overleaf. Pull, push, sync, and compile LaTeX projects from your terminal. Native git remote support. Install via Homebrew or npm.">
-<meta property="og:title" content="olcli — Overleaf CLI">
-<meta property="og:description" content="Sync, compile, and manage LaTeX projects from your terminal. Native git remote support.">
+<title>olcli | Overleaf CLI: pull, push, sync and compile LaTeX projects from your terminal</title>
+<meta name="description" content="Overleaf CLI: pull, push, sync and compile LaTeX projects from your terminal. Git remote helper, MCP server and TypeScript library.">
+<meta property="og:title" content="olcli | Overleaf CLI">
+<meta property="og:description" content="Overleaf CLI: pull, push, sync and compile LaTeX projects from your terminal. Git remote helper, MCP server and TypeScript library.">
 <meta property="og:url" content="https://aloth.github.io/olcli/">
 <meta property="og:image" content="https://raw.githubusercontent.com/aloth/olcli/main/screenshots/workflow.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="olcli — Overleaf CLI">
-<meta name="twitter:description" content="Sync, compile, and manage LaTeX projects from your terminal.">
+<meta name="twitter:title" content="olcli | Overleaf CLI">
+<meta name="twitter:description" content="Overleaf CLI: pull, push, sync and compile LaTeX projects from your terminal. Git remote helper, MCP server and TypeScript library.">
 <meta name="twitter:image" content="https://raw.githubusercontent.com/aloth/olcli/main/screenshots/workflow.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -136,12 +136,12 @@ footer a{color:var(--muted);text-decoration:none}
 {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
-  "name": "olcli — Overleaf CLI: Sync, Compile & Manage LaTeX from Your Terminal",
+  "name": "olcli | Overleaf CLI: pull, push, sync and compile LaTeX projects from your terminal",
   "applicationCategory": "https://schema.org/DeveloperApplication",
   "operatingSystem": "Cross-platform",
   "author": { "@type": "Person", "name": "Alexander Loth", "url": "https://alexloth.com/" },
   "image": "https://raw.githubusercontent.com/aloth/olcli/main/screenshots/workflow.png",
-  "description": "Command-line interface for Overleaf. Pull, push, sync, and compile LaTeX projects from your terminal. Native git remote support. Install via Homebrew or npm.",
+  "description": "Overleaf CLI: pull, push, sync and compile LaTeX projects from your terminal. Git remote helper, MCP server and TypeScript library. Coauthors keep the Overleaf web editor; works on the free Overleaf plan and on self-hosted Community Edition, without a git token.",
   "url": "https://aloth.github.io/olcli/",
   "codeRepository": "https://github.com/aloth/olcli",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
@@ -158,10 +158,10 @@ footer a{color:var(--muted);text-decoration:none}
     <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
   </div>
   <h1>Overleaf,<br>from your <span class="accent">terminal.</span></h1>
-  <p>Pull, push, sync, and compile LaTeX projects without leaving your editor. Native git remote. MCP server for AI agents. Works with CI/CD.</p>
+  <p>Work on Overleaf projects from your terminal while your coauthors keep using the Overleaf web editor. Works on the free plan and on self-hosted Community Edition, with no git token.</p>
 
   <div class="install-bar">
-    <div class="install-option" onclick="navigator.clipboard.writeText('brew tap aloth/tap && brew install olcli')">
+    <div class="install-option" onclick="navigator.clipboard.writeText('brew install aloth/tap/olcli')">
       <div>
         <div class="install-label">Homebrew</div>
         <div class="install-cmd">brew install aloth/tap/olcli</div>
@@ -182,70 +182,74 @@ footer a{color:var(--muted);text-decoration:none}
       <div class="terminal-dot r"></div>
       <div class="terminal-dot y"></div>
       <div class="terminal-dot g"></div>
-      <span>olcli — zsh</span>
+      <span>olcli: zsh</span>
     </div>
     <div class="terminal-body">
+      <div class="line"><span class="prompt">$ </span><span class="cmd">olcli auth </span><span class="flag">--browser</span></div>
+      <div class="line"><span class="success">ok: Authenticated! Found 12 projects.</span></div>
       <div class="line"><span class="prompt">$ </span><span class="cmd">olcli pull </span><span class="string">"Conference Paper"</span><span class="cmd"> paper</span></div>
-      <div class="line"><span class="success">✓ Pulled 12 files to ./paper/</span></div>
-      <div class="line"><span class="prompt">$ </span><span class="cmd">vim paper/main.tex</span></div>
-      <div class="line"><span class="prompt">$ </span><span class="cmd">olcli sync</span></div>
-      <div class="line"><span class="success">✓ Pushed 1 file · Pulled 0 files · PDF compiled</span></div>
-      <div class="line"><br></div>
-      <div class="line"><span class="output"># Or use native git commands:</span></div>
-      <div class="line"><span class="prompt">$ </span><span class="cmd">git clone </span><span class="string">overleaf::https://www.overleaf.com/project/abc123</span></div>
-      <div class="line"><span class="output">Cloning into 'abc123'...</span></div>
-      <div class="line"><span class="prompt">$ </span><span class="cmd">cd abc123 && echo </span><span class="string">"Hello from git"</span><span class="cmd"> >> main.tex</span></div>
-      <div class="line"><span class="prompt">$ </span><span class="cmd">git add . && git commit -m </span><span class="string">"update intro"</span></div>
-      <div class="line"><span class="prompt">$ </span><span class="cmd">git push</span></div>
-      <div class="line"><span class="success">✓ Uploaded 1 file to Overleaf</span></div>
-      <div class="line"><span class="output">To overleaf::https://www.overleaf.com/project/abc123</span></div>
+      <div class="line"><span class="success">ok: Downloaded 12 files to paper/</span></div>
+      <div class="line"><span class="prompt">$ </span><span class="cmd">cd paper && vim main.tex</span></div>
+      <div class="line"><span class="prompt">$ </span><span class="cmd">olcli diff </span><span class="flag">--name-only</span></div>
+      <div class="line"><span class="output">M  main.tex</span></div>
+      <div class="line"><span class="prompt">$ </span><span class="cmd">olcli push</span></div>
+      <div class="line"><span class="success">ok: Uploaded 1 file(s) to "Conference Paper"</span></div>
+      <div class="line"><span class="prompt">$ </span><span class="cmd">olcli diff </span><span class="flag">--latexdiff --pdf</span></div>
+      <div class="line"><span class="output">  .olcli-diff/main-diff.pdf</span></div>
+      <div class="line"><span class="prompt">$ </span><span class="cmd">olcli comments list </span><span class="flag">--status</span><span class="cmd"> open</span></div>
+      <div class="line"><span class="output">Found 3 comment(s):</span></div>
     </div>
   </div>
 </section>
 
 <section class="features">
   <h2>Everything you need</h2>
-  <p class="subtitle">Full Overleaf access without opening a browser.</p>
+  <p class="subtitle">Your editor, your scripts and your agents on one side; your coauthors in the browser on the other.</p>
   <div class="feature-grid">
     <div class="feature-card">
-      <div class="feature-icon">🔀</div>
-      <h3>Native Git Remote</h3>
-      <p><code>git clone overleaf::&lt;url&gt;</code> — use Overleaf as a standard git remote. Clone, pull, push with the commands you already know.</p>
+      <div class="feature-icon">👥</div>
+      <h3>Coauthors Change Nothing</h3>
+      <p>They keep editing, commenting and compiling in the Overleaf web editor. You pull, edit locally and push to the same project.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🆓</div>
+      <h3>Free Plan and Self-Hosted</h3>
+      <p>Checked on a free overleaf.com account. Works on self-hosted Community Edition with <code>olcli config set-url</code>. No git token needed.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔑</div>
+      <h3>Browser Sign-In</h3>
+      <p><code>olcli auth --browser</code> works with SSO, Google, ORCID and two-factor logins and keeps only the session cookie. Or paste the cookie at a hidden prompt.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🔄</div>
-      <h3>Bidirectional Sync</h3>
-      <p>Smart conflict detection. Local wins if newer, remote changes pulled automatically. Local deletions propagate to Overleaf.</p>
+      <h3>Pull, Push, Sync, Diff</h3>
+      <p>Diff against the live project before you push, so a coauthor's newer edit shows up first. <code>--exit-code</code> turns it into a CI gate.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📝</div>
+      <h3>Marked-Up Revisions</h3>
+      <p><code>olcli diff --latexdiff --pdf</code> builds the struck-through and underlined PDF advisors and journals ask for, compiled on Overleaf.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">💬</div>
+      <h3>Comments and Tracked Changes</h3>
+      <p>List, add, reply to and resolve comments. Accept or reject tracked changes in projects whose owner has an Overleaf premium plan.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🤖</div>
-      <h3>MCP Server</h3>
-      <p>Built-in Model Context Protocol server. Claude Desktop, Cursor, and Windsurf can manage your LaTeX projects directly.</p>
+      <h3>MCP Server, Asks First</h3>
+      <p>Claude Code, Codex and Cursor can read and edit your projects. Every tool that writes shows what it will do and waits for your confirmation.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔀</div>
+      <h3>Native Git Remote</h3>
+      <p><code>git clone overleaf::&lt;url&gt;</code> uses Overleaf as a standard git remote. Clone, commit and push with the commands you already know.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">📄</div>
       <h3>Remote Compilation</h3>
-      <p>Compile PDFs using Overleaf's servers. Download output artifacts (.bbl, .log) for arXiv submissions.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">✏️</div>
-      <h3>Your Editor, Your Way</h3>
-      <p>Vim, VS Code, Emacs, Sublime — edit locally in whatever you're fastest with.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🚫</div>
-      <h3>Smart Ignore</h3>
-      <p>LaTeX build artifacts filtered automatically. Customize with <code>.olignore</code> (gitignore syntax).</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">📦</div>
-      <h3>arXiv Workflow</h3>
-      <p>Download .bbl files, create submission zips, and prepare camera-ready papers from CLI.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🔐</div>
-      <h3>Flexible Auth</h3>
-      <p>Session cookie, env var, .olauth file, or password login. Works in CI/CD pipelines and self-hosted instances.</p>
+      <p>Compile on Overleaf's servers, download the PDF or outputs such as .bbl for arXiv. No local TeX installation needed.</p>
     </div>
   </div>
 </section>
@@ -264,8 +268,8 @@ footer a{color:var(--muted);text-decoration:none}
       <div class="compare-cell"><span class="no">✗</span></div>
     </div>
     <div class="compare-row">
-      <div class="compare-cell label">Native git workflow</div>
-      <div class="compare-cell"><span class="yes">✓</span></div>
+      <div class="compare-cell label">Git workflow</div>
+      <div class="compare-cell"><span class="yes">✓ free plan</span></div>
       <div class="compare-cell"><span class="partial">Premium only</span></div>
     </div>
     <div class="compare-row">
@@ -280,7 +284,7 @@ footer a{color:var(--muted);text-decoration:none}
     </div>
     <div class="compare-row">
       <div class="compare-cell label">AI agent integration</div>
-      <div class="compare-cell"><span class="yes">✓ MCP</span></div>
+      <div class="compare-cell"><span class="yes">✓ MCP, asks first</span></div>
       <div class="compare-cell"><span class="no">✗</span></div>
     </div>
     <div class="compare-row">
@@ -290,7 +294,7 @@ footer a{color:var(--muted);text-decoration:none}
     </div>
     <div class="compare-row">
       <div class="compare-cell label">Real-time collab</div>
-      <div class="compare-cell"><span class="no">✗</span></div>
+      <div class="compare-cell"><span class="partial">Coauthors stay in the web editor</span></div>
       <div class="compare-cell"><span class="yes">✓</span></div>
     </div>
   </div>
@@ -300,14 +304,29 @@ footer a{color:var(--muted);text-decoration:none}
   <h2>Common workflows</h2>
   <div class="usecase-grid">
     <div class="usecase-card">
-      <h3>🔀 Git clone & push</h3>
-      <p>Use Overleaf as a native git remote. Standard workflow, zero learning curve.</p>
-      <code>git clone overleaf::https://www.overleaf.com/project/abc123<br>cd abc123<br>vim main.tex<br>git add . && git commit -m "edits"<br>git push</code>
+      <h3>🔑 First run</h3>
+      <p>Sign in through a browser window, or paste the session cookie at a hidden prompt.</p>
+      <code>olcli auth --browser<br>olcli auth --cookie<br>olcli auth status</code>
+    </div>
+    <div class="usecase-card">
+      <h3>🏢 Self-hosted Overleaf</h3>
+      <p>Set the URL of your Community Edition instance once.</p>
+      <code>olcli config set-url https://latex.example.org<br>olcli config set-cookie-name overleaf.sid<br>olcli auth --browser</code>
     </div>
     <div class="usecase-card">
       <h3>📝 Daily thesis work</h3>
-      <p>Edit locally, sync when ready, compile to check output.</p>
-      <code>olcli pull "PhD Thesis" thesis<br>vim thesis/chapters/results.tex<br>olcli sync<br>olcli pdf -o draft.pdf</code>
+      <p>Edit locally, check what changed on Overleaf, sync and compile.</p>
+      <code>olcli pull "PhD Thesis" thesis<br>vim thesis/chapters/results.tex<br>olcli diff<br>olcli sync<br>olcli pdf -o draft.pdf</code>
+    </div>
+    <div class="usecase-card">
+      <h3>🖍️ Revision for your advisor</h3>
+      <p>Mark your local revision up inside the document and compile it on Overleaf.</p>
+      <code>olcli diff --latexdiff --pdf</code>
+    </div>
+    <div class="usecase-card">
+      <h3>🔀 Git clone & push</h3>
+      <p>Use Overleaf as a native git remote, without a git token.</p>
+      <code>git clone overleaf::https://www.overleaf.com/project/abc123<br>cd abc123<br>vim main.tex<br>git commit -am "edits"<br>git push</code>
     </div>
     <div class="usecase-card">
       <h3>📮 arXiv submission</h3>
@@ -338,6 +357,7 @@ footer a{color:var(--muted);text-decoration:none}
     <a href="https://github.com/aloth/olcli/blob/main/README.md">📖 README</a>
     <a href="https://github.com/aloth/olcli/blob/main/docs/GIT-REMOTE.md">🔀 Git Remote</a>
     <a href="https://github.com/aloth/olcli/blob/main/docs/MCP.md">🤖 MCP Server</a>
+    <a href="https://github.com/aloth/olcli/blob/main/docs/DIFF.md">📝 Diff and latexdiff</a>
     <a href="https://www.npmjs.com/package/@aloth/olcli">📦 npm</a>
   </div>
 </section>
