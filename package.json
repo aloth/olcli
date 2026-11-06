@@ -1,7 +1,7 @@
 {
   "name": "@aloth/olcli",
   "version": "0.15.3",
-  "description": "Command-line interface for Overleaf — Sync, manage, and compile LaTeX projects from your terminal",
+  "description": "Overleaf CLI: pull, push, sync and compile LaTeX projects from your terminal. Git remote helper, MCP server and TypeScript library.",
   "mcpName": "io.github.aloth/olcli",
   "type": "module",
   "main": "dist/index.js",
@@ -45,7 +45,12 @@
     "arxiv",
     "terminal",
     "typescript",
-    "latex-tools"
+    "latex-tools",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "git-remote-helper",
+    "ai-agents"
   ],
   "author": "Alexander Loth <home@alexloth.com> (https://alexloth.com)",
   "license": "MIT",
