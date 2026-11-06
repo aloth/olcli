@@ -88,3 +88,50 @@ export function resolveRemotePath(localPath: string, destination?: string): stri
   }
   return normalized;
 }
+
+/**
+ * Old local name for a project title: everything outside [a-zA-Z0-9-_]
+ * became "_". Kept so that a directory created by olcli 0.15 or earlier can
+ * still be found; see `defaultProjectDir`.
+ */
+export function legacyLocalName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9-_]/g, '_');
+}
+
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i;
+const MAX_NAME_BYTES = 200;
+
+/**
+ * A project title as a local file or directory name.
+ *
+ * Letters, digits and symbols from any script are kept, including emoji, so
+ * "Masterarbeit Müller" stays readable instead of becoming
+ * "Masterarbeit_M_ller". Replaced with "_": whitespace (as before, so ASCII
+ * titles keep the names they had), characters that are unsafe in a path on
+ * any platform (/ \ : * ? " < > |) and control characters. Leading dots and
+ * trailing dots or spaces are dropped, Windows device names get a suffix, and
+ * the result is capped at 200 UTF-8 bytes without splitting a character.
+ */
+export function safeLocalName(name: string): string {
+  let out = name
+    .normalize('NFC')
+    .trim()
+    // Windows drops trailing dots and spaces, and a leading dot hides the
+    // directory on Unix; neither belongs to the title.
+    .replace(/^\.+/, '')
+    .replace(/[.\s]+$/, '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f/\\:*?"<>|]/g, '_')
+    .replace(/\s/g, '_');
+  if (WINDOWS_RESERVED.test(out.split('.')[0])) out = `${out}_`;
+
+  if (Buffer.byteLength(out) > MAX_NAME_BYTES) {
+    let cut = '';
+    for (const ch of out) {
+      if (Buffer.byteLength(cut + ch) > MAX_NAME_BYTES) break;
+      cut += ch;
+    }
+    out = cut;
+  }
+  return out || 'project';
+}

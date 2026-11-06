@@ -98,14 +98,14 @@ interface MockOverleaf {
  * carries the CSRF token) and the project zip. With `loggedIn: false` the list
  * is a login form, which is how Overleaf answers an expired session.
  */
-async function mockOverleaf(options: { loggedIn: boolean; files?: Record<string, string> }): Promise<MockOverleaf> {
+async function mockOverleaf(options: { loggedIn: boolean; files?: Record<string, string>; projectName?: string }): Promise<MockOverleaf> {
   const requests: string[] = [];
   const zip = new AdmZip();
   for (const [path, content] of Object.entries(options.files ?? {})) {
     zip.addFile(path, Buffer.from(content));
   }
   const zipBuffer = zip.toBuffer();
-  const projects = JSON.stringify({ projects: [{ id: PROJECT_ID, name: 'Paper', lastUpdated: '2026-01-01T00:00:00.000Z' }] });
+  const projects = JSON.stringify({ projects: [{ id: PROJECT_ID, name: options.projectName ?? 'Paper', lastUpdated: '2026-01-01T00:00:00.000Z' }] });
   const attribute = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -397,6 +397,27 @@ test('info finds a project case-insensitively and suggests names on a miss', asy
 
     const pulled = await olcli(['pull', 'paper', join(home, 'pulled-lower')], { env: sessionEnv(live) });
     assert.equal(pulled.status, 0, pulled.stdout + pulled.stderr);
+  } finally {
+    await live.close();
+  }
+});
+
+test('pull keeps non-ASCII letters in the directory name and reuses a pre-0.16 directory', async () => {
+  const live = await mockOverleaf({ loggedIn: true, projectName: 'Masterarbeit Müller', files: { 'main.tex': 'x\n' } });
+  try {
+    const fresh = mkdtempSync(join(home, 'unicode-'));
+    const result = await olcli(['pull', 'Masterarbeit Müller'], { cwd: fresh, env: sessionEnv(live) });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.ok(existsSync(join(fresh, 'Masterarbeit_Müller', 'main.tex')), 'expected Masterarbeit_Müller/');
+
+    // A directory an earlier olcli created for the same project keeps working.
+    const old = mkdtempSync(join(home, 'legacy-'));
+    mkdirSync(join(old, 'Masterarbeit_M_ller'));
+    writeFileSync(join(old, 'Masterarbeit_M_ller', '.olcli.json'), JSON.stringify({ projectId: PROJECT_ID, projectName: 'Masterarbeit Müller' }));
+    const again = await olcli(['pull', 'Masterarbeit Müller'], { cwd: old, env: sessionEnv(live) });
+    assert.equal(again.status, 0, again.stdout + again.stderr);
+    assert.ok(existsSync(join(old, 'Masterarbeit_M_ller', 'main.tex')), 'expected the legacy directory to be reused');
+    assert.ok(!existsSync(join(old, 'Masterarbeit_Müller')), 'must not create a second copy');
   } finally {
     await live.close();
   }

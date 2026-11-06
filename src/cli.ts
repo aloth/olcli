@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { OverleafClient, resolveCommentConcurrency, type TrackedChange } from './client.js';
 import { formatAuthor } from './tracked-changes.js';
-import { resolveRemotePath, resolveWithin, normalizeRemotePath } from './paths.js';
+import { resolveRemotePath, resolveWithin, normalizeRemotePath, safeLocalName, legacyLocalName } from './paths.js';
 import { planProjectRenames } from './rename-plan.js';
 import { scanLocalFiles } from './scan.js';
 import {
@@ -110,6 +110,29 @@ async function readStdin(): Promise<string> {
 function nextStepCommands(projects: { name: string }[]): string[] {
   const first = projects.find((p) => p.name && !/["$`\\]/.test(p.name));
   return ['olcli list', `olcli pull "${first ? first.name : '<name>'}"`];
+}
+
+/**
+ * Where `pull <project>` puts a project when no directory is given.
+ *
+ * Normally `safeLocalName(name)`. Up to 0.15 every non-ASCII letter became
+ * "_", so a directory pulled back then has a different name; when that one
+ * exists and its .olcli.json points at the same project, and the new name is
+ * not taken yet, it is reused rather than downloading a second copy.
+ */
+function defaultProjectDir(projectId: string, name: string, cwd = '.'): string {
+  const current = safeLocalName(name);
+  const legacy = legacyLocalName(name);
+  if (legacy === current || existsSync(join(cwd, current))) return current;
+  const legacyMeta = join(cwd, legacy, '.olcli.json');
+  if (existsSync(legacyMeta)) {
+    try {
+      if (JSON.parse(readFileSync(legacyMeta, 'utf-8')).projectId === projectId) return legacy;
+    } catch {
+      // Unreadable metadata: not provably ours, use the new name.
+    }
+  }
+  return current;
 }
 
 /**
@@ -988,7 +1011,7 @@ program
       const proj = await resolveProject(client, project);
 
       const zip = await client.downloadProject(proj.id);
-      const outputPath = options.output || `${proj.name.replace(/[^a-zA-Z0-9-_]/g, '_')}.zip`;
+      const outputPath = options.output || `${safeLocalName(proj.name)}.zip`;
 
       writeFileSync(outputPath, zip);
       spinner.succeed(`Downloaded: ${outputPath} (${(zip.length / 1024).toFixed(1)} KB)`);
@@ -1013,7 +1036,7 @@ program
 
       spinner.text = 'Compiling...';
       const pdf = await client.downloadPdf(proj.id, undefined, options.resource);
-      const outputPath = options.output || `${proj.name.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+      const outputPath = options.output || `${safeLocalName(proj.name)}.pdf`;
 
       writeFileSync(outputPath, pdf);
       spinner.succeed(`Downloaded PDF: ${outputPath} (${(pdf.length / 1024).toFixed(1)} KB)`);
@@ -1439,9 +1462,13 @@ program
         const proj = await client.findProject(project!);
         projectId = proj.id;
         projectName = proj.name;
-        // Default directory is project name (sanitized) if not specified
+        // Default directory is the project name, made safe for a path
         if (!dir) {
-          targetDir = proj.name.replace(/[^a-zA-Z0-9-_]/g, '_');
+          targetDir = defaultProjectDir(proj.id, proj.name);
+          if (targetDir === legacyLocalName(proj.name) && targetDir !== safeLocalName(proj.name)) {
+            spinner.info(`Using existing directory ${targetDir}/ (created by an earlier olcli)`);
+            spinner.start('Downloading project...');
+          }
         }
       }
 
