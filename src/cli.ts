@@ -71,6 +71,7 @@ import {
   type PasswordCredentials
 } from './config.js';
 import { promptHidden, PromptCancelled, NotATerminal } from './prompt.js';
+import { BrowserSignInAborted, browserSignIn, chromiumLauncher, findBrowser, requireWebSocket } from './browser-auth.js';
 
 // NO_COLOR (no-color.org) and --no-color. chalk handles --no-color and a
 // non-TTY stdout by itself, but not NO_COLOR; ora and log-symbols share this
@@ -265,7 +266,16 @@ const authCmd = program
   .option('--save-password', 'Persist the password in the config file, in plaintext')
   .option('--no-save-password', 'Do not persist the password (the default; kept for existing scripts)')
   .option('--save-local', 'Save to .olauth in current directory')
+  .option('--browser', 'Sign in in a browser window; only the session cookie is kept')
   .addHelpText('after', `
+Easiest: olcli auth --browser opens the login page of the instance in Chrome,
+Edge, Chromium or Brave, with a new temporary profile (not your own), and
+waits up to 5 minutes until you have signed in. Works with SSO, Google, ORCID
+and two-factor logins. olcli keeps only the session cookie; it never sees your
+password. The browser and the profile are removed afterwards. Set
+OLCLI_BROWSER to the browser (an .app bundle or the executable) when it is
+not found. Needs Node 22 or newer.
+
 Get your session cookie: sign in to Overleaf in a browser, open the developer
 tools (F12), then Application (Chrome, Edge) or Storage (Firefox), Cookies,
 and copy the value of overleaf_session2 (overleaf.sid on older self-hosted
@@ -282,8 +292,21 @@ Passing --password puts the password in your shell history. Omit it to be
 prompted instead, or set OVERLEAF_EMAIL and OVERLEAF_PASSWORD, which every
 command reads without needing 'auth' at all.`)
   .action(async (options) => {
+    if (options.browser) {
+      if (options.cookie || options.email || options.password) {
+        console.error(chalk.red('Use either --browser or --cookie or --email/--password, not several.'));
+        process.exit(1);
+      }
+      await authWithBrowser(options);
+      return;
+    }
+
     if (!options.cookie && !options.email && !options.password) {
-      console.log(chalk.yellow('To authenticate, provide a session cookie:'));
+      console.log(chalk.yellow('To authenticate, sign in in a browser window:'));
+      console.log();
+      console.log(chalk.cyan('  olcli auth --browser'));
+      console.log();
+      console.log(chalk.yellow('Or provide a session cookie:'));
       console.log();
       console.log('1. Sign in to Overleaf in your browser');
       console.log('2. Open the developer tools (F12), then Application (Chrome, Edge) or Storage (Firefox), then Cookies');
@@ -423,14 +446,83 @@ command reads without needing 'auth' at all.`)
         }
       }
 
-      console.log(chalk.dim(`Config saved to: ${getConfigPath()}`));
-      console.log();
-      console.log('Next steps:');
-      for (const line of nextStepCommands(projects)) console.log(`  ${chalk.cyan(line)}`);
+      printNextSteps(projects);
     } catch (error: any) {
       failWith(spinner, error);
     }
   });
+
+/** Print the same lines as every successful `auth`. */
+function printNextSteps(projects: { name: string }[]): void {
+  console.log(chalk.dim(`Config saved to: ${getConfigPath()}`));
+  console.log();
+  console.log('Next steps:');
+  for (const line of nextStepCommands(projects)) console.log(`  ${chalk.cyan(line)}`);
+}
+
+/**
+ * `auth --browser`. The cookie found in the browser is validated with the
+ * same client call as `auth --cookie` (the project list) before it is
+ * stored, and only its name and value are stored. Ctrl-C and SIGTERM abort
+ * the wait; browserSignIn closes the browser and deletes the profile.
+ */
+async function authWithBrowser(options: { saveLocal?: boolean }): Promise<void> {
+  const baseUrl = (program.opts().baseUrl as string | undefined) || getBaseUrl();
+  const cookieName = (program.opts().cookieName as string | undefined) || getSessionCookieName();
+  const timeout = (program.opts().timeout as number | undefined) || getTimeout();
+
+  let browser;
+  try {
+    requireWebSocket();
+    browser = findBrowser();
+  } catch (error: any) {
+    console.error(chalk.red(error.message));
+    process.exit(1);
+  }
+
+  const abort = new AbortController();
+  const onSignal = (): void => abort.abort();
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+
+  console.error(`Opening ${browser.name} at ${baseUrl}/login with a temporary profile.`);
+  console.error(chalk.dim('Sign in there. olcli waits up to 5 minutes; Ctrl-C cancels.'));
+  const spinner = ora('Waiting for the sign-in...').start();
+  let projects: { name: string }[] = [];
+  try {
+    const session = await browserSignIn({
+      baseUrl,
+      cookieName,
+      startBrowser: chromiumLauncher(browser.path),
+      signal: abort.signal,
+      validate: async (candidate) => {
+        const client = await OverleafClient.fromSessionCookie(candidate.value, baseUrl, candidate.name);
+        client.setGlobalTimeout(timeout);
+        projects = await client.listProjects();
+        return true;
+      },
+    });
+
+    if (session.name !== cookieName) setSessionCookieName(session.name);
+    setSessionCookie(session.value);
+    if (options.saveLocal) {
+      saveOlAuth(session.value);
+      spinner.succeed(`Authenticated! Found ${projects.length} projects. Saved to .olauth`);
+    } else {
+      spinner.succeed(`Authenticated! Found ${projects.length} projects.`);
+    }
+    printNextSteps(projects);
+  } catch (error: any) {
+    if (error instanceof BrowserSignInAborted) {
+      spinner.fail('Cancelled. The browser was closed and its temporary profile deleted.');
+      process.exit(130);
+    }
+    failWith(spinner, error);
+  } finally {
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
+  }
+}
 
 /**
  * `auth status`: one answer to "am I set up". Replaces `whoami` (is the
