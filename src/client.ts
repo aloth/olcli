@@ -19,8 +19,7 @@ import * as cheerio from 'cheerio';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as https from 'node:https';
-import * as http from 'node:http';
+import { routeRequest } from './proxy.js';
 import {
   RejectConflictError,
   buildUserDirectory,
@@ -658,11 +657,13 @@ export class OverleafClient {
 
     const doRequest = (reqUrl: string, redirectsLeft: number): Promise<{ status: number; ok: boolean; headers: Record<string, string | string[]>; body: string | Buffer | any }> => {
       return new Promise((resolve, reject) => {
-        const parsedUrl = new URL(reqUrl);
-        const transport = parsedUrl.protocol === 'https:' ? https : http;
         const headers = this.normalizeHeaders({ ...extraHeaders, ...options.headers });
+        // HTTPS_PROXY / HTTP_PROXY / NO_PROXY: every request, the socket
+        // polling included, goes through here. See src/proxy.ts.
+        const route = routeRequest(reqUrl, headers);
+        if (route.proxy) this.logVerbose(`${method} ${reqUrl} via proxy ${route.proxy.host}`);
 
-        const req = transport.request(reqUrl, { method, headers }, (res) => {
+        const req = route.transport.request(route.url, { ...route.options, method }, (res) => {
           const status = res.statusCode || 0;
           const resHeaders = res.headers as Record<string, string | string[]>;
 

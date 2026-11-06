@@ -80,7 +80,20 @@ program
   .option('--base-url <url>', 'Overleaf instance base URL (overrides OVERLEAF_BASE_URL and config)')
   .option('--cookie-name <name>', 'Session cookie name (default: overleaf_session2, use overleaf.sid for older instances)')
   .option('--timeout <ms>', 'HTTP request timeout in milliseconds', parseInt)
-  .option('--verbose', 'Print every HTTP request, status, and error response body to stderr');
+  .option('--verbose', 'Print every HTTP request, status, and error response body to stderr')
+  .addHelpText('after', `
+Environment:
+  OVERLEAF_SESSION        session cookie (instead of olcli auth)
+  OVERLEAF_EMAIL, OVERLEAF_PASSWORD
+                          password login when no session cookie works
+  OVERLEAF_BASE_URL       instance URL, like --base-url
+  OVERLEAF_COOKIE_NAME    session cookie name, like --cookie-name
+  OVERLEAF_TIMEOUT        HTTP timeout in milliseconds, like --timeout
+  OLCLI_CONCURRENCY       documents fetched in parallel by comments list
+  HTTPS_PROXY             proxy for https:// instances (CONNECT tunnel)
+  HTTP_PROXY              proxy for http:// instances
+  NO_PROXY                comma-separated hosts that bypass the proxy
+  NO_COLOR                turn off color`);
 
 /**
  * The one way a command reports a failure: the cause (and the command that
