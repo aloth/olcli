@@ -355,3 +355,21 @@ test('the throwaway profile does not touch the OS keychain', () => {
   assert.ok(args.includes('--use-mock-keychain'));
   assert.ok(args.includes('--password-store=basic'));
 });
+
+test('an unchanged session cookie is re-validated only every recheckMs, a new value at once', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'olcli-recheck-'));
+  try {
+    const jar = (value: string): BrowserCookie[] => [{ name: 'overleaf_session2', value, domain: 'www.overleaf.com', path: '/' } as BrowserCookie];
+    const browser = fakeBrowser([jar('anonymous'), jar('anonymous'), jar('anonymous'), jar('anonymous'), jar('anonymous'), jar('logged-in')]);
+    const validated: string[] = [];
+    const cookie = await browserSignIn({
+      baseUrl: 'https://www.overleaf.com', cookieName: 'overleaf_session2', startBrowser: browser.start,
+      validate: async (c) => { validated.push(c.value); return c.value === 'logged-in'; },
+      pollMs: 1, recheckMs: 60_000, tmpRoot: root,
+    });
+    assert.equal(cookie.value, 'logged-in');
+    assert.deepEqual(validated, ['anonymous', 'logged-in']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

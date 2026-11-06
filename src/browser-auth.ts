@@ -412,12 +412,22 @@ export interface BrowserSignInOptions {
   validate: (cookie: SessionCookie) => Promise<boolean>;
   timeoutMs?: number;
   pollMs?: number;
+  /** How often an unchanged session cookie is checked against Overleaf again. */
+  recheckMs?: number;
   signal?: AbortSignal;
   /** Where the temporary profile goes; os.tmpdir() by default. */
   tmpRoot?: string;
   /** Called with the profile directory once it exists. */
   onProfile?: (profileDir: string) => void;
 }
+
+/**
+ * An unchanged cookie is validated against the instance at most this often.
+ * A new cookie value is validated at once, so a login that replaces the
+ * session id is picked up within a second; one that keeps it within 7 s.
+ * Over the 5-minute wait that is at most about 43 project-list requests.
+ */
+export const BROWSER_SIGN_IN_RECHECK_MS = 7000;
 
 /**
  * Open `<baseUrl>/login` in a throwaway browser profile and wait until the
@@ -427,6 +437,7 @@ export interface BrowserSignInOptions {
 export async function browserSignIn(options: BrowserSignInOptions): Promise<SessionCookie> {
   const timeoutMs = options.timeoutMs ?? BROWSER_SIGN_IN_TIMEOUT_MS;
   const pollMs = options.pollMs ?? 1000;
+  const recheckMs = options.recheckMs ?? BROWSER_SIGN_IN_RECHECK_MS;
   const base = options.baseUrl.replace(/\/+$/, '');
   const profileDir = mkdtempSync(join(options.tmpRoot ?? tmpdir(), 'olcli-browser-'));
   options.onProfile?.(profileDir);
@@ -480,7 +491,7 @@ export async function browserSignIn(options: BrowserSignInOptions): Promise<Sess
       const candidate = pickSessionCookie(cookies, base, options.cookieName);
       // Re-check the same value now and then: Overleaf may keep the session
       // id across the login and only mark the session as logged in.
-      if (candidate && (candidate.value !== lastTried || Date.now() - lastTriedAt >= 3000)) {
+      if (candidate && (candidate.value !== lastTried || Date.now() - lastTriedAt >= recheckMs)) {
         lastTried = candidate.value;
         lastTriedAt = Date.now();
         let valid = false;
