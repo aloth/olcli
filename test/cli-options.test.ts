@@ -4,7 +4,14 @@ import { Command } from 'commander';
 
 // Loads the real command tree from src/cli.ts without running it: parse() is
 // replaced for the duration of the import, so no command action ever runs.
-async function loadProgram(): Promise<Command> {
+// The module is evaluated once per process, so the program is cached.
+let cached: Promise<Command> | undefined;
+function loadProgram(): Promise<Command> {
+  cached ??= importProgram();
+  return cached;
+}
+
+async function importProgram(): Promise<Command> {
   const original = Command.prototype.parse;
   let captured: Command | undefined;
   Command.prototype.parse = function (this: Command) {
@@ -55,4 +62,27 @@ test('no subcommand declares an option that a parent command already declares', 
 
   assert.ok(checked > 20, `expected the full command tree, saw ${checked} subcommands`);
   assert.deepEqual(overlaps, []);
+});
+
+// The root help never grows (docs/ROADMAP.md, section 2). 0.16 folds whoami
+// and check into `auth status`, so 21 visible top-level commands. A new one
+// has to replace an existing one or raise this number in review.
+const TOP_LEVEL_BUDGET = 21;
+
+test('the root help lists at most the budgeted number of commands', async () => {
+  const program = await loadProgram();
+  const visible = program.commands.filter((command) => !(command as unknown as { _hidden: boolean })._hidden);
+  assert.ok(visible.length <= TOP_LEVEL_BUDGET, `${visible.length} visible commands: ${visible.map((c) => c.name()).join(', ')}`);
+  assert.equal(visible.length, TOP_LEVEL_BUDGET);
+});
+
+test('whoami and check still exist as hidden aliases of auth status', async () => {
+  const program = await loadProgram();
+  for (const name of ['whoami', 'check']) {
+    const command = program.commands.find((c) => c.name() === name);
+    assert.ok(command, `${name} is missing`);
+    assert.equal((command as unknown as { _hidden: boolean })._hidden, true, `${name} should be hidden`);
+  }
+  const auth = program.commands.find((c) => c.name() === 'auth');
+  assert.ok(auth?.commands.some((c) => c.name() === 'status'), 'auth status is missing');
 });

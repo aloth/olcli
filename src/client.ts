@@ -279,6 +279,8 @@ export class OverleafClient {
   private csrf: string;
   private baseUrl: string;
   private verbose: boolean = false;
+  /** Email of the signed-in account, when the bootstrap page named it. */
+  accountEmail?: string;
   private timeoutMs: number = 10000;
   // Cache per-project folder trees so repeated uploads in sync/upload calls
   // don't re-fetch the tree via Socket.IO on every file.
@@ -432,7 +434,9 @@ export class OverleafClient {
 
     // Update cookies if the bootstrap request added anything
     const updatedCookies = bootstrapClient.cookies;
-    return new OverleafClient({ cookies: updatedCookies, csrf, baseUrl });
+    const client = new OverleafClient({ cookies: updatedCookies, csrf, baseUrl });
+    client.accountEmail = OverleafClient.extractAccountEmail($);
+    return client;
   }
 
   /**
@@ -515,7 +519,9 @@ export class OverleafClient {
       throw new Error('Could not find CSRF token after password login.');
     }
 
-    return new OverleafClient({ cookies: bootstrapClient.cookies, csrf: projectCsrf, baseUrl });
+    const client = new OverleafClient({ cookies: bootstrapClient.cookies, csrf: projectCsrf, baseUrl });
+    client.accountEmail = OverleafClient.extractAccountEmail($project) ?? email;
+    return client;
   }
 
   /**
@@ -551,6 +557,26 @@ export class OverleafClient {
       }
     }
     return csrf;
+  }
+
+  /**
+   * The signed-in account's email from a rendered Overleaf page, when the
+   * page carries one. `ol-usersEmail` is on the project dashboard; `ol-user`
+   * (JSON) is on the editor and on older releases. Display only.
+   */
+  private static extractAccountEmail($: cheerio.CheerioAPI): string | undefined {
+    const direct = $('meta[name="ol-usersEmail"]').attr('content');
+    if (direct) return direct;
+    const user = $('meta[name="ol-user"]').attr('content');
+    if (user) {
+      try {
+        const parsed = JSON.parse(user);
+        if (typeof parsed?.email === 'string' && parsed.email) return parsed.email;
+      } catch {
+        // Not JSON on this release; no email to show.
+      }
+    }
+    return undefined;
   }
 
   private static isLoginPage($: cheerio.CheerioAPI): boolean {

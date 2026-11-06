@@ -9,7 +9,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora, { type Ora } from 'ora';
-import { formatError, SessionExpiredError } from './errors.js';
+import { formatError } from './errors.js';
 import { writeFileSync, readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -64,6 +64,8 @@ import {
   setPasswordCredentials,
   clearOlAuth,
   inspectStoredCredentials,
+  resolveSessionCookie,
+  maskSecret,
   type PasswordCredentials
 } from './config.js';
 import { promptHidden, PromptCancelled, NotATerminal } from './prompt.js';
@@ -198,7 +200,7 @@ async function resolveProject(
 // AUTH COMMANDS
 // ─────────────────────────────────────────────────────────────────────────────
 
-program
+const authCmd = program
   .command('auth')
   .description('Authenticate with Overleaf using a session cookie or email/password')
   .option('--cookie <session>', 'Session cookie (overleaf_session2 value)')
@@ -325,33 +327,138 @@ command reads without needing 'auth' at all.`)
     }
   });
 
-program
-  .command('whoami')
-  .description('Show current authentication status')
-  .action(async () => {
-    // Status 1 on both failure paths, so `olcli whoami || olcli auth` works.
-    // exitCode rather than exit(): the message still has to reach a pipe.
-    const cookie = getSessionCookie();
-    if (!cookie) {
-      console.log(chalk.yellow('Not authenticated'));
-      process.exitCode = 1;
+/**
+ * `auth status`: one answer to "am I set up". Replaces `whoami` (is the
+ * session valid) and `check` (where do credentials come from), which both
+ * stay as hidden aliases.
+ *
+ * Exit status 1 when no credential is found or the session is rejected, so
+ * `olcli auth status || olcli auth` works. exitCode rather than exit(): the
+ * report still has to reach a pipe.
+ */
+async function authStatus(options: { json?: boolean }): Promise<void> {
+  const baseUrl = (program.opts().baseUrl as string | undefined) || getBaseUrl();
+  const cookieName = (program.opts().cookieName as string | undefined) || getSessionCookieName();
+  const resolved = resolveSessionCookie();
+  const stored = inspectStoredCredentials();
+  const password = resolved ? undefined : getPasswordCredentials();
+
+  const sourceLabel = !resolved
+    ? (password ? (stored.envPassword ? 'OVERLEAF_EMAIL/OVERLEAF_PASSWORD' : 'saved password (config file)') : 'none')
+    : resolved.source === 'env' ? 'OVERLEAF_SESSION environment variable'
+    : resolved.source === 'olauth' ? `.olauth (${resolved.path})`
+    : `config file (${resolved.path})`;
+
+  const report: {
+    instance: string;
+    account: string | null;
+    credentialSource: string;
+    cookieName: string;
+    cookie: string | null;
+    configFile: string;
+    passwordStored: boolean;
+    signedIn: boolean;
+    projects?: number;
+    error?: string;
+  } = {
+    instance: baseUrl,
+    account: null,
+    credentialSource: sourceLabel,
+    cookieName,
+    cookie: resolved ? maskSecret(resolved.value) : null,
+    configFile: getConfigPath(),
+    passwordStored: stored.password,
+    signedIn: false,
+  };
+
+  const print = (): void => {
+    if (options.json) {
+      console.log(JSON.stringify(report, null, 2));
       return;
     }
-
-    const spinner = ora('Checking session...').start();
-    try {
-      const baseUrl = (program.opts().baseUrl as string | undefined) || getBaseUrl();
-      const cookieName = (program.opts().cookieName as string | undefined) || getSessionCookieName();
-      const client = await OverleafClient.fromSessionCookie(cookie, baseUrl, cookieName);
-      const projects = await client.listProjects();
-      spinner.succeed(`Authenticated with access to ${projects.length} projects`);
-    } catch (error: any) {
-      const [first, ...rest] = formatError(error, { verbose: Boolean(program.opts().verbose) });
-      spinner.fail(error instanceof SessionExpiredError ? first : `Session invalid. ${first}`);
-      for (const line of rest) console.error(chalk.dim(`  ${line}`));
-      process.exitCode = 1;
+    const row = (label: string, value: string): void => console.log(`  ${label.padEnd(12)} ${value}`);
+    row('Instance', report.instance);
+    row('Account', report.account ?? chalk.dim(report.signedIn ? 'unknown' : '-'));
+    row('Credential', report.credentialSource);
+    row('Cookie', report.cookie ? `${report.cookieName} = ${report.cookie}` : chalk.dim('-'));
+    row('Config file', report.configFile);
+    if (report.passwordStored) {
+      row('Password', chalk.yellow('stored in plaintext in the config file (olcli logout removes it)'));
     }
-  });
+    if (report.signedIn) {
+      row('Session', chalk.green(`valid, ${report.projects} project(s)`));
+    }
+  };
+
+  let failure: unknown;
+  if (!resolved && !password) {
+    report.error = 'Not signed in';
+  } else {
+    const spinner = options.json ? null : ora('Checking session...').start();
+    try {
+      const client = resolved
+        ? await OverleafClient.fromSessionCookie(resolved.value, baseUrl, cookieName)
+        : await OverleafClient.fromPasswordLogin(password!.email, password!.password, baseUrl);
+      const timeout = (program.opts().timeout as number | undefined) || getTimeout();
+      client.setGlobalTimeout(timeout);
+      const projects = await client.listProjects();
+      report.signedIn = true;
+      report.projects = projects.length;
+      report.account = client.accountEmail ?? (password ? password.email : null);
+      spinner?.stop();
+    } catch (error) {
+      spinner?.stop();
+      failure = error;
+      report.error = formatError(error, { verbose: true })[0];
+    }
+  }
+
+  print();
+
+  if (!report.signedIn) {
+    process.exitCode = 1;
+    if (options.json) return;
+    console.log();
+    if (!resolved && !password) {
+      console.log(chalk.yellow('Not signed in.'));
+      console.log(`Run: ${chalk.cyan('olcli auth')}`);
+    } else {
+      const [first, ...rest] = formatError(failure, { verbose: Boolean(program.opts().verbose) });
+      console.error(chalk.red(first));
+      for (const line of rest) console.error(chalk.dim(`  ${line}`));
+    }
+  }
+}
+
+/** Hidden alias for a command folded into `auth status`. */
+function deprecatedAlias(name: string, description: string): void {
+  program
+    .command(name, { hidden: true })
+    .description(description)
+    .option('--json', 'Output as JSON')
+    .action(async (options) => {
+      console.error(chalk.dim(`'olcli ${name}' is now 'olcli auth status'.`));
+      await authStatus(options);
+    });
+}
+
+authCmd
+  .command('status')
+  .description('Show instance, account, credential source and a masked cookie')
+  .option('--json', 'Output as JSON')
+  .addHelpText('after', `
+Exits 1 when no credential is found or Overleaf rejects the session, so
+'olcli auth status || olcli auth' signs in only when needed. The cookie is
+shown masked: its last four characters and its length.
+
+Credential sources, first match wins:
+  1. OVERLEAF_SESSION environment variable
+  2. .olauth file in the current directory
+  3. Global config file
+  4. OVERLEAF_EMAIL/OVERLEAF_PASSWORD, or a password saved with --save-password`)
+  .action(authStatus);
+
+deprecatedAlias('whoami', 'Alias of: auth status');
 
 program
   .command('logout')
@@ -2515,43 +2622,6 @@ program
     }
   });
 
-program
-  .command('check')
-  .description('Show credential sources and config path')
-  .action(() => {
-    console.log(chalk.bold('Configuration:'));
-    console.log(`  Config file: ${getConfigPath()}`);
-    console.log();
-
-    console.log(chalk.bold('Credential sources (in order):'));
-    console.log('  1. OVERLEAF_SESSION environment variable');
-    console.log('  2. .olauth file in current directory');
-    console.log('  3. Global config file');
-    console.log();
-
-    const cookie = getSessionCookie();
-    if (cookie) {
-      console.log(chalk.green('✓ Session cookie found'));
-      console.log(chalk.dim(`  Value: ${cookie.substring(0, 20)}...`));
-    } else {
-      console.log(chalk.yellow('✗ No session cookie found'));
-    }
-
-    // A stored password is a credential source this command used to omit,
-    // which made it impossible to answer "is my password on disk?" without
-    // opening the config file. Never print the value - only whether it exists
-    // and which source it came from.
-    const stored = inspectStoredCredentials();
-    if (stored.envPassword) {
-      console.log(chalk.yellow('⚠ Password set via OVERLEAF_EMAIL/OVERLEAF_PASSWORD'));
-    } else if (stored.password) {
-      console.log(chalk.yellow('⚠ Password stored in plaintext in the config file'));
-      console.log(chalk.dim("  Remove it with 'olcli logout', then re-auth without --save-password."));
-    }
-
-    if (stored.olAuthPath) {
-      console.log(chalk.dim(`  .olauth present: ${stored.olAuthPath}`));
-    }
-  });
+deprecatedAlias('check', 'Alias of: auth status');
 
 program.parse(process.argv);

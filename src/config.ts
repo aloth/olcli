@@ -77,10 +77,24 @@ export function setSessionCookieName(name: string): void {
   config.set('sessionCookieName', name);
 }
 
-export function getSessionCookie(): string | undefined {
-  // Check environment variable first
+/** Where the session cookie in effect came from, in precedence order. */
+export type SessionCookieSource = 'env' | 'olauth' | 'config';
+
+export interface ResolvedSessionCookie {
+  value: string;
+  source: SessionCookieSource;
+  /** File the cookie was read from (`.olauth` or the config file); absent for the env var. */
+  path?: string;
+}
+
+/**
+ * The session cookie in effect and where it came from. Same precedence as
+ * `getSessionCookie`: OVERLEAF_SESSION, then `.olauth` in the current
+ * directory, then the global config file.
+ */
+export function resolveSessionCookie(): ResolvedSessionCookie | undefined {
   if (process.env.OVERLEAF_SESSION) {
-    return process.env.OVERLEAF_SESSION;
+    return { value: process.env.OVERLEAF_SESSION, source: 'env' };
   }
 
   // Check .olauth file in current directory
@@ -94,17 +108,30 @@ export function getSessionCookie(): string | undefined {
         const cookieName = getSessionCookieName();
         const sessionCookie = cookies.find(c => c.startsWith(`${cookieName}=`));
         if (sessionCookie) {
-          return sessionCookie.split('=')[1];
+          return { value: sessionCookie.split('=')[1], source: 'olauth', path: olAuthPath };
         }
       }
-      return content;
+      return { value: content, source: 'olauth', path: olAuthPath };
     } catch {
       // Ignore errors
     }
   }
 
-  // Check global config
-  return config.get('sessionCookie');
+  const stored = config.get('sessionCookie');
+  return stored ? { value: stored, source: 'config', path: config.path } : undefined;
+}
+
+export function getSessionCookie(): string | undefined {
+  return resolveSessionCookie()?.value;
+}
+
+/**
+ * A cookie as it may be shown on screen: the last four characters only, plus
+ * the length. Enough to tell two cookies apart, not enough to use one.
+ */
+export function maskSecret(value: string): string {
+  if (value.length < 12) return `**** (${value.length} chars)`;
+  return `****${value.slice(-4)} (${value.length} chars)`;
 }
 
 export function setSessionCookie(cookie: string): void {

@@ -113,7 +113,7 @@ async function mockOverleaf(options: { loggedIn: boolean; files?: Record<string,
     if (req.method === 'GET' && req.url === '/project') {
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(options.loggedIn
-        ? `<html><head><meta name="ol-csrfToken" content="csrf"><meta name="ol-prefetchedProjectsBlob" content="${attribute(projects)}"></head></html>`
+        ? `<html><head><meta name="ol-csrfToken" content="csrf"><meta name="ol-usersEmail" content="me@example.com"><meta name="ol-prefetchedProjectsBlob" content="${attribute(projects)}"></head></html>`
         : '<html><body><form name="loginForm"><input name="email"><input name="password" type="password"></form></body></html>');
       return;
     }
@@ -266,7 +266,7 @@ test('diff --exit-code exits 2 on an invalid session and 0 or 1 on a real compar
 test('whoami exits 1 when not authenticated or the session is invalid, 0 when valid', async () => {
   const none = await olcli(['whoami']);
   assert.equal(none.status, 1, none.stdout + none.stderr);
-  assert.match(none.stdout, /Not authenticated/);
+  assert.match(none.stdout, /Not signed in/);
 
   const expired = await mockOverleaf({ loggedIn: false });
   try {
@@ -281,7 +281,7 @@ test('whoami exits 1 when not authenticated or the session is invalid, 0 when va
   try {
     const result = await olcli(['whoami'], { env: sessionEnv(live) });
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.match(result.stdout + result.stderr, /Authenticated with access to 1 projects/);
+    assert.match(result.stdout + result.stderr, /valid, 1 project\(s\)/);
   } finally {
     await live.close();
   }
@@ -299,5 +299,37 @@ test('an expired session names the fix before the detail, on every command', asy
     }
   } finally {
     await expired.close();
+  }
+});
+
+test('auth status shows instance, account, source and a masked cookie; exits 1 when signed out', async () => {
+  const none = await olcli(['auth', 'status']);
+  assert.equal(none.status, 1, none.stdout + none.stderr);
+  assert.match(none.stdout, /Not signed in/);
+  assert.match(none.stdout, /Run: olcli auth/);
+
+  const live = await mockOverleaf({ loggedIn: true });
+  try {
+    const cookie = 'abcdefghijklmnopqrstuvwxyz-SECRET-wxyz';
+    const result = await olcli(['auth', 'status'], { env: { OVERLEAF_SESSION: cookie, OVERLEAF_BASE_URL: live.baseUrl } });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, new RegExp(`Instance\\s+${live.baseUrl.replace(/[.]/g, '\\.')}`));
+    assert.match(result.stdout, /Account\s+me@example\.com/);
+    assert.match(result.stdout, /Credential\s+OVERLEAF_SESSION environment variable/);
+    assert.match(result.stdout, /overleaf_session2 = \*\*\*\*wxyz \(38 chars\)/);
+    assert.ok(!result.stdout.includes('abcdefghijklmnopqrst'), 'cookie must be masked');
+
+    const json = await olcli(['auth', 'status', '--json'], { env: { OVERLEAF_SESSION: cookie, OVERLEAF_BASE_URL: live.baseUrl } });
+    assert.equal(json.status, 0, json.stderr);
+    const parsed = JSON.parse(json.stdout);
+    assert.equal(parsed.signedIn, true);
+    assert.equal(parsed.account, 'me@example.com');
+    assert.equal(parsed.projects, 1);
+
+    const check = await olcli(['check'], { env: { OVERLEAF_SESSION: cookie, OVERLEAF_BASE_URL: live.baseUrl } });
+    assert.equal(check.status, 0, check.stdout + check.stderr);
+    assert.match(check.stderr, /now 'olcli auth status'/);
+  } finally {
+    await live.close();
   }
 });
