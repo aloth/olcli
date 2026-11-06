@@ -60,4 +60,5 @@ Environment:
   HTTPS_PROXY             proxy for https:// instances (CONNECT tunnel)
   HTTP_PROXY              proxy for http:// instances
   NO_PROXY                comma-separated hosts that bypass the proxy
+                          (localhost and 127.0.0.1 are always direct)
   NO_COLOR                turn off color

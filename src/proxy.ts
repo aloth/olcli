@@ -28,6 +28,25 @@ function envValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
   return value && value.trim() ? value.trim() : undefined;
 }
 
+/**
+ * True for localhost (and its subdomains), 127.0.0.0/8, ::1 and the
+ * IPv4-mapped ::ffff:127.x addresses. Brackets around IPv6 are accepted.
+ */
+export function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (isIP(host) === 4) return host.split('.')[0] === '127';
+  if (isIP(host) === 6) {
+    if (host === '::1' || /^(0{1,4}:){7}0{0,3}1$/.test(host) || host === '0:0:0:0:0:0:0:1') return true;
+    const mapped = host.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped) return mapped[1].split('.')[0] === '127';
+    // WHATWG URL normalizes ::ffff:127.0.0.1 to ::ffff:7f00:1.
+    const mappedHex = host.match(/^::ffff:([0-9a-f]{1,4}):[0-9a-f]{1,4}$/);
+    if (mappedHex) return (parseInt(mappedHex[1], 16) >> 8) === 127;
+  }
+  return false;
+}
+
 function defaultPort(protocol: string): number {
   return protocol === 'https:' ? 443 : 80;
 }
@@ -36,10 +55,13 @@ function defaultPort(protocol: string): number {
  * True when NO_PROXY exempts `target`. Entries are comma or space separated:
  * `*` matches everything, `example.com` and `.example.com` match the host and
  * its subdomains, `host:port` matches only that port, and an IP matches
- * itself. As in curl, loopback is not exempt unless NO_PROXY says so.
+ * itself. Loopback (localhost, 127.0.0.0/8, ::1) is always reached
+ * directly, whatever NO_PROXY says: a proxy cannot reach this machine's
+ * loopback interface, and the browser sign-in talks to a local browser.
  */
 export function bypassesProxy(target: URL, env: NodeJS.ProcessEnv = process.env): boolean {
   const host = target.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (isLoopbackHost(host)) return true;
 
   const noProxy = envValue(env, 'no_proxy');
   if (!noProxy) return false;
