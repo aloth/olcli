@@ -19,7 +19,7 @@ trap 'rm -rf "$SCRATCH"' EXIT
 export HOME="$SCRATCH" XDG_CONFIG_HOME="$SCRATCH/.config" APPDATA="$SCRATCH/AppData"
 unset OVERLEAF_SESSION OVERLEAF_EMAIL OVERLEAF_PASSWORD
 
-profiles_before=$(ls -d "${TMPDIR:-/tmp}"/olcli-browser-* 2>/dev/null | wc -l | tr -d ' ')
+profiles_before=$( (ls -d "${TMPDIR:-/tmp}"/olcli-browser-* 2>/dev/null || true) | wc -l | tr -d ' ')
 
 echo "1. A browser window opens at the login page. Sign in there (SSO, Google, ORCID, two-factor all fine)."
 echo "   olcli never sees what you type."
@@ -28,8 +28,8 @@ node "$CLI" auth --browser || status=$?
 
 echo
 echo "2. Checks:"
-node "$CLI" auth status
-profiles_after=$(ls -d "${TMPDIR:-/tmp}"/olcli-browser-* 2>/dev/null | wc -l | tr -d ' ')
+node "$CLI" auth status || echo "FAIL: auth status reports no valid session" >&2
+profiles_after=$( (ls -d "${TMPDIR:-/tmp}"/olcli-browser-* 2>/dev/null || true) | wc -l | tr -d ' ')
 if [ "$profiles_after" -gt "$profiles_before" ]; then
   echo "FAIL: a temporary browser profile was left behind" >&2
   exit 1
@@ -39,6 +39,10 @@ if pgrep -f "olcli-browser-" >/dev/null 2>&1; then
   exit 1
 fi
 config=$(find "$SCRATCH" -name config.json | head -1)
+if [ -z "$config" ]; then
+  echo "FAIL: no credential was stored (auth exit status $status)" >&2
+  exit 1
+fi
 if grep -qi password "$config"; then
   echo "FAIL: the config file mentions a password" >&2
   exit 1
