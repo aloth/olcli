@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -331,5 +331,58 @@ test('auth status shows instance, account, source and a masked cookie; exits 1 w
     assert.match(check.stderr, /now 'olcli auth status'/);
   } finally {
     await live.close();
+  }
+});
+
+function freshHome(): Record<string, string> {
+  const dir = mkdtempSync(join(home, 'home-'));
+  return { HOME: dir, XDG_CONFIG_HOME: join(dir, '.config'), APPDATA: join(dir, 'AppData') };
+}
+
+test('auth --cookie - reads stdin, warns about nothing, and prints the next steps', async () => {
+  const live = await mockOverleaf({ loggedIn: true });
+  try {
+    const env = { ...freshHome(), OVERLEAF_BASE_URL: live.baseUrl };
+    const result = await olcli(['auth', '--cookie', '-'], { input: 'overleaf_session2=from-stdin\n', env });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout + result.stderr, /Authenticated! Found 1 projects/);
+    assert.match(result.stdout, /Next steps:\s+olcli list\s+olcli pull "Paper"/);
+    assert.doesNotMatch(result.stderr, /shell history/);
+
+    const status = await olcli(['auth', 'status', '--json'], { env });
+    assert.equal(JSON.parse(status.stdout).cookie, '**** (10 chars)');
+  } finally {
+    await live.close();
+  }
+});
+
+test('auth --cookie <value> warns that the cookie is in the shell history', async () => {
+  const live = await mockOverleaf({ loggedIn: true });
+  try {
+    const result = await olcli(['auth', '--cookie', 'in-argv-cookie'], { env: { ...freshHome(), OVERLEAF_BASE_URL: live.baseUrl } });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /Warning: the cookie is now in your shell history/);
+    assert.match(result.stdout, /olcli pull "Paper"/);
+  } finally {
+    await live.close();
+  }
+});
+
+test('auth --cookie without a value prompts, and without a terminal says how to pipe it', async () => {
+  const result = await olcli(['auth', '--cookie'], { env: freshHome() });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /No terminal available to prompt for the cookie/);
+  assert.match(result.stderr, /olcli auth --cookie -/);
+});
+
+test('no error or hint suggests --password on the command line', async () => {
+  const none = await olcli(['list'], { env: freshHome() });
+  assert.equal(none.status, 1);
+  assert.doesNotMatch(none.stdout + none.stderr, /--password/);
+  assert.match(none.stderr, /olcli auth --cookie/);
+  for (const file of ['cli.ts', 'mcp.ts', 'mcp-server.ts', 'remote-helper.ts']) {
+    const text = readFileSync(join(SRC, file), 'utf-8');
+    const offenders = text.split('\n').filter((line) => /--password <|--password \$\{|--password \*/.test(line) && !/\.option\(/.test(line));
+    assert.deepEqual(offenders, [], file);
   }
 });

@@ -126,6 +126,22 @@ export function getSessionCookie(): string | undefined {
 }
 
 /**
+ * Normalize a pasted session cookie. Accepts the bare value, the value in
+ * quotes, `name=value`, or a whole `Cookie:` header copied from the browser,
+ * from which the cookie called `cookieName` is taken.
+ */
+export function parseCookieInput(raw: string, cookieName: string = getSessionCookieName()): string {
+  let value = raw.trim().replace(/^cookie:\s*/i, '');
+  if (value.includes(';') || value.startsWith(`${cookieName}=`)) {
+    const pair = value.split(';').map((c) => c.trim()).find((c) => c.startsWith(`${cookieName}=`));
+    if (pair) value = pair.slice(cookieName.length + 1);
+  }
+  value = value.trim();
+  if (value.length >= 2 && /^(["']).*\1$/.test(value)) value = value.slice(1, -1);
+  return value.trim();
+}
+
+/**
  * A cookie as it may be shown on screen: the last four characters only, plus
  * the length. Enough to tell two cookies apart, not enough to use one.
  */

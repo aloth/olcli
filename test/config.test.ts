@@ -83,3 +83,18 @@ test('inspectStoredCredentials: needs both env password variables before reporti
   process.env.OVERLEAF_PASSWORD = 'secret';
   assert.equal(inspectStoredCredentials(root).envPassword, true);
 });
+
+test('parseCookieInput accepts a bare value, quotes, name=value and a Cookie header', async () => {
+  const { parseCookieInput } = await import('../src/config.js');
+  assert.equal(parseCookieInput('  s%3Aabc.def\n', 'overleaf_session2'), 's%3Aabc.def');
+  assert.equal(parseCookieInput('"s%3Aabc"', 'overleaf_session2'), 's%3Aabc');
+  assert.equal(parseCookieInput('overleaf_session2=s%3Aabc', 'overleaf_session2'), 's%3Aabc');
+  assert.equal(parseCookieInput('Cookie: a=1; overleaf_session2=s%3Aabc; b=2', 'overleaf_session2'), 's%3Aabc');
+  assert.equal(parseCookieInput('', 'overleaf_session2'), '');
+});
+
+test('maskSecret shows only the last four characters and the length', async () => {
+  const { maskSecret } = await import('../src/config.js');
+  assert.equal(maskSecret('abcdefghijklmnop'), '****mnop (16 chars)');
+  assert.equal(maskSecret('short'), '**** (5 chars)');
+});

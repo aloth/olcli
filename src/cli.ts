@@ -64,6 +64,7 @@ import {
   setPasswordCredentials,
   clearOlAuth,
   inspectStoredCredentials,
+  parseCookieInput,
   resolveSessionCookie,
   maskSecret,
   type PasswordCredentials
@@ -93,6 +94,22 @@ function failWith(spinner: Ora, error: unknown, code = 1): never {
   spinner.fail(first);
   for (const line of rest) console.error(chalk.dim(`  ${line}`));
   process.exit(code);
+}
+
+/** Everything on stdin, as text. Used by `auth --cookie -`. */
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks).toString('utf-8');
+}
+
+/**
+ * What to run after a successful `auth`. Names a real project when there is
+ * one whose name can be quoted safely, the placeholder otherwise.
+ */
+function nextStepCommands(projects: { name: string }[]): string[] {
+  const first = projects.find((p) => p.name && !/["$`\\]/.test(p.name));
+  return ['olcli list', `olcli pull "${first ? first.name : '<name>'}"`];
 }
 
 /**
@@ -125,10 +142,8 @@ async function getClient(cookieOpt?: string, baseUrlOpt?: string, failureCode = 
   }
 
   console.error(chalk.red('No session cookie or password credentials found.'));
-  console.error('Set one with: olcli auth --cookie <session_cookie>');
-  console.error('Or use: olcli auth --email <email> --password <password>');
-  console.error('Or set OVERLEAF_SESSION environment variable');
-  console.error('Or create .olauth file in current directory');
+  console.error('Sign in with: olcli auth --cookie   (prompts for the cookie; see olcli auth --help)');
+  console.error('Or set the OVERLEAF_SESSION environment variable.');
   process.exit(failureCode);
 }
 
@@ -203,13 +218,21 @@ async function resolveProject(
 const authCmd = program
   .command('auth')
   .description('Authenticate with Overleaf using a session cookie or email/password')
-  .option('--cookie <session>', 'Session cookie (overleaf_session2 value)')
+  .option('--cookie [session]', 'Session cookie; omit the value to be prompted, "-" reads stdin')
   .option('--email <email>', 'Account email for password login')
   .option('--password <password>', 'Account password (omit to be prompted; see warning below)')
   .option('--save-password', 'Persist the password in the config file, in plaintext')
   .option('--no-save-password', 'Do not persist the password (the default; kept for existing scripts)')
   .option('--save-local', 'Save to .olauth in current directory')
   .addHelpText('after', `
+Get your session cookie: sign in to Overleaf in a browser, open the developer
+tools (F12), then Application (Chrome, Edge) or Storage (Firefox), Cookies,
+and copy the value of overleaf_session2 (overleaf.sid on older self-hosted
+instances). Then either:
+  olcli auth --cookie                       prompts, input stays hidden
+  pbpaste | olcli auth --cookie -           reads the cookie from stdin
+A value given on the command line works too, but lands in your shell history.
+
 The password is not stored unless you ask for it with --save-password. A
 session cookie is stored either way, and that is what later commands use; the
 password only buys an automatic re-login once the cookie expires.
@@ -221,12 +244,13 @@ command reads without needing 'auth' at all.`)
     if (!options.cookie && !options.email && !options.password) {
       console.log(chalk.yellow('To authenticate, provide a session cookie:'));
       console.log();
-      console.log('1. Log into overleaf.com in your browser');
-      console.log('2. Open Developer Tools (F12) → Application → Cookies');
-      console.log('3. Find the cookie named "overleaf_session2"');
-      console.log('4. Copy its value and run:');
+      console.log('1. Sign in to Overleaf in your browser');
+      console.log('2. Open the developer tools (F12), then Application (Chrome, Edge) or Storage (Firefox), then Cookies');
+      console.log('3. Copy the value of the cookie named "overleaf_session2"');
+      console.log('4. Run this and paste it when asked (input stays hidden):');
       console.log();
-      console.log(chalk.cyan('  olcli auth --cookie "your_session_cookie_value"'));
+      console.log(chalk.cyan('  olcli auth --cookie'));
+      console.log(chalk.dim('  (or pipe it: pbpaste | olcli auth --cookie -)'));
       console.log();
       console.log('Or log in with email/password:');
       console.log(chalk.cyan('  olcli auth --email "you@example.com"'));
@@ -243,6 +267,42 @@ command reads without needing 'auth' at all.`)
 
     if (!options.cookie && !options.email) {
       console.error(chalk.red('--email is required for password login.'));
+      process.exit(1);
+    }
+
+    // The cookie is a secret, so it does not have to travel through argv:
+    // no value prompts with hidden input, "-" reads stdin. Resolved before
+    // the spinner for the same reason as the password below.
+    const promptCookieName = (program.opts().cookieName as string | undefined) || getSessionCookieName();
+    let cookie: string | undefined;
+    if (options.cookie === true) {
+      try {
+        cookie = parseCookieInput(await promptHidden(`Paste the ${promptCookieName} cookie (input hidden): `), promptCookieName);
+      } catch (error: any) {
+        if (error instanceof NotATerminal) {
+          console.error(chalk.red('No terminal available to prompt for the cookie.'));
+          console.error('Pipe it instead: olcli auth --cookie - < cookie.txt');
+          console.error('Or set OVERLEAF_SESSION, which every command reads.');
+          process.exit(1);
+        }
+        if (error instanceof PromptCancelled) {
+          console.error(chalk.red('Cancelled.'));
+          process.exit(1);
+        }
+        throw error;
+      }
+    } else if (options.cookie === '-') {
+      if (process.stdin.isTTY) {
+        console.error(chalk.dim('Reading the cookie from stdin; paste it, then press Ctrl+D.'));
+      }
+      cookie = parseCookieInput(await readStdin(), promptCookieName);
+    } else if (typeof options.cookie === 'string') {
+      cookie = parseCookieInput(options.cookie, promptCookieName);
+      console.error(chalk.yellow('Warning: the cookie is now in your shell history.'));
+      console.error(chalk.dim('  Next time run olcli auth --cookie to be prompted, or pipe it to olcli auth --cookie -'));
+    }
+    if (options.cookie && !cookie) {
+      console.error(chalk.red('The session cookie must not be empty.'));
       process.exit(1);
     }
 
@@ -281,14 +341,15 @@ command reads without needing 'auth' at all.`)
       const baseUrl = (program.opts().baseUrl as string | undefined) || getBaseUrl();
       const cookieName = (program.opts().cookieName as string | undefined) || getSessionCookieName();
 
-      if (options.cookie) {
-        const client = await OverleafClient.fromSessionCookie(options.cookie, baseUrl, cookieName);
-        const projects = await client.listProjects();
+      let projects: { name: string }[];
+      if (cookie) {
+        const client = await OverleafClient.fromSessionCookie(cookie, baseUrl, cookieName);
+        projects = await client.listProjects();
 
-        setSessionCookie(options.cookie);
+        setSessionCookie(cookie);
 
         if (options.saveLocal) {
-          saveOlAuth(options.cookie);
+          saveOlAuth(cookie);
           spinner.succeed(`Authenticated! Found ${projects.length} projects. Saved to .olauth`);
         } else {
           spinner.succeed(`Authenticated! Found ${projects.length} projects.`);
@@ -296,7 +357,7 @@ command reads without needing 'auth' at all.`)
       } else {
         spinner.text = 'Logging in with email/password...';
         const client = await OverleafClient.fromPasswordLogin(options.email, password!, baseUrl);
-        const projects = await client.listProjects();
+        projects = await client.listProjects();
         persistClientSession(client, cookieName);
         setBaseUrl(baseUrl);
 
@@ -322,6 +383,9 @@ command reads without needing 'auth' at all.`)
       }
 
       console.log(chalk.dim(`Config saved to: ${getConfigPath()}`));
+      console.log();
+      console.log('Next steps:');
+      for (const line of nextStepCommands(projects)) console.log(`  ${chalk.cyan(line)}`);
     } catch (error: any) {
       failWith(spinner, error);
     }

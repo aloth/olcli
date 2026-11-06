@@ -63,7 +63,7 @@ function resolveSessionCookie(): string {
 
   throw new Error(
     'No Overleaf session cookie found.\n' +
-    'Set OVERLEAF_SESSION=<cookie>, run `olcli auth`, or save password login credentials with `olcli auth --email <email> --password <password>`.'
+    'Set OVERLEAF_SESSION=<cookie> in the MCP server environment, or run `olcli auth` in a terminal first.'
   );
 }
 
