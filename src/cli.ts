@@ -8,7 +8,8 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import ora, { type Ora } from 'ora';
+import type { Ora } from 'ora';
+import { colorDisabled, createSpinner as ora, icon } from './term.js';
 import { formatError } from './errors.js';
 import { writeFileSync, readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
@@ -71,16 +72,22 @@ import {
 } from './config.js';
 import { promptHidden, PromptCancelled, NotATerminal } from './prompt.js';
 
+// NO_COLOR (no-color.org) and --no-color. chalk handles --no-color and a
+// non-TTY stdout by itself, but not NO_COLOR; ora and log-symbols share this
+// chalk instance, so one assignment covers them too.
+if (colorDisabled()) chalk.level = 0;
+
 const program = new Command();
 
 program
   .name('olcli')
   .description('Overleaf CLI - interact with Overleaf projects from the command line')
   .version(VERSION)
-  .option('--base-url <url>', 'Overleaf instance base URL (overrides OVERLEAF_BASE_URL and config)')
-  .option('--cookie-name <name>', 'Session cookie name (default: overleaf_session2, use overleaf.sid for older instances)')
+  .option('--base-url <url>', 'Overleaf instance URL (overrides OVERLEAF_BASE_URL and config)')
+  .option('--cookie-name <name>', 'Session cookie name (default: overleaf_session2; or overleaf.sid)')
   .option('--timeout <ms>', 'HTTP request timeout in milliseconds', parseInt)
-  .option('--verbose', 'Print every HTTP request, status, and error response body to stderr')
+  .option('--verbose', 'Print every HTTP request, status and error body to stderr')
+  .option('--no-color', 'Turn off color (same as setting NO_COLOR)')
   .addHelpText('after', `
 Environment:
   OVERLEAF_SESSION        session cookie (instead of olcli auth)
@@ -344,7 +351,7 @@ command reads without needing 'auth' at all.`)
     let password: string | undefined = options.password;
     if (!options.cookie) {
       if (password) {
-        console.log(chalk.yellow('⚠ --password is now in your shell history.'));
+        console.log(chalk.yellow(icon('⚠ ', '') + '--password is now in your shell history.'));
         console.log(chalk.dim('  Omit it to be prompted, or set OVERLEAF_EMAIL/OVERLEAF_PASSWORD.'));
       } else {
         try {
@@ -672,8 +679,8 @@ program
       const sorted = entities.sort((a, b) => a.path.localeCompare(b.path));
       
       for (const entity of sorted) {
-        const icon = entity.type === 'doc' ? '📄' : '📎';
-        console.log(`  ${icon} ${entity.path}`);
+        const marker = entity.type === 'doc' ? icon('📄', 'doc ') : icon('📎', 'file');
+        console.log(`  ${marker} ${entity.path}`);
       }
 
       setLastProject(proj.id);
@@ -924,7 +931,10 @@ commentsCmd
 
 const changesCmd = program
   .command('changes')
-  .description('Review Overleaf tracked changes (suggested edits). Requires a project whose owner has an Overleaf premium plan; collaborators on any plan can then use it');
+  .description('Accept or reject tracked changes (needs a premium project owner)')
+  .addHelpText('after', `
+Tracked changes need a project whose owner has an Overleaf premium plan;
+collaborators on any plan can then accept and reject them.`);
 
 changesCmd
   .command('accept <ids...>')
@@ -1821,7 +1831,7 @@ program
       }
 
       if (deleted > 0) {
-        console.log(chalk.dim(`  ✖ ${deleted} deleted on remote`));
+        console.log(chalk.dim(`  ${icon('✖', '-')} ${deleted} deleted on remote`));
       }
       if (deleteSkipped.length > 0) {
         console.log(chalk.yellow(`  ${deleteSkipped.length} deletion(s) skipped:`));
@@ -2072,13 +2082,13 @@ skipped, or pushed. Combine it with --dry-run to preview deletions:
       }
 
       // Summary
-      console.log(chalk.dim(`  ↓ ${filesUpdatedLocally.length} pulled from remote`));
-      console.log(chalk.dim(`  ↑ ${filesToUpload.length} pushed to remote`));
+      console.log(chalk.dim(`  ${icon('↓', '<')} ${filesUpdatedLocally.length} pulled from remote`));
+      console.log(chalk.dim(`  ${icon('↑', '>')} ${filesToUpload.length} pushed to remote`));
       if (filesDeletedRemote.length > 0) {
-        console.log(chalk.dim(`  ✖ ${filesDeletedRemote.length} deleted on remote`));
+        console.log(chalk.dim(`  ${icon('✖', '-')} ${filesDeletedRemote.length} deleted on remote`));
       }
       if (filesDeleteSkipped.length > 0) {
-        console.log(chalk.yellow(`  ⚠ ${filesDeleteSkipped.length} deletion(s) failed (kept remote)`));
+        console.log(chalk.yellow(`  ${icon('⚠', '!')} ${filesDeleteSkipped.length} deletion(s) failed (kept remote)`));
       }
 
       // The program-level --verbose, not a sync option: commander assigns a
@@ -2119,7 +2129,7 @@ skipped, or pushed. Combine it with --dry-run to preview deletions:
 
 program
   .command('diff [project] [dir]')
-  .description('Show content-level differences between local files and the remote project')
+  .description('Show content differences between local files and the remote project')
   .option('--name-only', 'List changed paths instead of printing patches')
   .option('--file <path>', 'Diff a single file')
   .option('-U, --unified <n>', 'Lines of context around each hunk (default: 3)', parseInt)
@@ -2703,5 +2713,34 @@ program
   });
 
 deprecatedAlias('check', 'Alias of: auth status');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ROOT HELP GROUPS
+// ─────────────────────────────────────────────────────────────────────────────
+// Workflow order: sign in, find a project, sync it, touch single files, build,
+// review, settings. A visible top-level command without a group fails a test.
+
+const HELP_GROUPS: [string, string[]][] = [
+  ['Account:', ['auth', 'logout']],
+  ['Projects:', ['list', 'info', 'project']],
+  ['Sync:', ['pull', 'push', 'sync', 'diff']],
+  ['Files:', ['download', 'upload', 'delete', 'rename', 'zip']],
+  ['Build:', ['compile', 'pdf', 'output']],
+  ['Review:', ['comments', 'changes']],
+  ['Settings:', ['config', 'ignored']],
+];
+
+{
+  const order = new Map<string, number>();
+  HELP_GROUPS.forEach(([heading, names], group) => {
+    names.forEach((name, position) => {
+      program.commands.find((c) => c.name() === name)?.helpGroup(heading);
+      order.set(name, group * 100 + position);
+    });
+  });
+  // Commander lists groups in the order their first command appears.
+  (program.commands as Command[]).sort((a, b) => (order.get(a.name()) ?? 9999) - (order.get(b.name()) ?? 9999));
+  program.commandsGroup('Help:').helpCommand(true);
+}
 
 program.parse(process.argv);

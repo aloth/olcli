@@ -1,0 +1,63 @@
+Usage: olcli [options] [command]
+
+Overleaf CLI - interact with Overleaf projects from the command line
+
+Options:
+  -V, --version                                      output the version number
+  --base-url <url>                                   Overleaf instance URL (overrides OVERLEAF_BASE_URL and config)
+  --cookie-name <name>                               Session cookie name (default: overleaf_session2; or overleaf.sid)
+  --timeout <ms>                                     HTTP request timeout in milliseconds
+  --verbose                                          Print every HTTP request, status and error body to stderr
+  --no-color                                         Turn off color (same as setting NO_COLOR)
+  -h, --help                                         display help for command
+
+Account:
+  auth [options]                                     Authenticate with Overleaf using a session cookie or email/password
+  logout                                             Clear stored credentials
+
+Projects:
+  list|ls [options]                                  List all projects
+  info [options] [project]                           Show project details (by name or ID)
+  project                                            Operate on projects themselves (create, rename, bulk rename)
+
+Sync:
+  pull [options] [project] [dir]                     Download project files to local directory
+  push [options] [dir]                               Upload local changes to Overleaf project
+  sync [options] [dir]                               Pull then push (bidirectional sync, propagates local deletions)
+  diff [options] [project] [dir]                     Show content differences between local files and the remote project
+
+Files:
+  download [options] <file> [project]                Download a single file from project
+  upload [options] <file> [project]                  Upload a file to a project
+  delete|rm [options] <file> [project]               Delete a file or folder from a project
+  rename|mv [options] <oldname> <newname> [project]  Rename or move a file or folder in a project
+  zip [options] [project]                            Download project as zip archive
+
+Build:
+  compile [options] [project]                        Compile a project (trigger PDF generation)
+  pdf [options] [project]                            Compile and download PDF
+  output [options] [type]                            Download compile output files (bbl, log, aux, etc.)
+
+Review:
+  comments                                           View and manage Overleaf comments
+  changes                                            Accept or reject tracked changes (needs a premium project owner)
+
+Settings:
+  config                                             Manage olcli configuration
+  ignored [options] [dir]                            Show ignore patterns currently in effect for a project directory
+
+Help:
+  help [command]                                     display help for command
+
+Environment:
+  OVERLEAF_SESSION        session cookie (instead of olcli auth)
+  OVERLEAF_EMAIL, OVERLEAF_PASSWORD
+                          password login when no session cookie works
+  OVERLEAF_BASE_URL       instance URL, like --base-url
+  OVERLEAF_COOKIE_NAME    session cookie name, like --cookie-name
+  OVERLEAF_TIMEOUT        HTTP timeout in milliseconds, like --timeout
+  OLCLI_CONCURRENCY       documents fetched in parallel by comments list
+  HTTPS_PROXY             proxy for https:// instances (CONNECT tunnel)
+  HTTP_PROXY              proxy for http:// instances
+  NO_PROXY                comma-separated hosts that bypass the proxy
+  NO_COLOR                turn off color
