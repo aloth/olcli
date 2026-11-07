@@ -23,7 +23,7 @@ git push
 
 - **Clone/fetch:** Downloads the project zip, emits a fast-import stream with one commit containing the full tree.
 - **Push:** Parses the fast-export stream to determine file modifications and deletions, then calls the Overleaf API to upload/delete only what changed.
-- **Pull:** Compares marks to detect if the remote has new content; skips download when up-to-date.
+- **Pull:** Downloads the project and compares a sha256 of every file with the state recorded at the last fetch or push (`.git/overleaf/state.json`); only a change produces a new commit.
 
 State is stored in `.git/overleaf/` (marks file + manifest).
 
@@ -72,11 +72,6 @@ GIT_REMOTE_OVERLEAF_DEBUG=1 git push origin main
 ## Limitations
 
 - Overleaf has no native revision history exposed via API, so each clone creates a single "Import from Overleaf" commit (no history replay).
-- **Known bug: `git fetch` and `git pull` do not pick up changes made on Overleaf after the clone.** The helper reports the commit you already have as the state of the remote, so git never downloads the project again. A `git push` then uploads your version of every file your commits changed and overwrites a coauthor's newer edits in those files without a warning. Running `git pull` before `git push` does not protect you. Until this is fixed, check the project before every push from the top level of the clone:
-
-  ```bash
-  olcli diff "<project name or id>" --name-only
-  ```
-
-  `olcli diff` downloads the project as it is on Overleaf right now. If it lists files you did not change, a coauthor edited them: pull those edits into your clone (for example with `olcli pull "<project>" --force` in a separate directory and copying the files over) before you push. For projects you edit together with others, `olcli pull` and `olcli push` with `olcli diff` are the safer workflow for now.
+- **Coauthors' edits are not overwritten by accident.** `git fetch` and `git pull` download the project and compare every file with the state of the last fetch or push, so they bring in edits made on Overleaf and write no commit when nothing changed. `git push` is refused, like a non-fast-forward push, when Overleaf has changes you have not fetched yet, or when your branch does not contain the last fetch (for example after a `git pull` whose merge conflict is still open). Run `git pull`, resolve any conflict, commit, then push again. `git push --force` overwrites Overleaf on purpose. Clones made with olcli 0.16.0 or earlier have no record of the Overleaf state yet: run `git pull` once before the first push.
+- A fetch or push downloads the whole project once to compare it, so on a large project it takes as long as an `olcli pull`. Overleaf limits how often a project can be downloaded; many fetches in a few minutes can be answered with HTTP 429 (wait a minute and retry).
 - Binary files are supported but large files may be slow (uploaded individually via the Overleaf API).

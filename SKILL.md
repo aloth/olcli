@@ -93,9 +93,9 @@ vim main.tex
 git add . && git commit -m "update introduction"
 git push
 
-# Known bug: git pull does not fetch changes made on Overleaf after the clone,
-# and git push overwrites them. Before pushing, check with:
-olcli diff "<project>" --name-only
+# Pull latest from Overleaf (a push is refused while Overleaf has edits you
+# have not pulled; git push --force overwrites them on purpose)
+git pull
 ```
 
 Authentication: reads `OVERLEAF_SESSION` env var, the `.olauth` file in the current directory, or stored config (same as CLI).

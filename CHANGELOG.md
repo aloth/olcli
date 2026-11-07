@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.16.1] - 2026-11-07
+
+### Fixed
+- **`git pull` through the git remote helper now brings in edits made on Overleaf, and `git push` no longer overwrites them** - the helper answered git's `list` command with the commit already in the clone, so after the clone `git fetch` and `git pull` never downloaded the project again, and a following `git push` overwrote newer edits by coauthors in every file it uploaded, without a warning. Present since the helper was added. A fetch now downloads the project and compares a sha256 of every file with the state of the last fetch or push, imports a new commit when something changed and none when nothing did. A push is refused, like a non-fast-forward push, when Overleaf has changes the clone has not fetched or when the pushed branch does not contain the last fetch (for example after a `git pull` whose merge conflict is still open); `git push --force` overwrites on purpose. Clones made with 0.16.0 or earlier have no record of the Overleaf state and are asked to run `git pull` once before their first push
+
 ## [0.16.0] - 2026-11-06
 
 ### Added

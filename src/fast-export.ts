@@ -79,6 +79,8 @@ export interface ExportedDelete {
 export interface ParsedExport {
   files: ExportedFile[];
   deletes: ExportedDelete[];
+  /** Local refs the stream writes commits for, e.g. refs/heads/main. */
+  refs: string[];
 }
 
 /** Unquote a fast-export path (C-style quoting for unusual names). */
@@ -110,6 +112,7 @@ function unquotePath(p: string): string {
  */
 export async function parseFastExport(src: ByteSource): Promise<ParsedExport> {
   const files: ExportedFile[] = [];
+  const refs: string[] = [];
   const deletes: ExportedDelete[] = [];
   const blobData = new Map<string, Buffer>(); // mark -> data
 
@@ -159,6 +162,8 @@ export async function parseFastExport(src: ByteSource): Promise<ParsedExport> {
     }
 
     if (line.startsWith('commit ')) {
+      const ref = line.slice(7).trim();
+      if (!refs.includes(ref)) refs.push(ref);
       commitSection = true;
       currentMark = '';
       continue;
@@ -189,5 +194,5 @@ export async function parseFastExport(src: ByteSource): Promise<ParsedExport> {
     // author, committer, from, merge, reset, feature, ... carry nothing we need
   }
 
-  return { files, deletes };
+  return { files, deletes, refs };
 }

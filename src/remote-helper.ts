@@ -9,11 +9,13 @@
  *
  * Protocol reference: gitremote-helpers(7)
  *
- * Capabilities: import + export with refspec.
- * State stored in .git/overleaf/ (manifest).
+ * Capabilities: import + export with refspec, option (for push --force).
+ * State stored in .git/overleaf/ (manifest, marks, sha256 of every remote file).
+ * A push is refused while Overleaf has changes the clone has not fetched.
  */
 
 import { execSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { OverleafClient } from './client.js';
@@ -82,6 +84,51 @@ interface HelperState {
   manifest: string[];
   /** fast-import mark counter */
   lastMark: number;
+  /**
+   * sha256 of every file as it was on Overleaf after the last import or push.
+   * `list` compares against it to tell git whether Overleaf changed, and a push
+   * is refused while Overleaf holds changes the clone has not fetched. Clones
+   * made by olcli 0.16.0 and earlier have no record.
+   */
+  remoteHashes?: Record<string, string>;
+}
+
+interface RemoteSnapshot {
+  files: { path: string; data: Buffer }[];
+  hashes: Record<string, string>;
+}
+
+/** Download the project and hash every file in it. */
+async function remoteSnapshot(client: OverleafClient, projectId: string): Promise<RemoteSnapshot> {
+  const zipBuffer = await client.downloadProject(projectId);
+  const AdmZip = (await import('adm-zip')).default;
+  const files: RemoteSnapshot['files'] = [];
+  const hashes: Record<string, string> = {};
+  for (const entry of new AdmZip(zipBuffer).getEntries()) {
+    if (entry.isDirectory) continue;
+    const data = entry.getData();
+    files.push({ path: entry.entryName, data });
+    hashes[entry.entryName] = createHash('sha256').update(data).digest('hex');
+  }
+  return { files, hashes };
+}
+
+/** Paths whose content differs between two snapshots, including added and removed files. */
+function changedPaths(before: Record<string, string>, after: Record<string, string>): string[] {
+  const paths = new Set([...Object.keys(before), ...Object.keys(after)]);
+  return [...paths].filter((p) => before[p] !== after[p]).sort();
+}
+
+function localRemoteSha(): string | undefined {
+  try {
+    const sha = execSync(
+      'git rev-parse --verify refs/overleaf/main 2>/dev/null',
+      { encoding: 'utf-8', env: { ...process.env, GIT_DIR: getGitDir() } }
+    ).trim();
+    return /^[a-f0-9]{40}$/.test(sha) ? sha : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function getGitDir(): string {
@@ -181,6 +228,40 @@ async function pushChanges(
   }
 }
 
+/**
+ * Why a push must not go ahead, or undefined when it may. Mirrors git's
+ * non-fast-forward rejection: Overleaf has changes this clone has not fetched.
+ */
+function pushRefusal(recorded: Record<string, string> | undefined, current: Record<string, string>): string | undefined {
+  if (!recorded) {
+    return 'this clone has no record of the Overleaf state (made by olcli 0.16.0 or earlier); run git pull once, then push again';
+  }
+  const changed = changedPaths(recorded, current);
+  if (changed.length === 0) return undefined;
+  const shown = changed.slice(0, 3).join(', ') + (changed.length > 3 ? ` and ${changed.length - 3} more` : '');
+  return `Overleaf has changes you do not have yet (${shown}); run git pull, then push again, or git push --force to overwrite them`;
+}
+
+/**
+ * The commit being pushed must contain the last import, or the push would
+ * replace what was fetched from Overleaf with an older version, for example
+ * after a git pull whose merge conflict was never resolved.
+ */
+function notMergedRefusal(refs: string[]): string | undefined {
+  const fetchedSha = localRemoteSha();
+  if (!fetchedSha) return undefined;
+  for (const ref of refs.length ? refs : ['HEAD']) {
+    try {
+      execSync(`git merge-base --is-ancestor ${fetchedSha} ${JSON.stringify(ref)}`, {
+        stdio: 'ignore', env: { ...process.env, GIT_DIR: getGitDir() },
+      });
+    } catch {
+      return 'your branch does not contain the last fetch from Overleaf; merge it first (git pull, resolve any conflict, commit), then push again, or git push --force to overwrite';
+    }
+  }
+  return undefined;
+}
+
 // ─── Protocol handler ───
 
 async function main(): Promise<void> {
@@ -198,6 +279,13 @@ async function main(): Promise<void> {
 
   ensureStateDir();
   const state = loadState();
+
+  let clientPromise: Promise<OverleafClient> | undefined;
+  const client = (): Promise<OverleafClient> => (clientPromise ??= getClient(baseUrl));
+  // The snapshot `list` downloads is reused by the `import` that follows in the
+  // same process, so a fetch downloads the project once.
+  let fetched: RemoteSnapshot | undefined;
+  let force = false;
 
   // Byte-exact reader: fast-export blobs are raw bytes, which a line reader
   // such as readline would decode as text and corrupt.
@@ -227,6 +315,8 @@ async function main(): Promise<void> {
       const caps = [
         'import',
         'export',
+        // Lets git pass `option force true` for `git push --force`.
+        'option',
         // Map remote refs/heads/* to a private namespace refs/overleaf/<remote>/*
         // This is critical: git uses the private namespace to track what the remote has.
         // Without a separate namespace, git can't compute the push delta.
@@ -242,26 +332,24 @@ async function main(): Promise<void> {
     }
 
     if (trimmed === 'list' || trimmed === 'list for-push') {
-      // Report what SHA the remote currently has.
-      // Read from refs/overleaf/main (our private namespace ref updated by
-      // git after import/export via the refspec mapping).
-      let remoteSha: string | undefined;
-      try {
-        const sha = execSync(
-          'git rev-parse --verify refs/overleaf/main 2>/dev/null',
-          { encoding: 'utf-8', env: { ...process.env, GIT_DIR: getGitDir() } }
-        ).trim();
-        if (/^[a-f0-9]{40}$/.test(sha)) remoteSha = sha;
-      } catch { /* not yet created */ }
-
-      if (remoteSha) {
-        process.stdout.write(`${remoteSha} refs/heads/main\n`);
-      } else {
-        process.stdout.write('? refs/heads/main\n');
+      // Tell git which commit the remote is at. refs/overleaf/main is the
+      // commit of the last import or push; it is only still true if Overleaf
+      // has not changed since. Before a fetch, download the project and
+      // compare: unchanged reports that commit (git has nothing to do),
+      // changed reports '?' so git asks for an import. For a push the check
+      // happens in export instead, against a fresh download.
+      const remoteSha = localRemoteSha();
+      let report = remoteSha ?? '?';
+      if (trimmed === 'list' && remoteSha) {
+        fetched = await remoteSnapshot(await client(), projectId);
+        const changed = state.remoteHashes ? changedPaths(state.remoteHashes, fetched.hashes) : ['(no record)'];
+        if (changed.length > 0) report = '?';
+        debug(`Overleaf changed since last import: ${changed.length ? changed.join(', ') : 'nothing'}`);
       }
+      process.stdout.write(`${report} refs/heads/main\n`);
       process.stdout.write('@refs/heads/main HEAD\n');
       process.stdout.write('\n'); // blank line terminates
-      debug(`> list response sent (sha=${remoteSha || '?'})`);
+      debug(`> list response sent (sha=${report})`);
       continue;
     }
 
@@ -283,14 +371,9 @@ async function main(): Promise<void> {
 
       debug(`Import requested for: ${refs.join(', ')}`);
 
-      // Authenticate and fetch
-      const client = await getClient(baseUrl);
-
       debug('Generating fast-import stream...');
-      const zipBuffer = await client.downloadProject(projectId);
-      const AdmZip = (await import('adm-zip')).default;
-      const zip = new AdmZip(zipBuffer);
-      const entries = zip.getEntries();
+      const snapshot = fetched ?? await remoteSnapshot(await client(), projectId);
+      fetched = undefined;
 
       let mark = state.lastMark;
       const newManifest: string[] = [];
@@ -305,14 +388,20 @@ async function main(): Promise<void> {
       // feature done tells fast-import to expect "done" as terminator
       process.stdout.write('feature done\n');
 
+      // Nothing changed on Overleaf since the last import or push: write no
+      // commit, so the history does not fill up with empty imports.
+      const parentSha = localRemoteSha();
+      if (parentSha && state.remoteHashes && changedPaths(state.remoteHashes, snapshot.hashes).length === 0) {
+        process.stdout.write('done\n');
+        debug('Import: Overleaf unchanged, no commit');
+        continue;
+      }
+
       // Write blobs
-      for (const entry of entries) {
-        if (entry.isDirectory) continue;
-        const path = entry.entryName;
+      for (const { path, data } of snapshot.files) {
         newManifest.push(path);
         mark++;
 
-        const data = entry.getData();
         process.stdout.write(`blob\nmark :${mark}\ndata ${data.length}\n`);
         process.stdout.write(data);
         process.stdout.write('\n');
@@ -330,8 +419,8 @@ async function main(): Promise<void> {
       process.stdout.write(`data ${Buffer.byteLength(msg)}\n`);
       process.stdout.write(`${msg}\n`);
 
-      // Parent: reference previous state if any
-      if (state.manifest.length > 0) {
+      // Parent: the last imported or pushed commit, if any
+      if (parentSha) {
         process.stdout.write(`from refs/overleaf/main^0\n`);
       }
 
@@ -352,6 +441,7 @@ async function main(): Promise<void> {
       // Update state
       state.manifest = newManifest;
       state.lastMark = mark;
+      state.remoteHashes = snapshot.hashes;
       saveState(state);
 
       debug(`Import complete: ${fileMarks.length} files, ${removedFiles.length} deletions`);
@@ -362,7 +452,6 @@ async function main(): Promise<void> {
       // Push: git sends a fast-export stream on stdin
       debug('Export (push) starting — reading fast-export stream...');
 
-      const client = await getClient(baseUrl);
       const parsed = await parseFastExport(reader);
 
       debug(`Parsed export: ${parsed.files.length} modifications, ${parsed.deletes.length} deletions`);
@@ -373,7 +462,18 @@ async function main(): Promise<void> {
         // This prevents git from advancing the remote tracking ref.
         process.stdout.write('\n');
       } else {
-        await pushChanges(client, projectId, parsed, state);
+        const overleaf = await client();
+        // Refuse to overwrite edits made on Overleaf since the last fetch, the
+        // way git refuses a non-fast-forward push. --force skips the check.
+        const before = await remoteSnapshot(overleaf, projectId);
+        const refusal = force ? undefined : (pushRefusal(state.remoteHashes, before.hashes) ?? notMergedRefusal(parsed.refs));
+        if (refusal) {
+          process.stdout.write(`error refs/heads/main ${refusal}\n\n`);
+          debug(`Push refused: ${refusal}`);
+          continue;
+        }
+
+        await pushChanges(overleaf, projectId, parsed, state);
 
         // Report success for each ref that was pushed
         process.stdout.write('ok refs/heads/main\n');
@@ -388,6 +488,9 @@ async function main(): Promise<void> {
           currentManifest.add(file.path);
         }
         state.manifest = [...currentManifest];
+        // Record Overleaf as it is after the push, as Overleaf stores it, so
+        // the next push does not mistake our own upload for a coauthor's edit.
+        state.remoteHashes = (await remoteSnapshot(overleaf, projectId)).hashes;
         saveState(state);
       }
 
@@ -396,8 +499,12 @@ async function main(): Promise<void> {
     }
 
     if (trimmed.startsWith('option ')) {
-      // We don't support any options currently
-      process.stdout.write('unsupported\n');
+      if (trimmed === 'option force true' || trimmed === 'option force false') {
+        force = trimmed.endsWith('true');
+        process.stdout.write('ok\n');
+      } else {
+        process.stdout.write('unsupported\n');
+      }
       continue;
     }
 
