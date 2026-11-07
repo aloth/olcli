@@ -17,6 +17,8 @@
 - **No git token, no paid plan.** olcli signs in with your normal Overleaf session. Overleaf's own Git integration is a premium feature; olcli's git remote helper is not tied to it.
 - **One package:** command-line tool, git remote helper, MCP server and TypeScript library.
 
+> **If olcli saves you time, please star the repository.** To reference it in a paper, see [Citation](#citation).
+
 <p align="center">
   <img src="screenshots/demo.gif" alt="olcli demo" width="600">
 </p>
@@ -228,6 +230,19 @@ All exports: [docs/LIBRARY.md](docs/LIBRARY.md).
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, which tests need a real Overleaf account, and what CI checks on a pull request.
+
+## Citation
+
+If you use olcli in your research, please cite it. GitHub's "Cite this repository" button in the sidebar gives the reference in APA and BibTeX, from [CITATION.cff](CITATION.cff). The DOI [10.5281/zenodo.23896243](https://doi.org/10.5281/zenodo.23896243) always resolves to the latest version.
+
+```bibtex
+@software{loth_olcli,
+    author = {Loth, Alexander},
+    title  = {{olcli}: Command-line interface for Overleaf},
+    doi    = {10.5281/zenodo.23896243},
+    url    = {https://github.com/aloth/olcli}
+}
+```
 
 ## License
 
