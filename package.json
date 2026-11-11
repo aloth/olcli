@@ -1,6 +1,6 @@
 {
   "name": "@aloth/olcli",
-  "version": "0.16.1",
+  "version": "0.16.2",
   "description": "Overleaf CLI: pull, push, sync and compile LaTeX projects from your terminal. Git remote helper, MCP server and TypeScript library.",
   "mcpName": "io.github.aloth/olcli",
   "type": "module",

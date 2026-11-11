@@ -9,6 +9,8 @@
 export interface RenameCandidate {
   id: string;
   name: string;
+  /** Owner from the project list; compared with `accountUserId`. */
+  owner?: { id?: string; email?: string };
 }
 
 export interface PlannedRename {
@@ -31,6 +33,11 @@ export interface RenamePlanOptions {
   replace?: string;
   prefix?: string;
   suffix?: string;
+  /**
+   * The signed-in account's user id. When given, projects owned by someone
+   * else are skipped, because Overleaf lets only the owner rename a project.
+   */
+  accountUserId?: string;
 }
 
 export interface RenamePlan {
@@ -98,6 +105,11 @@ export function planProjectRenames(
       continue;
     }
     if (next === p.name) continue;
+    const ownerId = p.owner?.id;
+    if (options.accountUserId && ownerId && ownerId !== options.accountUserId) {
+      skipped.push({ name: p.name, reason: `owned by ${p.owner?.email || ownerId}; only the owner can rename it` });
+      continue;
+    }
     planned.push({ id: p.id, from: p.name, to: next });
   }
 

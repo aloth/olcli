@@ -10,7 +10,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import type { Ora } from 'ora';
 import { colorDisabled, createSpinner as ora, icon } from './term.js';
-import { formatError } from './errors.js';
+import { ProjectOwnerOnlyError, formatError } from './errors.js';
 import { writeFileSync, readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -1392,7 +1392,16 @@ projectCmd
     const spinner = ora('Renaming project...').start();
     try {
       const client = await getClient(options.cookie);
-      const proj = await resolveProject(client, project);
+      const resolved = await resolveProject(client, project);
+      // The project list carries the owner and the real name; resolveProject
+      // trusts a bare ID without looking it up.
+      const listed = await client.getProjectById(resolved.id);
+      const proj = { id: resolved.id, name: listed?.name ?? resolved.name };
+
+      const foreignOwner = listed ? client.foreignOwner(listed) : undefined;
+      if (foreignOwner) {
+        throw new ProjectOwnerOnlyError(foreignOwner);
+      }
 
       if (proj.name === newname) {
         spinner.info(`Project is already named "${newname}"`);
@@ -1443,6 +1452,7 @@ projectCmd
           replace: options.replace,
           prefix: options.prefix,
           suffix: options.suffix,
+          accountUserId: client.accountUserId,
         });
       } catch (err: any) {
         spinner.fail(err.message);

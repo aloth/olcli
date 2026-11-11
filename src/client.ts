@@ -35,7 +35,7 @@ import {
 } from './tracked-changes.js';
 import { planEntityMove, type MovePlan } from './move-plan.js';
 import { matchProject } from './project-match.js';
-import { HttpStatusError, SessionExpiredError, httpError, isAuthStatus } from './errors.js';
+import { HttpStatusError, ProjectOwnerOnlyError, SessionExpiredError, httpError, isAuthStatus } from './errors.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -61,7 +61,7 @@ export interface Project {
   name: string;
   lastUpdated: string;
   lastUpdatedBy?: string;
-  owner?: { email: string; firstName?: string; lastName?: string };
+  owner?: { id?: string; email: string; firstName?: string; lastName?: string };
   archived?: boolean;
   trashed?: boolean;
 }
@@ -281,6 +281,8 @@ export class OverleafClient {
   private verbose: boolean = false;
   /** Email of the signed-in account, when the bootstrap page named it. */
   accountEmail?: string;
+  /** User id of the signed-in account, when the bootstrap page named it (`ol-user_id`). */
+  accountUserId?: string;
   private timeoutMs: number = 10000;
   // Cache per-project folder trees so repeated uploads in sync/upload calls
   // don't re-fetch the tree via Socket.IO on every file.
@@ -436,6 +438,7 @@ export class OverleafClient {
     const updatedCookies = bootstrapClient.cookies;
     const client = new OverleafClient({ cookies: updatedCookies, csrf, baseUrl });
     client.accountEmail = OverleafClient.extractAccountEmail($);
+    client.accountUserId = OverleafClient.extractAccountUserId($);
     return client;
   }
 
@@ -521,6 +524,7 @@ export class OverleafClient {
 
     const client = new OverleafClient({ cookies: bootstrapClient.cookies, csrf: projectCsrf, baseUrl });
     client.accountEmail = OverleafClient.extractAccountEmail($project) ?? email;
+    client.accountUserId = OverleafClient.extractAccountUserId($project);
     return client;
   }
 
@@ -577,6 +581,38 @@ export class OverleafClient {
       }
     }
     return undefined;
+  }
+
+  /**
+   * The signed-in account's user id from a rendered Overleaf page
+   * (`ol-user_id`, falling back to the `_id` or `id` in `ol-user`). Compared
+   * with `Project.owner.id` to tell owned projects from shared ones.
+   */
+  static extractAccountUserId($: cheerio.CheerioAPI): string | undefined {
+    const direct = $('meta[name="ol-user_id"]').attr('content');
+    if (direct) return direct;
+    const user = $('meta[name="ol-user"]').attr('content');
+    if (user) {
+      try {
+        const parsed = JSON.parse(user);
+        const id = parsed?._id ?? parsed?.id;
+        if (typeof id === 'string' && id) return id;
+      } catch {
+        // Not JSON on this release.
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Who owns a project from the project list, when that is known and is not
+   * the signed-in account. Undefined means "owned by you" or "cannot tell";
+   * only a definite mismatch should stop a request.
+   */
+  foreignOwner(project: Pick<Project, 'owner'>): string | undefined {
+    const ownerId = project.owner?.id;
+    if (!ownerId || !this.accountUserId || ownerId === this.accountUserId) return undefined;
+    return project.owner?.email || ownerId;
   }
 
   private static isLoginPage($: cheerio.CheerioAPI): boolean {
@@ -2144,6 +2180,12 @@ export class OverleafClient {
       expect: 'text'
     });
 
+    if (response.status === 403) {
+      // A valid session gets 403 here when it is not the project owner
+      // (issue #62). An expired session is caught earlier as a redirect to
+      // the login page, so 403 is not reported as an expired session.
+      throw new ProjectOwnerOnlyError(undefined, 403);
+    }
     if (!response.ok) {
       throw httpError('Failed to rename project', response.status);
     }

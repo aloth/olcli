@@ -1133,7 +1133,7 @@ export function createOlcliMcpServer(options: OlcliMcpServerOptions): McpServer 
       wrapTool(async () => {
         const client = await getClient();
         const projects = await client.listProjects();
-        const plan = planProjectRenames(projects, { match, search, replace, prefix, suffix });
+        const plan = planProjectRenames(projects, { match, search, replace, prefix, suffix, accountUserId: client.accountUserId });
         return {
           ...plan,
           applied: false,

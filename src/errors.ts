@@ -45,6 +45,30 @@ export class SessionExpiredError extends Error {
   }
 }
 
+/**
+ * Overleaf refused to rename a project the signed-in account does not own.
+ *
+ * Overleaf lets only the owner rename a project and answers 403 to every
+ * collaborator, including ones with edit access, while the session itself
+ * stays valid. Reporting that as an expired session sent users to
+ * `olcli auth`, which cannot help (issue #62).
+ */
+export class ProjectOwnerOnlyError extends Error {
+  readonly status?: number;
+  readonly owner?: string;
+
+  constructor(owner?: string, status?: number) {
+    super(
+      owner
+        ? `Only the project owner can rename a project. This project is owned by ${owner}.`
+        : 'Only the project owner can rename a project.'
+    );
+    this.name = 'ProjectOwnerOnlyError';
+    this.owner = owner;
+    this.status = status;
+  }
+}
+
 /** HTTP statuses that mean "this session is not allowed", not "this request is wrong". */
 export function isAuthStatus(status: number): boolean {
   return status === 401 || status === 403;
@@ -90,6 +114,14 @@ export function formatError(error: unknown, options: FormatErrorOptions = {}): s
 
   if (error instanceof SessionExpiredError) {
     return [error.message, `${error.detail}.${verboseHint}`];
+  }
+
+  if (error instanceof ProjectOwnerOnlyError) {
+    if (error.status === undefined) return [error.message];
+    return [
+      error.message,
+      `Overleaf answered HTTP ${error.status}. If you are the owner, your session may have expired; run: ${AUTH_COMMAND}.${verboseHint}`,
+    ];
   }
 
   if (error instanceof HttpStatusError) {

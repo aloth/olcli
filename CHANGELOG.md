@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.16.2] - 2026-11-11
+
+### Fixed
+- **Renaming a project you do not own says so instead of "Session expired"** ([#62](https://github.com/aloth/olcli/issues/62)) - Overleaf lets only the project owner rename a project and answers 403 to every collaborator, also with edit access, while the session stays valid. olcli reported that as "Session expired or invalid. Run: olcli auth", which sent users to sign in again for nothing. `olcli project rename` now checks the owner in the project list before sending anything and stops with "Only the project owner can rename a project. This project is owned by <email>." When the owner is not known in advance and Overleaf still answers 403, the message names the owner rule first and mentions `olcli auth` only as the second possibility. `olcli project rename-bulk` and the MCP tool `plan_project_renames` list projects owned by someone else as skipped instead of planning a rename that would fail. Thanks to @alessandrocornacchia for the report and the verbose log
+
 ## [0.16.1] - 2026-11-07
 
 ### Fixed
