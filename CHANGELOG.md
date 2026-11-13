@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **Requests rate limited by Overleaf (HTTP 429) are retried** - Overleaf answers a burst of requests with 429 before doing anything, and its limit lasts about 25 seconds, so commands that send several requests in a row (adding a comment, then reading the threads back) failed with "Overleaf is rate limiting requests" although waiting a little would have worked. A 429 is now retried up to 5 times after 1, 2, 4, 8 and 16 seconds, with some jitter so parallel requests do not retry in step, or after `Retry-After` when Overleaf sends one. The extra sockets of the doc-joining pool still give up at once, so a rate-limited pool shrinks right away instead of waiting. `--verbose` logs each retry
+
 ## [0.16.2] - 2026-11-11
 
 ### Fixed

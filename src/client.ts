@@ -41,6 +41,8 @@ import { HttpStatusError, ProjectOwnerOnlyError, SessionExpiredError, httpError,
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
 const USER_AGENT = `olcli/${pkg.version}`;
+/** How often a request answered with HTTP 429 is retried before the 429 is returned to the caller. */
+const MAX_429_RETRIES = 5;
 
 const DEFAULT_BASE_URL = 'https://www.overleaf.com';
 const RESOURCE_PATH_FAILURE_HINT = ' (Perhaps the resource file you specified does not exist in the project?)';
@@ -669,6 +671,8 @@ export class OverleafClient {
     timeoutMs?: number;
     maxRedirects?: number;
     expect?: 'text' | 'json' | 'buffer';
+    /** Wait and retry when Overleaf answers 429 (default). Off where a 429 has its own handling. */
+    retryOn429?: boolean;
   } = {}): Promise<{ status: number; ok: boolean; headers: Record<string, string | string[]>; body: string | Buffer | any }> {
     const method = options.method || 'GET';
     const timeoutMs = options.timeoutMs ?? this.timeoutMs;
@@ -768,7 +772,17 @@ export class OverleafClient {
       });
     };
 
-    return doRequest(url, maxRedirects);
+    // Overleaf answers bursts with 429 before doing anything, so a retry is safe for every method. It sends no
+    // Retry-After in practice and its limit lasts about 25 s, so wait 1, 2, 4, 8 and 16 s (about 30 s in all), with
+    // +/-25% jitter so parallel callers do not retry in step. A Retry-After header wins when present.
+    for (let attempt = 0; ; attempt++) {
+      const res = await doRequest(url, maxRedirects);
+      if (res.status !== 429 || options.retryOn429 === false || attempt >= MAX_429_RETRIES) return res;
+      const retryAfter = Number(res.headers['retry-after']);
+      const waitMs = Number.isFinite(retryAfter) ? retryAfter * 1000 : 1000 * 2 ** attempt * (0.75 + Math.random() * 0.5);
+      this.logVerbose(`${method} ${url} -> 429, retrying in ${Math.round(waitMs)}ms (${attempt + 1}/${MAX_429_RETRIES})`);
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+    }
   }
 
   /**
@@ -1317,12 +1331,14 @@ export class OverleafClient {
     return docs;
   }
 
-  private async openProjectSocket(projectId: string): Promise<ProjectSocketSession> {
+  /** `retryOn429: false` for sockets the caller can do without: a rate-limited one then fails at once. */
+  private async openProjectSocket(projectId: string, { retryOn429 = true } = {}): Promise<ProjectSocketSession> {
     const handshakeUrl = `${this.baseUrl}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
     const handshakeResponse = await this.httpRequest(handshakeUrl, {
       headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT },
       expect: 'text',
-      timeoutMs: 5000
+      timeoutMs: 5000,
+      retryOn429
     });
 
     if (!handshakeResponse.ok) {
@@ -2401,7 +2417,7 @@ export class OverleafClient {
     const extra = Array.from({ length: Math.min(concurrency, docs.length) - 1 }, async () => {
       let session: ProjectSocketSession;
       try {
-        session = await this.openProjectSocket(projectId);
+        session = await this.openProjectSocket(projectId, { retryOn429: false });
       } catch (error) {
         if ((error as { status?: number }).status === 429) return;
         if (failure === undefined) failure = error;
