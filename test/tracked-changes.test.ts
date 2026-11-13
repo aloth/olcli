@@ -202,3 +202,38 @@ test('not found error explains premium only when the project has no tracked chan
   const some = reviewClient('foo quux baz', replaced);
   await assert.rejects(some.client.acceptTrackedChanges('p', ['x']), (err: Error) => /not found: x$/.test(err.message));
 });
+
+test('suggestChanges undoes a pushed edit untracked, redoes it tracked, and leaves unpushed edits alone', async () => {
+  const client: any = new OverleafClient({ cookies: {}, csrf: 'c' });
+  client.getProjectInfo = async () => ({ rootFolder: [{ docs: [{ _id: 'd1', name: 'main.tex' }], folders: [] }] });
+  client.openProjectSocket = async () => ({});
+  client.closeProjectSocket = async () => {};
+  client.joinDocument = async () => ({ docId: 'd1', content: 'The new cat sat. The new dog.', lines: [], version: 7, type: 'sharejs-text-ot', ranges: {} });
+  const sent: any[] = [];
+  client.socketRpc = async (_s: object, name: string, args: any[]) => { sent.push([name, args[1]]); return []; };
+
+  const res = await client.suggestChanges('p', '/main.tex', [
+    { before: 'The ', deleted: 'old', inserted: 'new', after: ' dog', hint: 21 },
+    { before: 'cat ', deleted: 'sat', inserted: 'ran', after: '.', hint: 12 },
+    { before: 'zzz', deleted: 'a', inserted: 'b', after: 'zzz', hint: 0 }
+  ]);
+
+  assert.deepEqual(res, ['done', 'not-pushed', 'not-found']);
+  assert.equal(sent.length, 2);
+  assert.deepEqual(sent[0][1].op, [{ p: 21, d: 'new' }, { p: 21, i: 'old' }], 'the nearest "The new" is the second one');
+  assert.equal(sent[0][1].meta, undefined);
+  assert.deepEqual(sent[1][1].op, [{ p: 21, d: 'old' }, { p: 21, i: 'new' }]);
+  assert.match(sent[1][1].meta.tc, /^[0-9a-f]{18}$/);
+  assert.deepEqual([sent[0][1].v, sent[1][1].v], [7, 8]);
+});
+
+test('suggestChanges refuses history-ot docs', async () => {
+  const client: any = new OverleafClient({ cookies: {}, csrf: 'c' });
+  client.getProjectInfo = async () => ({ rootFolder: [{ docs: [{ _id: 'd1', name: 'main.tex' }], folders: [] }] });
+  client.openProjectSocket = async () => ({});
+  let closed = false;
+  client.closeProjectSocket = async () => { closed = true; };
+  client.joinDocument = async () => ({ docId: 'd1', content: 'x', lines: ['x'], version: 1, type: 'history-ot', ranges: {} });
+  await assert.rejects(client.suggestChanges('p', 'main.tex', []), /history-ot/);
+  assert.equal(closed, true);
+});

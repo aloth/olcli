@@ -42,6 +42,20 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
 const USER_AGENT = `olcli/${pkg.version}`;
 
+/** Offset of the occurrence of `needle` nearest to `hint`, or -1. */
+function nearestIndex(text: string, needle: string, hint: number): number {
+  let best = -1;
+  for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + 1)) {
+    if (best === -1 || Math.abs(i - hint) < Math.abs(best - hint)) best = i;
+  }
+  return best;
+}
+
+/** The editor names tracked changes by an 18-hex-digit seed plus a counter, and sends the seed as `meta.tc`. */
+function trackChangesSeed(): string {
+  return Array.from({ length: 18 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+}
+
 const DEFAULT_BASE_URL = 'https://www.overleaf.com';
 const RESOURCE_PATH_FAILURE_HINT = ' (Perhaps the resource file you specified does not exist in the project?)';
 
@@ -231,6 +245,24 @@ export interface AcceptancePlan {
 }
 
 export { RejectConflictError };
+
+/**
+ * An edit that was made outside Overleaf and pushed as plain text (through
+ * git, `olcli push` or a sync): `deleted` was replaced by `inserted` between
+ * `before` and `after`. `suggestChanges` turns it into a tracked change.
+ */
+export interface SuggestionEdit {
+  before: string;
+  after: string;
+  deleted: string;
+  inserted: string;
+  /** About where the edit is in the doc; the match nearest to it wins. */
+  hint: number;
+}
+
+/** done: now a tracked change. not-pushed: Overleaf still has the old text. not-found: neither text is there. */
+export type SuggestionResult = 'done' | 'not-pushed' | 'not-found';
+
 
 export interface AddCommentOptions {
   filePath: string;
@@ -2744,6 +2776,57 @@ export class OverleafClient {
       throw new Error(`Overleaf did not reject: ${remaining.map(change => change.id).join(', ')}`);
     }
     return plan;
+  }
+
+  /**
+   * Turn edits that already reached Overleaf as plain text into tracked
+   * changes, as if they had been typed in Reviewing mode: each edit is undone
+   * without tracking and then redone with tracking (the update's `meta.tc`).
+   * The text ends up as it was, so a git clone that pushed the edit has
+   * nothing new to pull. An edit whose new text is not in the doc is left
+   * alone and reported. One socket, one join; sharejs-text-ot docs only.
+   */
+  async suggestChanges(projectId: string, filePath: string, edits: SuggestionEdit[]): Promise<SuggestionResult[]> {
+    const docs = this.collectProjectDocs(await this.getProjectInfo(projectId));
+    const wanted = filePath.replace(/^\/+/, '');
+    const doc = docs.find(item => item.path.replace(/^\/+/, '') === wanted);
+    if (!doc) {
+      throw new Error(`Doc not found: ${filePath}`);
+    }
+
+    const session = await this.openProjectSocket(projectId);
+    try {
+      const joinedDoc = await this.joinDocument(session, doc.id);
+      if (joinedDoc.type !== 'sharejs-text-ot') {
+        throw new Error(`${doc.path}: turning edits into tracked changes is not supported for history-ot docs yet`);
+      }
+      const content = joinedDoc.content;
+      let version = joinedDoc.version;
+      const send = async (op: ShareJsTextOp[], tc?: string) => {
+        await this.socketRpc(session, 'applyOtUpdate', [doc.id, { doc: doc.id, op, v: version, ...(tc ? { meta: { tc } } : {}) }]);
+        version++;
+      };
+
+      const results: SuggestionResult[] = [];
+      for (const edit of edits) {
+        const from = edit.hint - edit.before.length;
+        const at = edit.inserted === edit.deleted ? -1 : nearestIndex(content, edit.before + edit.inserted + edit.after, from);
+        if (at === -1) {
+          results.push(nearestIndex(content, edit.before + edit.deleted + edit.after, from) === -1 ? 'not-found' : 'not-pushed');
+          continue;
+        }
+        const p = at + edit.before.length;
+        // Each edit leaves the text as it found it, so the offsets of the next edits stay valid.
+        const undo: ShareJsTextOp[] = [...(edit.inserted ? [{ p, d: edit.inserted }] : []), ...(edit.deleted ? [{ p, i: edit.deleted }] : [])];
+        const redo: ShareJsTextOp[] = [...(edit.deleted ? [{ p, d: edit.deleted }] : []), ...(edit.inserted ? [{ p, i: edit.inserted }] : [])];
+        await send(undo);
+        await send(redo, trackChangesSeed());
+        results.push('done');
+      }
+      return results;
+    } finally {
+      await this.closeProjectSocket(session);
+    }
   }
 
   async resolveComment(projectId: string, threadId: string): Promise<ProjectComment> {
