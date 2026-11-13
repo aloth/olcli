@@ -202,3 +202,10 @@ test('not found error explains premium only when the project has no tracked chan
   const some = reviewClient('foo quux baz', replaced);
   await assert.rejects(some.client.acceptTrackedChanges('p', ['x']), (err: Error) => /not found: x$/.test(err.message));
 });
+
+test('the package entry exports the tracked-change API', async () => {
+  const entry = await import('../src/index.js');
+  assert.equal(entry.RejectConflictError, RejectConflictError);
+  const change: import('../src/index.js').TrackedChange | undefined = undefined;
+  assert.equal(change, undefined);
+});

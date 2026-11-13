@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Tracked-change types in the package entry** - `TrackedChange`, `ProjectReview`, `ListTrackedChangesOptions`, the acceptance and rejection plan types, `TrackedChangeKind`, `TrackedChangeAuthor`, `ShareJsTextOp` and `RejectConflictError` are exported from `@aloth/olcli`, so code that uses `listReview`, `listTrackedChanges` or `rejectTrackedChanges` as a library can name what they return and catch the conflict error
+
 ## [0.16.2] - 2026-11-11
 
 ### Fixed
