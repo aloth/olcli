@@ -33,6 +33,8 @@ export {
   DEFAULT_COMMENT_CONCURRENCY,
   MAX_COMMENT_CONCURRENCY,
   type AddCommentOptions,
+  type SuggestionEdit,
+  type SuggestionResult,
   type Credentials,
   type SessionCookiePair,
   // Type aliases

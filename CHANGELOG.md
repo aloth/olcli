@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Turn pushed edits into tracked changes** - `suggestChanges(projectId, path, edits)` makes edits that reached Overleaf as plain text, through git, `olcli push` or a sync, show up as tracked changes, as if they had been typed in Reviewing mode. Each edit is given as the old and new text with some text around it; olcli finds the new text, undoes the edit without tracking and redoes it with tracking (`meta.tc` on the update, as the editor sends it). The text ends up as it was, so a git clone that pushed the edit has nothing new to pull. An edit whose new text is not on Overleaf yet is reported as `not-pushed` and left alone. sharejs-text-ot docs only; history-ot docs are refused
+
 ## [0.16.2] - 2026-11-11
 
 ### Fixed
