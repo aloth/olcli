@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Accept tracked changes of one doc with a single request** - `acceptTrackedChangesInDoc(projectId, docId, ids)` sends just the editor's accept request. `acceptTrackedChanges` reads the whole project before and after to resolve the ids and check the result, which is right for the CLI but costs two passes over every doc; an editor integration that already holds the changes and re-reads the project after every write can skip both. `acceptTrackedChanges` now uses it for each doc, so the request is built in one place
+
 ## [0.16.2] - 2026-11-11
 
 ### Fixed

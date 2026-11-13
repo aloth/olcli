@@ -2601,16 +2601,7 @@ export class OverleafClient {
     const byDoc = new Map<string, TrackedChange[]>();
     for (const change of selected) byDoc.set(change.docId, [...(byDoc.get(change.docId) ?? []), change]);
     for (const [docId, changes] of byDoc) {
-      const response = await this.httpRequest(`${this.baseUrl}/project/${projectId}/doc/${docId}/changes/accept`, {
-        method: 'POST',
-        headers: this.getHeaders(true),
-        body: JSON.stringify({ change_ids: changes.map(change => change.id) }),
-        expect: 'text'
-      });
-      if (!response.ok) {
-        throw httpError(`Failed to accept tracked changes in ${changes[0].path}`, response.status);
-      }
-      this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+      await this.acceptTrackedChangesInDoc(projectId, docId, changes.map(change => change.id), changes[0].path);
     }
 
     const after = await this.listTrackedChanges(projectId);
@@ -2619,6 +2610,25 @@ export class OverleafClient {
       throw new Error(`Overleaf did not accept: ${remaining.map(change => change.id).join(', ')}`);
     }
     return selected;
+  }
+
+  /**
+   * Accept tracked changes of one doc with a single request, the editor's
+   * route, without listing the project before or after. For callers that
+   * already hold the changes and their doc id and re-read the project anyway;
+   * `acceptTrackedChanges` resolves ids and checks the result for you.
+   */
+  async acceptTrackedChangesInDoc(projectId: string, docId: string, ids: string[], label = docId): Promise<void> {
+    const response = await this.httpRequest(`${this.baseUrl}/project/${projectId}/doc/${docId}/changes/accept`, {
+      method: 'POST',
+      headers: this.getHeaders(true),
+      body: JSON.stringify({ change_ids: ids }),
+      expect: 'text'
+    });
+    if (!response.ok) {
+      throw httpError(`Failed to accept tracked changes in ${label}`, response.status);
+    }
+    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
   }
 
   private selectTrackedChanges(all: TrackedChange[], ids: string[]): TrackedChange[] {
