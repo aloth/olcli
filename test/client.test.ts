@@ -360,3 +360,30 @@ test('refusals happen before any write request', async () => {
     assert.deepEqual(writes(requests), []);
   });
 });
+
+test('httpRequest retries 429 (honoring Retry-After), gives up after 5 retries, and can be told not to retry', async () => {
+  const cases = [
+    { failures: 2, options: {}, status: 200, calls: 3 },
+    { failures: 99, options: {}, status: 429, calls: 6 },
+    { failures: 99, options: { retryOn429: false }, status: 429, calls: 1 }
+  ];
+  for (const c of cases) {
+    let calls = 0;
+    const server = createServer((_req, res) => {
+      calls++;
+      const limited = calls <= c.failures;
+      res.writeHead(limited ? 429 : 200, { 'Content-Type': 'application/json', ...(limited ? { 'Retry-After': '0' } : {}) });
+      res.end('{}');
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const { port } = server.address() as { port: number };
+      const client = new OverleafClient({ cookies: { session: 's' }, csrf: 'c', baseUrl: `http://127.0.0.1:${port}` });
+      const res = await (client as any).httpRequest(`http://127.0.0.1:${port}/x`, { expect: 'json', ...c.options });
+      assert.equal(res.status, c.status);
+      assert.equal(calls, c.calls);
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  }
+});
