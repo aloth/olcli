@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **The text around a tracked change, on request** - `listTrackedChanges` and `listReview` take `surroundingChars`, and each change then carries `before` and `after`: up to that many characters of the visible text right before the change and right after it (after the inserted text for an insert). `position` only fits Overleaf's current copy of the doc; a tool that shows tracked changes in a local copy that was edited since, such as a git clone, needs some surrounding text to find each change again. Off by default, so the output of `olcli changes` does not change
+
 ## [0.16.2] - 2026-11-11
 
 ### Fixed
