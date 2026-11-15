@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { OverleafClient, resolveCommentConcurrency } from '../src/client.js';
+import { MAX_RETRY_AFTER_MS, OverleafClient, resolveCommentConcurrency, retryDelayMs } from '../src/client.js';
 
 interface CapturedRequest {
   method?: string;
@@ -385,5 +385,45 @@ test('httpRequest retries 429 (honoring Retry-After), gives up after 5 retries, 
     } finally {
       await new Promise(resolve => server.close(resolve));
     }
+  }
+});
+
+test('a 429 with Retry-After: 3600 waits at most 60 seconds, not an hour', async () => {
+  assert.equal(MAX_RETRY_AFTER_MS, 60_000);
+  assert.equal(retryDelayMs('3600', 0), 60_000);
+  assert.equal(retryDelayMs('61', 0), 60_000);
+  assert.equal(retryDelayMs('60', 0), 60_000);
+  assert.equal(retryDelayMs('2', 0), 2000);
+  assert.equal(retryDelayMs('0', 3), 0);
+  // Missing, non-numeric or negative values fall back to the exponential backoff.
+  for (const value of [undefined, '', 'soon', '-5']) {
+    assert.equal(retryDelayMs(value, 2, () => 0.5), 4000);
+  }
+
+  // End to end: the server asks for an hour, the client waits no longer than the cap.
+  let calls = 0;
+  const server = createServer((_req, res) => {
+    calls++;
+    res.writeHead(calls === 1 ? 429 : 200, { 'Content-Type': 'application/json', ...(calls === 1 ? { 'Retry-After': '3600' } : {}) });
+    res.end('{}');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const realSetTimeout = globalThis.setTimeout;
+  const waits: number[] = [];
+  globalThis.setTimeout = ((fn: () => void, ms?: number) => {
+    waits.push(ms ?? 0);
+    return realSetTimeout(fn, 0);
+  }) as typeof setTimeout;
+  try {
+    const { port } = server.address() as { port: number };
+    const client = new OverleafClient({ cookies: { session: 's' }, csrf: 'c', baseUrl: `http://127.0.0.1:${port}` });
+    const res = await (client as any).httpRequest(`http://127.0.0.1:${port}/x`, { expect: 'json' });
+    assert.equal(res.status, 200);
+    assert.equal(calls, 2);
+    assert.ok(waits.includes(MAX_RETRY_AFTER_MS), `expected a ${MAX_RETRY_AFTER_MS} ms wait, got ${waits.join(', ')}`);
+    assert.ok(waits.every(ms => ms <= MAX_RETRY_AFTER_MS), `no wait may exceed the cap, got ${waits.join(', ')}`);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    await new Promise(resolve => server.close(resolve));
   }
 });
