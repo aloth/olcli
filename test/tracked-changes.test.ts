@@ -104,6 +104,29 @@ test('listReview returns comments and tracked changes from one pass with locatio
   ]);
 });
 
+test('surroundingChars returns the visible text around each change, and nothing by default', async () => {
+  const client: any = new OverleafClient({ cookies: { session: 's' }, csrf: 'c' });
+  client.getProjectInfo = async () => ({ rootFolder: [{ docs: [{ _id: 'd1', name: 'main.tex' }, { _id: 'd2', name: 'a.tex' }], folders: [] }] });
+  client.getCommentThreads = async () => ({});
+  client.getChangesUsers = async () => [];
+  client.openProjectSocket = async () => ({});
+  client.closeProjectSocket = async () => {};
+  client.joinDocument = async (_s: object, docId: string) => docId === 'd1'
+    ? { docId, content: 'line one\nfoo quux baz', lines: [], version: 3, type: 'sharejs-text-ot',
+      ranges: { changes: [{ id: 'c1', op: { i: 'quux', p: 13 }, metadata: {} }, { id: 'c2', op: { d: 'gone', p: 4 }, metadata: {} }] } }
+    : { docId, content: 'x', lines: ['x'], version: 1, type: 'history-ot',
+      ranges: { content: 'xyz', trackedChanges: [{ range: { pos: 1, length: 1 }, tracking: { type: 'delete', userId: 'u9' } }] } };
+
+  const around = (await client.listReview('p', { surroundingChars: 5 })).changes.map((c: any) => [c.path, c.text, c.before, c.after]);
+  assert.deepEqual(around, [
+    ['a.tex', 'y', 'x', 'z'],
+    ['main.tex', 'gone', 'line', ' one\n'],
+    ['main.tex', 'quux', '\nfoo ', ' baz']
+  ]);
+  const plain = (await client.listTrackedChanges('p')).map((c: any) => [c.before, c.after]);
+  assert.deepEqual(plain, [[undefined, undefined], [undefined, undefined], [undefined, undefined]]);
+});
+
 test('normalizeJoinedDocument decodes UTF-8 in tracked change texts', () => {
   const client: any = new OverleafClient({ cookies: {}, csrf: 'c' });
   const enc = (s: string) => Buffer.from(s, 'utf-8').toString('binary');
