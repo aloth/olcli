@@ -33,11 +33,26 @@ export {
   DEFAULT_COMMENT_CONCURRENCY,
   MAX_COMMENT_CONCURRENCY,
   type AddCommentOptions,
+  type TrackedChange,
+  type ListTrackedChangesOptions,
+  type ProjectReview,
+  type RejectionPlan,
+  type RejectionDocPlan,
+  type AcceptancePlan,
+  type AcceptanceDocPlan,
+  RejectConflictError,
   type Credentials,
   type SessionCookiePair,
   // Type aliases
   type CommentStatus,
 } from './client.js';
+
+// Tracked changes: kinds, authors and the ShareJS op format
+export {
+  type TrackedChangeKind,
+  type TrackedChangeAuthor,
+  type ShareJsTextOp
+} from './tracked-changes.js';
 
 // Configuration utilities
 export {

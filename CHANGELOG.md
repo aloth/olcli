@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Tracked-change types in the package entry** - `TrackedChange`, `ProjectReview`, `ListTrackedChangesOptions`, the acceptance and rejection plan types, `TrackedChangeKind`, `TrackedChangeAuthor`, `ShareJsTextOp` and `RejectConflictError` are exported from `@aloth/olcli`, so code that uses `listReview`, `listTrackedChanges` or `rejectTrackedChanges` as a library can name what they return and catch the conflict error
+- **Accept tracked changes of one doc with a single request** - `acceptTrackedChangesInDoc(projectId, docId, ids)` sends just the editor's accept request. `acceptTrackedChanges` reads the whole project before and after to resolve the ids and check the result, which is right for the CLI but costs two passes over every doc; an editor integration that already holds the changes and re-reads the project after every write can skip both. `acceptTrackedChanges` now uses it for each doc, so the request is built in one place
+- **The text around a tracked change, on request** - `listTrackedChanges` and `listReview` take `surroundingChars`, and each change then carries `before` and `after`: up to that many characters of the visible text right before the change and right after it (after the inserted text for an insert). `position` only fits Overleaf's current copy of the doc; a tool that shows tracked changes in a local copy that was edited since, such as a git clone, needs some surrounding text to find each change again. Off by default, so the output of `olcli changes` does not change
+
 ### Fixed
 - **Requests rate limited by Overleaf (HTTP 429) are retried** - Overleaf answers a burst of requests with 429 before doing anything, and its limit lasts about 25 seconds, so commands that send several requests in a row (adding a comment, then reading the threads back) failed with "Overleaf is rate limiting requests" although waiting a little would have worked. A 429 is now retried up to 5 times after 1, 2, 4, 8 and 16 seconds, with some jitter so parallel requests do not retry in step, or after `Retry-After` when Overleaf sends one, capped at 60 seconds. The extra sockets of the doc-joining pool still give up at once, so a rate-limited pool shrinks right away instead of waiting. `--verbose` logs each retry
 

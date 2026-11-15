@@ -155,6 +155,8 @@ export type CommentStatus = 'all' | 'open' | 'resolved';
 export interface ListCommentsOptions {
   status?: CommentStatus;
   contextLines?: number;
+  /** For `listReview`: characters of text around each tracked change, as in `ListTrackedChangesOptions`. */
+  surroundingChars?: number;
   /** Sockets used to join docs in parallel (1-8). Defaults to OLCLI_CONCURRENCY, else 4. */
   concurrency?: number;
 }
@@ -192,10 +194,20 @@ export interface TrackedChange {
   author: TrackedChangeAuthor;
   timestamp?: string;
   context?: CommentContext;
+  /**
+   * Up to `surroundingChars` characters of the visible text right before and
+   * right after the change (after the inserted text for an insert). Only set
+   * when asked for; enough to find the change again in a copy of the doc that
+   * was edited since, where `position` no longer fits.
+   */
+  before?: string;
+  after?: string;
 }
 
 export interface ListTrackedChangesOptions {
   contextLines?: number;
+  /** Characters of text to return around each change as `before`/`after` (0, the default, returns none). */
+  surroundingChars?: number;
   /** Sockets used to join docs in parallel (1-8). Defaults to OLCLI_CONCURRENCY, else 4. */
   concurrency?: number;
 }
@@ -2461,7 +2473,7 @@ export class OverleafClient {
     const joinedDocs = await this.joinDocuments(projectId, docs, resolveCommentConcurrency(options.concurrency));
     return {
       comments: this.commentsFromDocs(docs, joinedDocs, threads, options.status || 'all', contextLines),
-      changes: await this.changesFromDocs(projectId, projectInfo, docs, joinedDocs, contextLines)
+      changes: await this.changesFromDocs(projectId, projectInfo, docs, joinedDocs, contextLines, options.surroundingChars)
     };
   }
 
@@ -2567,7 +2579,7 @@ export class OverleafClient {
     const projectInfo = await this.getProjectInfo(projectId);
     const docs = this.collectProjectDocs(projectInfo);
     const joinedDocs = await this.joinDocuments(projectId, docs, resolveCommentConcurrency(options.concurrency));
-    return this.changesFromDocs(projectId, projectInfo, docs, joinedDocs, options.contextLines || 0);
+    return this.changesFromDocs(projectId, projectInfo, docs, joinedDocs, options.contextLines || 0, options.surroundingChars);
   }
 
   private async changesFromDocs(
@@ -2575,7 +2587,8 @@ export class OverleafClient {
     projectInfo: ProjectInfo,
     docs: ProjectDoc[],
     joinedDocs: JoinedDocument[],
-    contextLines: number
+    contextLines: number,
+    surroundingChars = 0
   ): Promise<TrackedChange[]> {
     const perDoc = joinedDocs.map(doc => this.docTrackedChanges(doc));
     const anyChanges = perDoc.some(doc => doc.changes.length > 0);
@@ -2586,6 +2599,7 @@ export class OverleafClient {
       const { changes, visibleContent } = perDoc[index];
       for (const change of changes) {
         const location = this.positionToLineColumn(visibleContent, change.position);
+        const end = change.kind === 'insert' ? change.position + change.text.length : change.position;
         result.push({
           id: change.id,
           docId: doc.id,
@@ -2597,7 +2611,11 @@ export class OverleafClient {
           text: change.text,
           author: describeAuthor(change.userId, users),
           ...(change.timestamp ? { timestamp: change.timestamp } : {}),
-          ...(contextLines > 0 ? { context: this.buildCommentContext(visibleContent, location.line, contextLines) } : {})
+          ...(contextLines > 0 ? { context: this.buildCommentContext(visibleContent, location.line, contextLines) } : {}),
+          ...(surroundingChars > 0 ? {
+            before: visibleContent.slice(Math.max(0, change.position - surroundingChars), change.position),
+            after: visibleContent.slice(end, end + surroundingChars)
+          } : {})
         });
       }
     }
@@ -2630,16 +2648,7 @@ export class OverleafClient {
     const byDoc = new Map<string, TrackedChange[]>();
     for (const change of selected) byDoc.set(change.docId, [...(byDoc.get(change.docId) ?? []), change]);
     for (const [docId, changes] of byDoc) {
-      const response = await this.httpRequest(`${this.baseUrl}/project/${projectId}/doc/${docId}/changes/accept`, {
-        method: 'POST',
-        headers: this.getHeaders(true),
-        body: JSON.stringify({ change_ids: changes.map(change => change.id) }),
-        expect: 'text'
-      });
-      if (!response.ok) {
-        throw httpError(`Failed to accept tracked changes in ${changes[0].path}`, response.status);
-      }
-      this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+      await this.acceptTrackedChangesInDoc(projectId, docId, changes.map(change => change.id), changes[0].path);
     }
 
     const after = await this.listTrackedChanges(projectId);
@@ -2648,6 +2657,25 @@ export class OverleafClient {
       throw new Error(`Overleaf did not accept: ${remaining.map(change => change.id).join(', ')}`);
     }
     return selected;
+  }
+
+  /**
+   * Accept tracked changes of one doc with a single request, the editor's
+   * route, without listing the project before or after. For callers that
+   * already hold the changes and their doc id and re-read the project anyway;
+   * `acceptTrackedChanges` resolves ids and checks the result for you.
+   */
+  async acceptTrackedChangesInDoc(projectId: string, docId: string, ids: string[], label = docId): Promise<void> {
+    const response = await this.httpRequest(`${this.baseUrl}/project/${projectId}/doc/${docId}/changes/accept`, {
+      method: 'POST',
+      headers: this.getHeaders(true),
+      body: JSON.stringify({ change_ids: ids }),
+      expect: 'text'
+    });
+    if (!response.ok) {
+      throw httpError(`Failed to accept tracked changes in ${label}`, response.status);
+    }
+    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
   }
 
   private selectTrackedChanges(all: TrackedChange[], ids: string[]): TrackedChange[] {
