@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - **Tracked-change types in the package entry** - `TrackedChange`, `ProjectReview`, `ListTrackedChangesOptions`, the acceptance and rejection plan types, `TrackedChangeKind`, `TrackedChangeAuthor`, `ShareJsTextOp` and `RejectConflictError` are exported from `@aloth/olcli`, so code that uses `listReview`, `listTrackedChanges` or `rejectTrackedChanges` as a library can name what they return and catch the conflict error
+- **Accept tracked changes of one doc with a single request** - `acceptTrackedChangesInDoc(projectId, docId, ids)` sends just the editor's accept request. `acceptTrackedChanges` reads the whole project before and after to resolve the ids and check the result, which is right for the CLI but costs two passes over every doc; an editor integration that already holds the changes and re-reads the project after every write can skip both. `acceptTrackedChanges` now uses it for each doc, so the request is built in one place
 
 ## [0.16.2] - 2026-11-11
 
