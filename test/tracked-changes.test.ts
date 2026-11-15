@@ -174,6 +174,15 @@ test('acceptTrackedChanges posts the ids per doc and verifies they are gone', as
   assert.deepEqual(state.posts[0].body.change_ids.sort(), ['d', 'i']);
 });
 
+test('acceptTrackedChangesInDoc posts once and reads nothing', async () => {
+  const { client, state } = reviewClient('foo quux baz', replaced);
+  let listed = 0;
+  client.joinDocument = async () => { listed++; throw new Error('must not list'); };
+  await client.acceptTrackedChangesInDoc('p', 'd1', ['i']);
+  assert.equal(listed, 0);
+  assert.deepEqual(state.posts.map((x: any) => [x.url.replace(/^.*\/project/, '/project'), x.body]), [['/project/p/doc/d1/changes/accept', { change_ids: ['i'] }]]);
+});
+
 test('acceptTrackedChanges sends nothing when an id is unknown', async () => {
   const { client, state } = reviewClient('foo quux baz', replaced);
   await assert.rejects(client.acceptTrackedChanges('p', ['i', 'nope']), /not found: nope/);
@@ -224,4 +233,11 @@ test('not found error explains premium only when the project has no tracked chan
   await assert.rejects(empty.client.acceptTrackedChanges('p', ['x']), /no tracked changes; track changes requires the project owner to have an Overleaf premium plan/);
   const some = reviewClient('foo quux baz', replaced);
   await assert.rejects(some.client.acceptTrackedChanges('p', ['x']), (err: Error) => /not found: x$/.test(err.message));
+});
+
+test('the package entry exports the tracked-change API', async () => {
+  const entry = await import('../src/index.js');
+  assert.equal(entry.RejectConflictError, RejectConflictError);
+  const change: import('../src/index.js').TrackedChange | undefined = undefined;
+  assert.equal(change, undefined);
 });

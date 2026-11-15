@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Tracked-change types in the package entry** - `TrackedChange`, `ProjectReview`, `ListTrackedChangesOptions`, the acceptance and rejection plan types, `TrackedChangeKind`, `TrackedChangeAuthor`, `ShareJsTextOp` and `RejectConflictError` are exported from `@aloth/olcli`, so code that uses `listReview`, `listTrackedChanges` or `rejectTrackedChanges` as a library can name what they return and catch the conflict error
+- **Accept tracked changes of one doc with a single request** - `acceptTrackedChangesInDoc(projectId, docId, ids)` sends just the editor's accept request. `acceptTrackedChanges` reads the whole project before and after to resolve the ids and check the result, which is right for the CLI but costs two passes over every doc; an editor integration that already holds the changes and re-reads the project after every write can skip both. `acceptTrackedChanges` now uses it for each doc, so the request is built in one place
 - **The text around a tracked change, on request** - `listTrackedChanges` and `listReview` take `surroundingChars`, and each change then carries `before` and `after`: up to that many characters of the visible text right before the change and right after it (after the inserted text for an insert). `position` only fits Overleaf's current copy of the doc; a tool that shows tracked changes in a local copy that was edited since, such as a git clone, needs some surrounding text to find each change again. Off by default, so the output of `olcli changes` does not change
 
 ## [0.16.2] - 2026-11-11
