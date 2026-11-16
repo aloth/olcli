@@ -8,9 +8,11 @@ import {
   parseHistoryOtChanges,
   parseShareJsChanges,
   planRejection,
-  RejectConflictError
+  RejectConflictError,
+  nearestIndex,
+  generateIdSeed
 } from '../src/tracked-changes.js';
-import { OverleafClient } from '../src/client.js';
+import { OverleafClient, SuggestionPermissionError } from '../src/client.js';
 
 test('parseShareJsChanges reads inserts and deletes and skips malformed entries', () => {
   const changes = parseShareJsChanges({
@@ -235,14 +237,46 @@ test('not found error explains premium only when the project has no tracked chan
   await assert.rejects(some.client.acceptTrackedChanges('p', ['x']), (err: Error) => /not found: x$/.test(err.message));
 });
 
-test('suggestChanges undoes a pushed edit untracked, redoes it tracked, and leaves unpushed edits alone', async () => {
+/**
+ * A client whose socket is a small stand-in for Overleaf: it applies the ops
+ * to the text and, for an update with `meta.tc`, records a tracked delete
+ * and insert the way the ranges tracker names them (seed plus counter).
+ * `track: false` drops the tracking, like a server that ignored `meta.tc`.
+ */
+function suggestionClient(content: string, options: { ranges?: any; track?: boolean; permissionsLevel?: string; rejectUntracked?: 'error' | 'no-ack' } = {}) {
   const client: any = new OverleafClient({ cookies: {}, csrf: 'c' });
+  const state = { content, version: 7, ranges: options.ranges ?? { changes: [] as any[] }, sent: [] as any[], joins: 0 };
+  client.suggestionVerifyDelaysMs = [0, 0];
   client.getProjectInfo = async () => ({ rootFolder: [{ docs: [{ _id: 'd1', name: 'main.tex' }], folders: [] }] });
-  client.openProjectSocket = async () => ({});
+  client.openProjectSocket = async () => (options.permissionsLevel ? { permissionsLevel: options.permissionsLevel } : {});
   client.closeProjectSocket = async () => {};
-  client.joinDocument = async () => ({ docId: 'd1', content: 'The new cat sat. The new dog.', lines: [], version: 7, type: 'sharejs-text-ot', ranges: {} });
-  const sent: any[] = [];
-  client.socketRpc = async (_s: object, name: string, args: any[]) => { sent.push([name, args[1]]); return []; };
+  client.joinDocument = async () => {
+    state.joins++;
+    return { docId: 'd1', content: state.content, lines: [], version: state.version, type: 'sharejs-text-ot', ranges: JSON.parse(JSON.stringify(state.ranges)) };
+  };
+  client.socketRpc = async (_s: object, name: string, args: any[]) => {
+    const update = args[1];
+    if (!update.meta?.tc && options.rejectUntracked === 'error') throw new Error(`${name} failed: not authorized`);
+    if (!update.meta?.tc && options.rejectUntracked === 'no-ack') throw new Error(`${name} did not return an acknowledgement`);
+    state.sent.push([name, update]);
+    state.content = applyTextOps(state.content, update.op);
+    if (update.meta?.tc && options.track !== false) {
+      let counter = 0;
+      const id = () => `${update.meta.tc}${(++counter).toString(16).padStart(6, '0')}`;
+      const del = update.op.find((op: any) => typeof op.d === 'string');
+      const ins = update.op.find((op: any) => typeof op.i === 'string');
+      if (del) state.ranges.changes.push({ id: id(), op: { d: del.d, p: del.p + (ins ? ins.i.length : 0) }, metadata: { user_id: 'u1' } });
+      if (ins) state.ranges.changes.push({ id: id(), op: { i: ins.i, p: ins.p }, metadata: { user_id: 'u1' } });
+    }
+    state.version++;
+    return [];
+  };
+  return { client, state };
+}
+
+test('suggestChanges undoes a pushed edit untracked, redoes it tracked, and leaves unpushed edits alone', async () => {
+  const { client, state } = suggestionClient('The new cat sat. The new dog.');
+  const sent = state.sent;
 
   const res = await client.suggestChanges('p', '/main.tex', [
     { before: 'The ', deleted: 'old', inserted: 'new', after: ' dog', hint: 21 },
@@ -257,6 +291,96 @@ test('suggestChanges undoes a pushed edit untracked, redoes it tracked, and leav
   assert.deepEqual(sent[1][1].op, [{ p: 21, d: 'old' }, { p: 21, i: 'new' }]);
   assert.match(sent[1][1].meta.tc, /^[0-9a-f]{18}$/);
   assert.deepEqual([sent[0][1].v, sent[1][1].v], [7, 8]);
+  assert.equal(state.content, 'The new cat sat. The new dog.');
+});
+
+test('suggestChanges: an edit with nothing to search for returns invalid instead of hanging', async () => {
+  const { client, state } = suggestionClient('alpha gamma delta');
+  const res = await Promise.race([
+    client.suggestChanges('p', 'main.tex', [
+      { before: '', deleted: 'gamma ', inserted: '', after: '', hint: 6 },
+      { before: '', deleted: '', inserted: '', after: '', hint: 0 }
+    ]),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('suggestChanges hung')), 2000))
+  ]);
+  assert.deepEqual(res, ['invalid', 'invalid']);
+  assert.equal(state.sent.length, 0);
+});
+
+test('nearestIndex returns -1 for an empty needle instead of looping', () => {
+  assert.equal(nearestIndex('abc', '', 3), -1);
+  assert.equal(nearestIndex('abcabc', 'bc', 4), 4);
+  assert.equal(nearestIndex('abc', 'x', 0), -1);
+});
+
+test('suggestChanges: the same edit twice is done, then already-tracked, and sent once', async () => {
+  const { client, state } = suggestionClient('alpha beta delta.');
+  const edit = { before: 'alpha ', deleted: 'gamma', inserted: 'beta', after: ' delta', hint: 6 };
+  assert.deepEqual(await client.suggestChanges('p', 'main.tex', [edit]), ['done']);
+  assert.deepEqual(await client.suggestChanges('p', 'main.tex', [edit]), ['already-tracked']);
+  assert.equal(state.sent.length, 2, 'one undo and one redo in total');
+  assert.deepEqual(state.ranges.changes.map((c: any) => c.op), [{ d: 'gamma', p: 10 }, { i: 'beta', p: 6 }], 'the delete is not doubled');
+  // In one call, a repeated edit is caught too.
+  const again = suggestionClient('alpha beta delta.');
+  assert.deepEqual(await again.client.suggestChanges('p', 'main.tex', [edit, edit]), ['done', 'already-tracked']);
+  assert.equal(again.state.sent.length, 2);
+});
+
+test('suggestChanges: a pure insert or delete that is already tracked is not sent again', async () => {
+  const ins = suggestionClient('a new b', { ranges: { changes: [{ id: 'x1', op: { i: 'new ', p: 2 }, metadata: {} }] } });
+  assert.deepEqual(await ins.client.suggestChanges('p', 'main.tex', [{ before: 'a ', deleted: '', inserted: 'new ', after: 'b', hint: 2 }]), ['already-tracked']);
+  const del = suggestionClient('a b', { ranges: { changes: [{ id: 'x2', op: { d: 'old ', p: 2 }, metadata: {} }] } });
+  assert.deepEqual(await del.client.suggestChanges('p', 'main.tex', [{ before: 'a ', deleted: 'old ', inserted: '', after: 'b', hint: 2 }]), ['already-tracked']);
+  assert.equal(ins.state.sent.length + del.state.sent.length, 0);
+});
+
+test('suggestChanges: reports not-tracked when the doc has no tracked change after writing', async () => {
+  const { client, state } = suggestionClient('alpha beta delta.', { track: false });
+  const res = await client.suggestChanges('p', 'main.tex', [{ before: 'alpha ', deleted: 'gamma', inserted: 'beta', after: ' delta', hint: 6 }]);
+  assert.deepEqual(res, ['not-tracked']);
+  assert.equal(state.sent.length, 2);
+  assert.equal(state.joins, 3, 'one join to plan, then one read-back per delay');
+  assert.equal(state.content, 'alpha beta delta.', 'the text is as before');
+});
+
+test('suggestChanges: review-only access is refused with a permission error before anything is sent', async () => {
+  const known = suggestionClient('alpha beta delta.', { permissionsLevel: 'review' });
+  await assert.rejects(
+    known.client.suggestChanges('p', 'main.tex', [{ before: 'alpha ', deleted: 'gamma', inserted: 'beta', after: ' delta', hint: 6 }]),
+    (err: Error) => err.name === 'SuggestionPermissionError' && /needs edit access/.test(err.message) && /review-only access cannot/.test(err.message)
+  );
+  assert.equal(known.state.sent.length, 0);
+  for (const mode of ['error', 'no-ack'] as const) {
+    const live = suggestionClient('alpha beta delta.', { rejectUntracked: mode });
+    await assert.rejects(
+      live.client.suggestChanges('p', 'main.tex', [{ before: 'alpha ', deleted: 'gamma', inserted: 'beta', after: ' delta', hint: 6 }]),
+      (err: Error) => err instanceof SuggestionPermissionError && /needs edit access/.test(err.message),
+      mode
+    );
+    assert.equal(live.state.sent.length, 0, `${mode}: no tracked redo after a refused undo`);
+  }
+});
+
+test('generateIdSeed: 18 hex digits, the first 8 are the current time in seconds', () => {
+  const seed = generateIdSeed();
+  assert.match(seed, /^[0-9a-f]{18}$/);
+  const seconds = parseInt(seed.slice(0, 8), 16);
+  assert.ok(Math.abs(seconds - Date.now() / 1000) < 5, `timestamp part ${seconds}`);
+  assert.equal(generateIdSeed(0x6a000000 * 1000, () => 0), '6a0000000000000000');
+  assert.equal(generateIdSeed(1000, () => 0.999999999), '00000001ffffff7ffe');
+});
+
+test('suggestChanges sends meta.tc with a timestamp seed', async () => {
+  const { client, state } = suggestionClient('alpha beta delta.');
+  await client.suggestChanges('p', 'main.tex', [{ before: 'alpha ', deleted: 'gamma', inserted: 'beta', after: ' delta', hint: 6 }]);
+  const tc = state.sent[1][1].meta.tc;
+  assert.ok(Math.abs(parseInt(tc.slice(0, 8), 16) - Date.now() / 1000) < 5);
+});
+
+test('suggestChanges: inserted equal to deleted is unchanged, not not-pushed', async () => {
+  const { client, state } = suggestionClient('alpha beta delta.');
+  assert.deepEqual(await client.suggestChanges('p', 'main.tex', [{ before: 'alpha ', deleted: 'beta', inserted: 'beta', after: ' delta', hint: 6 }]), ['unchanged']);
+  assert.equal(state.sent.length, 0);
 });
 
 test('suggestChanges refuses history-ot docs', async () => {

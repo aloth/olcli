@@ -22,6 +22,7 @@ Tools marked "asks first" change the Overleaf project. Before writing, the serve
 | `resolve_comment` | Mark a comment thread as resolved; asks first |
 | `accept_tracked_changes` | Accept tracked changes by id; sends nothing if any id is unknown; asks first |
 | `reject_tracked_changes` | Reject tracked changes by id; returns a diff preview and writes only with `apply: true`, after asking |
+| `suggest_changes` | Experimental. Turn edits that are already on Overleaf as plain text (pushed through git, `push_file` or a sync) into tracked changes collaborators can accept or reject, for projects with track changes; sharejs-text-ot documents only; returns one result per edit; asks first |
 | `delete_entity` | Delete a file or document by path; asks first |
 | `rename_entity` | Rename a file, document, or folder, or move it into another folder (`new_name` as a path, see below); asks first |
 | `rename_project` | Rename the project itself (not a file inside it); asks first |
@@ -31,6 +32,8 @@ Tools marked "asks first" change the Overleaf project. Before writing, the serve
 | `create_project` | Create a new blank or example project; asks first |
 
 > **Tracked changes need a premium project.** Track changes is an Overleaf premium feature: it is only available in projects whose owner has a premium plan, and invited collaborators can then use it regardless of their own plan. In other projects `list_comments` with `include_changes` returns no changes and `accept_tracked_changes`/`reject_tracked_changes` report the ids as not found. See the [Overleaf documentation](https://docs.overleaf.com/collaborating/track-changes).
+
+> **`suggest_changes` is experimental.** Each edit is undone without tracking and redone with tracking, so the text ends up the same, but collaborators who have the document open see the old text for a short moment (about 0.2 seconds). It needs edit access to the project: review-only access cannot send the untracked undo, and the tool then fails with an error that says so before writing anything. Only documents in the `sharejs-text-ot` format are supported; `history-ot` documents are refused. Results per edit: `done` (checked by reading the document again), `already-tracked`, `not-pushed`, `not-found`, `unchanged`, `invalid`, and `not-tracked` (sent, but no tracked change showed up afterwards).
 
 > **What `diff_project` compares.** The remote side is fetched fresh on every call, so the result describes the project as it is right now, which is what a later push would overwrite. It is not a comparison against the last pull: the manifest records remote paths, never remote contents, so there is no stored snapshot. Every response carries `remote_fetched_at` for that reason — a collaborator editing between the call and a push can still change the outcome. Patches are oriented `a/` = remote, `b/` = local, so a `+` line is content a push would upload. Pass `name_only` to get statuses without patch text.
 
@@ -58,12 +61,13 @@ The server also tells the client, in its MCP `instructions` and in the descripti
 | `resolve_comment` | The thread |
 | `accept_tracked_changes` | Each change as `path:line:column`, kind, author, and text, plus a diff of what becomes final: the text without the selected suggestions against the text after accepting them. Other tracked changes in the same document stay pending and are shown as not applied on both sides |
 | `reject_tracked_changes` with `apply: true` | Each change and the rejection diff. With `apply: false` (the default) it returns the preview and asks nothing |
+| `suggest_changes` | Per edit its location as `path:line:column` and the suggested deletion and insertion with the text around them, or why the edit is left alone (already tracked, not pushed, not found, unchanged, invalid). If no edit can become a suggestion, nothing is asked and nothing is written. Clients without elicitation get the preview only, since there is no olcli command for this yet |
 
 The dialog has one checkbox, "Confirm", which starts unchecked. Only accepting with the box checked writes. Declining, dismissing the dialog, submitting it unchecked, no answer within 10 minutes (or the client canceling the call sooner), or an error all write nothing, and the tool result tells the assistant that the change was not made and why.
 
 Long content is cut with an explicit note such as `... 12 more lines not shown`. Control characters, zero-width characters, and bidirectional formatting characters are shown as `\u{...}`, so text cannot look different from what it is.
 
-What you confirm is what gets written: `delete_entity` and `rename_entity` act on the entity shown in the dialog, `reject_tracked_changes` refuses to write if a document changed after the preview, and `accept_tracked_changes` refuses if a selected change no longer has the text shown.
+What you confirm is what gets written: `delete_entity` and `rename_entity` act on the entity shown in the dialog, `reject_tracked_changes` and `suggest_changes` refuse to write if a document changed after the preview, and `accept_tracked_changes` refuses if a selected change no longer has the text shown.
 
 Tools that only read never ask. `pull_project`, `download_file`, and `download_pdf` write local files but do not change the Overleaf project, and do not ask either. `plan_project_renames` never applies anything.
 

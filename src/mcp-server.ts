@@ -70,6 +70,7 @@ export const WRITE_TOOLS = [
   'resolve_comment',
   'accept_tracked_changes',
   'reject_tracked_changes',
+  'suggest_changes',
 ] as const;
 
 /** MCP `instructions`: sent to the client once, at initialization. */
@@ -102,8 +103,8 @@ interface CallContext {
 interface WritePreview {
   /** Dialog text: what will happen, in terms the user can check. */
   message: string;
-  /** The olcli command that performs the same write from a terminal. */
-  cliCommand: string;
+  /** The olcli command that performs the same write from a terminal; undefined when there is none. */
+  cliCommand?: string;
   /** Structured parts of the preview, returned to the agent when nothing is written. */
   data?: Record<string, unknown>;
   /** Performs the write. Called only after the user confirmed. */
@@ -257,8 +258,8 @@ export function createOlcliMcpServer(options: OlcliMcpServerOptions): McpServer 
       return jsonResult({
         applied: false,
         confirmation: 'unsupported',
-        message: outcomeMessage('unsupported'),
-        cli_command: prepared.cliCommand,
+        message: prepared.cliCommand === undefined ? outcomeMessage('unsupported_no_cli') : outcomeMessage('unsupported'),
+        ...(prepared.cliCommand === undefined ? {} : { cli_command: prepared.cliCommand }),
         opt_out_env: `${UNCONFIRMED_WRITES_ENV}=1`,
         preview: prepared.message,
         ...prepared.data,
@@ -687,6 +688,92 @@ export function createOlcliMcpServer(options: OlcliMcpServerOptions): McpServer 
         },
       );
     }
+  );
+
+  // -------------------------------------------------------------------------
+  // Tool: suggest_changes (experimental)
+  // -------------------------------------------------------------------------
+
+  const SUGGESTION_NOTES: Record<string, string> = {
+    suggest: 'becomes a suggestion',
+    'already-tracked': 'already a tracked change, left alone',
+    'not-pushed': 'Overleaf still has the old text, left alone',
+    'not-found': 'neither the old nor the new text is in the document, left alone',
+    unchanged: 'old and new text are the same, left alone',
+    invalid: 'before, inserted and after are all empty, so it cannot be found, left alone',
+  };
+
+  server.registerTool(
+    'suggest_changes',
+    {
+      description: `Experimental. Turn edits that are already on Overleaf as plain text (pushed through git, push_file or a sync) into tracked changes (suggestions) that collaborators can accept or reject, for projects with track changes. Each edit gives the old text (deleted), the new text (inserted) and some unchanged text right before and after it, so the new text can be found; hint is the approximate character offset of the edit and picks the nearest match. Olcli undoes each edit without tracking and redoes it with tracking, so the text ends up the same; collaborators with the document open see the old text for about 0.2 seconds. Only documents in the sharejs-text-ot format; history-ot documents are refused. Needs edit access to the project. Returns one result per edit: done, already-tracked, not-pushed, not-found, unchanged, invalid, or not-tracked (sent, but no tracked change showed up).${askNote}${CONTENT_NOTE}`,
+      inputSchema: {
+        project_id: z.string().describe('The Overleaf project ID'),
+        path: z.string().describe('Path of the document within the project (e.g. main.tex)'),
+        edits: z.array(z.object({
+          before: z.string().describe('Unchanged text right before the edit'),
+          deleted: z.string().describe('The old text that the edit replaced (empty for a pure insertion)'),
+          inserted: z.string().describe('The new text, as it is on Overleaf now (empty for a pure deletion)'),
+          after: z.string().describe('Unchanged text right after the edit'),
+          hint: z.number().int().min(0).optional().describe('Approximate character offset of the edit in the document; the nearest match wins'),
+        })).min(1).max(100).describe('The edits to turn into suggestions'),
+      },
+      annotations: WRITE(false, true),
+    },
+    async ({ project_id, path, edits }, extra) =>
+      gatedWrite(
+        extra,
+        async () => {
+          const client = await getClient();
+          const results = await client.suggestChanges(project_id, path, edits);
+          return { path, results: edits.map((edit, index) => ({ ...edit, result: results[index] })) };
+        },
+        async () => {
+          const client = await getClient();
+          const plan = await client.planSuggestions(project_id, path, edits);
+          const items = plan.edits.map((item, index) => ({ index: index + 1, outcome: item.outcome, line: item.line, column: item.column }));
+          const toSuggest = plan.edits.filter(item => item.outcome === 'suggest').length;
+          if (toSuggest === 0) {
+            return {
+              noWrite: {
+                applied: false,
+                message: 'None of the edits can become a suggestion, so nothing was asked and nothing was written.',
+                path: plan.path,
+                results: edits.map((edit, index) => ({ ...edit, result: plan.edits[index].outcome })),
+              },
+            };
+          }
+          const name = await projectName(client, project_id);
+          const lines = plan.edits.map((item, index) => {
+            const where = item.line !== undefined ? ` at ${inlineText(plan.path)}:${item.line}:${item.column}` : '';
+            const head = `${index + 1}.${where}: ${SUGGESTION_NOTES[item.outcome] ?? item.outcome}`;
+            if (item.outcome !== 'suggest') return head;
+            const parts = [head];
+            if (item.edit.deleted) parts.push(`   suggested deletion: ${quoteInline(item.edit.deleted)}`);
+            if (item.edit.inserted) parts.push(`   suggested insertion: ${quoteInline(item.edit.inserted)}`);
+            parts.push(`   between ${quoteInline(item.edit.before)} and ${quoteInline(item.edit.after)}`);
+            return parts.join('\n');
+          });
+          const message = [
+            `Turn ${countOf(toSuggest, 'edit')} in ${inlineText(plan.path)} into suggestions in Overleaf project ${projectLabel(project_id, name)} (experimental)`,
+            '',
+            'The text stays the same. Each edit is briefly undone and redone as a tracked change, so collaborators with the document open see the old text for about 0.2 seconds. Afterwards anyone can accept or reject the suggestions.',
+            '',
+            'Edits:',
+            lines.join('\n'),
+          ].join('\n');
+          return {
+            message,
+            // No CLI command does this yet, so a client without elicitation gets the preview only.
+            data: { path: plan.path, edits: items },
+            apply: async () => {
+              // Refuses to write if the doc moved since this preview.
+              const results = await client.suggestChanges(project_id, path, edits, { expectedVersion: plan.version });
+              return { path: plan.path, results: edits.map((edit, index) => ({ ...edit, result: results[index] })) };
+            },
+          };
+        },
+      )
   );
 
   // -------------------------------------------------------------------------

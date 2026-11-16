@@ -300,3 +300,105 @@ export function formatAuthor(author: TrackedChangeAuthor): string {
 export function renderRejectionDiff(path: string, before: string, after: string): string {
   return createTwoFilesPatch(`a/${path}`, `b/${path}`, before, after, undefined, undefined, { context: 2 });
 }
+
+/**
+ * An edit that was made outside Overleaf and pushed as plain text (through
+ * git, `olcli push` or a sync): `deleted` was replaced by `inserted` between
+ * `before` and `after`. `suggestChanges` turns it into a tracked change.
+ */
+export interface SuggestionEdit {
+  before: string;
+  after: string;
+  deleted: string;
+  inserted: string;
+  /**
+   * About where the edit is in the doc (offset of the edited text); the
+   * match nearest to it wins. Without it the first match wins.
+   */
+  hint?: number;
+}
+
+/**
+ * What `suggestChanges` does with one edit, decided from the doc alone:
+ * - `suggest`: the new text is there and not tracked yet; it becomes a suggestion.
+ * - `invalid`: `before`, `inserted` and `after` are all empty (or not strings), so there is nothing to find.
+ * - `unchanged`: `inserted` equals `deleted`; there is no edit.
+ * - `not-pushed`: Overleaf still has the old text.
+ * - `not-found`: neither the old nor the new text is there.
+ * - `already-tracked`: the new text is there and the edit, or part of it, is already a tracked change.
+ */
+export type SuggestionOutcome = 'suggest' | 'invalid' | 'unchanged' | 'not-pushed' | 'not-found' | 'already-tracked';
+
+export interface SuggestionMatch {
+  outcome: SuggestionOutcome;
+  /** Offset of the edit in the visible text, for `suggest` and `already-tracked`. */
+  position?: number;
+}
+
+/**
+ * Offset of the occurrence of `needle` nearest to `hint`, or -1. An empty
+ * needle matches nowhere: it would match at every offset, which tells
+ * nothing about where an edit is.
+ */
+export function nearestIndex(text: string, needle: string, hint: number): number {
+  if (needle === '') return -1;
+  let best = -1;
+  for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + 1)) {
+    if (best === -1 || Math.abs(i - hint) < Math.abs(best - hint)) best = i;
+  }
+  return best;
+}
+
+/**
+ * Which parts of an edit at `position` are tracked changes in `changes`
+ * (sharejs-text-ot, visible offsets): a tracked insert that covers the new
+ * text, and a tracked delete holding the old text right after it or at its
+ * start, where the ranges tracker puts the delete of a tracked replacement.
+ * With `anywhere`, position is ignored and any change with the text counts,
+ * for a doc that collaborators edited in the meantime.
+ */
+export function trackedParts(changes: DocTrackedChange[], position: number, deleted: string, inserted: string, anywhere = false): { insert: boolean; delete: boolean } {
+  const end = position + inserted.length;
+  return {
+    insert: inserted !== '' && changes.some(change => change.kind === 'insert'
+      && change.text.includes(inserted)
+      && (anywhere || (change.position <= position && change.position + change.text.length >= end))),
+    delete: deleted !== '' && changes.some(change => change.kind === 'delete'
+      && change.text.includes(deleted)
+      && (anywhere || change.position === end || change.position === position))
+  };
+}
+
+/** Find one edit in a doc's visible text and decide what to do with it. */
+export function matchSuggestionEdit(content: string, changes: DocTrackedChange[], edit: SuggestionEdit): SuggestionMatch {
+  const { before, after, deleted, inserted } = edit ?? ({} as SuggestionEdit);
+  if (![before, after, deleted, inserted].every(part => typeof part === 'string')) return { outcome: 'invalid' };
+  // The new text is searched as before + inserted + after; empty, it would match anywhere.
+  if (before === '' && after === '' && inserted === '') return { outcome: 'invalid' };
+  if (inserted === deleted) return { outcome: 'unchanged' };
+  const hint = typeof edit.hint === 'number' && Number.isFinite(edit.hint) ? edit.hint : 0;
+  const from = hint - before.length;
+  const at = nearestIndex(content, before + inserted + after, from);
+  if (at === -1) {
+    return { outcome: nearestIndex(content, before + deleted + after, from) === -1 ? 'not-found' : 'not-pushed' };
+  }
+  const position = at + before.length;
+  const tracked = trackedParts(changes, position, deleted, inserted);
+  // Redoing an edit that is already (partly) tracked would track it twice:
+  // the old text would end up in the tracked delete two times.
+  if (tracked.insert || tracked.delete) return { outcome: 'already-tracked', position };
+  return { outcome: 'suggest', position };
+}
+
+/**
+ * An 18-hex-digit id seed in the format of `RangesTracker.generateIdSeed` in
+ * Overleaf: 8 digits of seconds since the epoch, then 10 random digits. The
+ * server takes it as `meta.tc` and names the new tracked changes by it plus
+ * a 6-digit counter, the same shape as a Mongo ObjectId.
+ */
+export function generateIdSeed(now: number = Date.now(), random: () => number = Math.random): string {
+  const timestamp = Math.floor(now / 1000).toString(16).padStart(8, '0');
+  const machine = Math.floor(random() * 16777216).toString(16).padStart(6, '0');
+  const pid = Math.floor(random() * 32767).toString(16).padStart(4, '0');
+  return `${timestamp}${machine}${pid}`;
+}
