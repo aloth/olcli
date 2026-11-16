@@ -10,7 +10,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import type { Ora } from 'ora';
 import { colorDisabled, createSpinner as ora, icon } from './term.js';
-import { ProjectOwnerOnlyError, formatError } from './errors.js';
+import { CaptchaRequiredError, ProjectOwnerOnlyError, formatError } from './errors.js';
 import { writeFileSync, readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -70,7 +70,8 @@ import {
   maskSecret,
   type PasswordCredentials
 } from './config.js';
-import { promptHidden, PromptCancelled, NotATerminal } from './prompt.js';
+import { promptHidden, promptYesNo, PromptCancelled, NotATerminal } from './prompt.js';
+import { canOfferBrowserSignIn, offerBrowserSignIn, passwordSignInWarnings } from './auth-fallback.js';
 import { BrowserSignInAborted, browserSignIn, chromiumLauncher, findBrowser, requireWebSocket } from './browser-auth.js';
 
 // NO_COLOR (no-color.org) and --no-color. chalk handles --no-color and a
@@ -93,7 +94,9 @@ program
 Environment:
   OVERLEAF_SESSION        session cookie (instead of olcli auth)
   OVERLEAF_EMAIL, OVERLEAF_PASSWORD
-                          password login when no session cookie works
+                          password login when no session cookie works;
+                          self-hosted servers without reCAPTCHA only
+                          (overleaf.com: olcli auth --browser)
   OVERLEAF_BASE_URL       instance URL, like --base-url
   OVERLEAF_COOKIE_NAME    session cookie name, like --cookie-name
   OVERLEAF_TIMEOUT        HTTP timeout in milliseconds, like --timeout
@@ -261,7 +264,7 @@ const authCmd = program
   .command('auth')
   .description('Authenticate with Overleaf using a session cookie or email/password')
   .option('--cookie [session]', 'Session cookie; omit the value to be prompted, "-" reads stdin')
-  .option('--email <email>', 'Account email for password login')
+  .option('--email <email>', 'Account email for password login (self-hosted servers without reCAPTCHA)')
   .option('--password <password>', 'Account password (omit to be prompted; see warning below)')
   .option('--save-password', 'Persist the password in the config file, in plaintext')
   .option('--no-save-password', 'Do not persist the password (the default; kept for existing scripts)')
@@ -284,13 +287,18 @@ instances). Then either:
   pbpaste | olcli auth --cookie -           reads the cookie from stdin
 A value given on the command line works too, but lands in your shell history.
 
+Password sign-in (--email) works only on self-hosted servers without
+reCAPTCHA. overleaf.com requires a captcha for it, which olcli cannot
+complete; use --browser or --cookie there.
+
 The password is not stored unless you ask for it with --save-password. A
 session cookie is stored either way, and that is what later commands use; the
 password only buys an automatic re-login once the cookie expires.
 
 Passing --password puts the password in your shell history. Omit it to be
 prompted instead, or set OVERLEAF_EMAIL and OVERLEAF_PASSWORD, which every
-command reads without needing 'auth' at all.`)
+command reads without needing 'auth' at all (self-hosted servers without
+reCAPTCHA only).`)
   .action(async (options) => {
     if (options.browser) {
       if (options.cookie || options.email || options.password) {
@@ -316,7 +324,7 @@ command reads without needing 'auth' at all.`)
       console.log(chalk.cyan('  olcli auth --cookie'));
       console.log(chalk.dim('  (or pipe it: pbpaste | olcli auth --cookie -)'));
       console.log();
-      console.log('Or log in with email/password:');
+      console.log('Or log in with email/password (self-hosted servers without reCAPTCHA):');
       console.log(chalk.cyan('  olcli auth --email "you@example.com"'));
       console.log(chalk.dim('  (prompts for the password, so it stays out of your shell history)'));
       console.log();
@@ -383,8 +391,8 @@ command reads without needing 'auth' at all.`)
         } catch (error: any) {
           if (error instanceof NotATerminal) {
             console.error(chalk.red('No terminal available to prompt for a password.'));
-            console.error('Set OVERLEAF_EMAIL and OVERLEAF_PASSWORD instead — every command reads them,');
-            console.error("so a scripted run does not need 'olcli auth' at all.");
+            console.error('Set OVERLEAF_EMAIL and OVERLEAF_PASSWORD instead - every command reads them,');
+            console.error("so a scripted run does not need 'olcli auth' at all (self-hosted servers without reCAPTCHA only).");
             process.exit(1);
           }
           if (error instanceof PromptCancelled) {
@@ -448,6 +456,20 @@ command reads without needing 'auth' at all.`)
 
       printNextSteps(projects);
     } catch (error: any) {
+      if (error instanceof CaptchaRequiredError) {
+        const [first, ...rest] = formatError(error, { verbose: Boolean(program.opts().verbose) });
+        spinner.fail(first);
+        for (const line of rest) console.error(chalk.dim(`  ${line}`));
+        const offer = await offerBrowserSignIn(error, {
+          interactive: canOfferBrowserSignIn(),
+          checkBrowser: () => { requireWebSocket(); findBrowser(); },
+          ask: (question) => promptYesNo(question, true).catch(() => false),
+          runBrowser: () => authWithBrowser({ saveLocal: options.saveLocal }),
+        });
+        if (offer.outcome === 'browser') return;
+        if (offer.outcome === 'unavailable') console.error(chalk.dim(`  Browser sign-in is not available here: ${offer.reason}`));
+        process.exit(1);
+      }
       failWith(spinner, error);
     }
   });
@@ -555,6 +577,7 @@ async function authStatus(options: { json?: boolean }): Promise<void> {
     configFile: string;
     passwordStored: boolean;
     signedIn: boolean;
+    warnings: string[];
     projects?: number;
     error?: string;
   } = {
@@ -566,6 +589,7 @@ async function authStatus(options: { json?: boolean }): Promise<void> {
     configFile: getConfigPath(),
     passwordStored: stored.password,
     signedIn: false,
+    warnings: passwordSignInWarnings(Boolean(password), baseUrl),
   };
 
   const print = (): void => {
@@ -584,6 +608,9 @@ async function authStatus(options: { json?: boolean }): Promise<void> {
     }
     if (report.signedIn) {
       row('Session', chalk.green(`valid, ${report.projects} project(s)`));
+    }
+    for (const warning of report.warnings) {
+      row('Warning', chalk.yellow(warning));
     }
   };
 

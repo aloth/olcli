@@ -169,3 +169,43 @@ export function promptHidden(label: string): Promise<string> {
     stdout.write(label);
   });
 }
+
+/**
+ * Read a yes/no answer for a `[Y/n]` or `[y/N]` question. An empty answer
+ * takes the default; anything that is not a recognizable yes or no counts as
+ * no, so a stray keystroke never starts something the user did not ask for.
+ */
+export function parseYesNo(answer: string, defaultYes: boolean): boolean {
+  const text = answer.trim().toLowerCase();
+  if (text === '') return defaultYes;
+  return text === 'y' || text === 'yes';
+}
+
+/**
+ * Ask a yes/no question on the terminal and read one visible line.
+ *
+ * Throws `NotATerminal` when stdin is not a terminal, like `promptHidden`, and
+ * `PromptCancelled` on Ctrl+C or Ctrl+D.
+ */
+export async function promptYesNo(question: string, defaultYes = true): Promise<boolean> {
+  if (!stdin.isTTY) {
+    throw new NotATerminal('stdin is not a terminal, so a question cannot be asked');
+  }
+  const { createInterface } = await import('node:readline');
+  const rl = createInterface({ input: stdin, output: stdout, terminal: true });
+  try {
+    const answer = await new Promise<string>((resolve, reject) => {
+      let answered = false;
+      rl.once('SIGINT', () => reject(new PromptCancelled()));
+      rl.once('close', () => { if (!answered) reject(new PromptCancelled()); });
+      rl.question(`${question} ${defaultYes ? '[Y/n]' : '[y/N]'} `, (line) => {
+        answered = true;
+        resolve(line);
+      });
+    });
+    return parseYesNo(answer, defaultYes);
+  } finally {
+    rl.close();
+    stdin.pause();
+  }
+}

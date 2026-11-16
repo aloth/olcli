@@ -52,6 +52,9 @@ export {
   type CommentStatus,
 } from './client.js';
 
+// Password sign-in refused because the instance requires a captcha
+export { CaptchaRequiredError } from './errors.js';
+
 // Tracked changes: kinds, authors and the ShareJS op format
 export {
   type TrackedChangeKind,

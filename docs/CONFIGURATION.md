@@ -27,14 +27,14 @@ Everything is stored in plaintext, so it is worth knowing what is on disk:
 
 ### Password login
 
-Self-hosted instances without reCAPTCHA accept a password login:
+Self-hosted instances without reCAPTCHA accept a password login. overleaf.com does not: it requires a captcha for password sign-in, which olcli cannot complete, and olcli says so instead of a bare HTTP 400. Use `olcli auth --browser` or `olcli auth --cookie` there. On a terminal, `olcli auth --email` offers the browser sign-in when the captcha refuses the password; `olcli auth status` warns when password credentials would be used on overleaf.com.
 
 ```bash
 olcli auth --email "you@example.com"
 # prompts for the password, so it stays out of your shell history
 ```
 
-The password is **not stored** unless you pass `--save-password`. A session cookie is saved either way and is what later commands use; the password only buys an automatic re-login once that cookie expires. For scripts, set `OVERLEAF_EMAIL` and `OVERLEAF_PASSWORD`: every command reads them, so a scripted run never needs `olcli auth` at all.
+The password is **not stored** unless you pass `--save-password`. A session cookie is saved either way and is what later commands use; the password only buys an automatic re-login once that cookie expires. For scripts on such an instance, set `OVERLEAF_EMAIL` and `OVERLEAF_PASSWORD`: every command reads them, so a scripted run never needs `olcli auth` at all.
 
 ## Self-hosted Overleaf
 
@@ -62,7 +62,7 @@ olcli reads these. The MCP server and the git remote helper read the same sessio
 | Variable | Purpose |
 |---|---|
 | `OVERLEAF_SESSION` | Session cookie value |
-| `OVERLEAF_EMAIL`, `OVERLEAF_PASSWORD` | Password login, used when no session cookie is set or it is rejected |
+| `OVERLEAF_EMAIL`, `OVERLEAF_PASSWORD` | Password login, used when no session cookie is set or it is rejected. Self-hosted instances without reCAPTCHA only; overleaf.com requires a captcha (use `olcli auth --browser`) |
 | `OVERLEAF_BASE_URL` | Instance URL, like `--base-url` (default: `https://www.overleaf.com`) |
 | `OVERLEAF_COOKIE_NAME` | Session cookie name, like `--cookie-name` (default: `overleaf_session2`; self-hosted instances often use `overleaf.sid`) |
 | `OVERLEAF_TIMEOUT` | HTTP timeout in milliseconds, like `--timeout` |

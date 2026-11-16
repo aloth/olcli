@@ -101,7 +101,7 @@ Every tool declares MCP tool annotations. Read-only tools set `readOnlyHint`. To
 The MCP server reads credentials in this order:
 
 1. **`OVERLEAF_SESSION` environment variable** — set in your MCP config (recommended)
-2. **`OVERLEAF_EMAIL` + `OVERLEAF_PASSWORD` environment variables** — for password login (self-hosted)
+2. **`OVERLEAF_EMAIL` + `OVERLEAF_PASSWORD` environment variables** - for password login on self-hosted instances without reCAPTCHA. overleaf.com requires a captcha for password sign-in, which olcli cannot complete; the tools then fail with a message that says so. Use `OVERLEAF_SESSION` or run `olcli auth --browser` once instead
 3. **`.olauth` file in cwd** — written by `olcli auth --save-local`
 4. **Stored config** — written by `olcli auth` (including saved password credentials)
 

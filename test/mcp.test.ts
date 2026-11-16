@@ -727,3 +727,12 @@ test('every registered tool is documented in SKILL.md and docs/MCP.md', async ()
     assert.deepEqual(missing, [], `${doc} does not mention: ${missing.join(', ')}`);
   }
 });
+
+test('a password sign-in refused by reCAPTCHA reaches the agent as the captcha message', async () => {
+  const { CaptchaRequiredError } = await import('../src/errors.js');
+  const h = await connect(async () => { throw new CaptchaRequiredError('www.overleaf.com', 400); });
+  const result = await h.call('list_projects', {});
+  assert.equal(result.isError, true);
+  assert.match(result.text[0], /^Error: www\.overleaf\.com requires a captcha for password sign-in, which olcli cannot complete\. Sign in with `olcli auth --browser`, or paste a session cookie with `olcli auth --cookie`\./);
+  await h.close();
+});
