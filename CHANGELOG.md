@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **`brew install aloth/tap/olcli` installs the commands again** ([#69](https://github.com/aloth/olcli/issues/69)) - the formula built from the GitHub source tarball, which has no `dist/`, and Homebrew removes the `prepare` script that builds it before packing, so the install finished without error but linked no `olcli`. The formula now installs the prebuilt npm package, the same one `npm install -g` uses, and the release workflow installs and tests the formula on macOS after every bump. Already fixed for 0.18.0: run `brew update && brew reinstall olcli`. Thanks to @floswald for the report and the diagnosis
+
 ## [0.18.0] - 2026-11-16
 
 ### Added

@@ -77,7 +77,7 @@ jobs:
       - name: Wait for tarball availability
         run: |
           for i in $(seq 1 10); do
-            STATUS=$(curl -sI "https://github.com/aloth/olcli/archive/refs/tags/${{ github.ref_name }}.tar.gz" -o /dev/null -w '%{http_code}')
+            STATUS=$(curl -sI "https://registry.npmjs.org/@aloth/olcli/-/olcli-${GITHUB_REF_NAME#v}.tgz" -o /dev/null -w '%{http_code}')
             if [ "$STATUS" = "200" ] || [ "$STATUS" = "302" ]; then
               echo "Tarball ready (HTTP $STATUS)"
               exit 0
@@ -87,15 +87,26 @@ jobs:
           done
           echo "Tarball not available after 50s"
           exit 1
+      - uses: actions/checkout@v4
+      - name: Read the version from package.json
+        id: version
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
       - name: Bump Homebrew formula
         uses: mislav/bump-homebrew-formula-action@v4.2
         with:
           formula-name: olcli
           homebrew-tap: aloth/homebrew-tap
           tag-name: ${{ github.ref_name }}
-          download-url: https://github.com/aloth/olcli/archive/refs/tags/${{ github.ref_name }}.tar.gz
+          # The npm tarball, not the GitHub source tarball: Homebrew's npm
+          # helper removes the prepare script before packing, so a source
+          # tarball without dist/ installs no binary.
+          download-url: https://registry.npmjs.org/@aloth/olcli/-/olcli-${{ steps.version.outputs.version }}.tgz
           create-pullrequest: false
           commit-message: |
             olcli: bump to {{version}}
         env:
           COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  verify-homebrew:
+    needs: bump-homebrew
+    uses: ./.github/workflows/homebrew.yml
