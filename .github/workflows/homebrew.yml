@@ -1,0 +1,24 @@
+name: Homebrew install check
+# Installs olcli from aloth/homebrew-tap on macOS and runs the formula test, so
+# a formula that installs no binary fails visibly. Runs after every formula
+# bump in publish.yml and can be started by hand.
+on:
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  brew-install:
+    runs-on: macos-latest
+    steps:
+      - name: Install olcli from the tap
+        run: |
+          brew update
+          brew install aloth/tap/olcli
+      - name: Run the formula test
+        run: brew test aloth/tap/olcli
+      - name: Check the linked commands
+        run: |
+          olcli --version
+          test -x "$(brew --prefix)/bin/olcli-mcp"
+          test -x "$(brew --prefix)/bin/git-remote-overleaf"
