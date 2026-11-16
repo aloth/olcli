@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.18.0] - 2026-11-16
 
 ### Added
 - **Turn pushed edits into suggestions (experimental)** ([#66](https://github.com/aloth/olcli/pull/66), [#70](https://github.com/aloth/olcli/pull/70)) - `suggestChanges(projectId, path, edits)` makes edits that reached Overleaf as plain text, through git, `olcli push` or a sync, show up as tracked changes that collaborators can accept or reject, as if they had been typed in Reviewing mode. Each edit is given as the old and new text with some text around it; olcli finds the new text, undoes the edit without tracking and redoes it with tracking. The text ends up as it was, so a git clone that pushed the edit has nothing new to pull. Each edit gets a result: `done`, `not-pushed` (the new text is not on Overleaf yet), `not-found`, `already-tracked` (running it again sends nothing), `unchanged`, `invalid` or `not-tracked` (the document was read again and no tracked change was found). `planSuggestions` reports the results without writing, and `expectedVersion` refuses to write when the document changed since. Review-only access is refused with `SuggestionPermissionError` before anything is written. Limits: sharejs-text-ot documents only (history-ot documents are refused), and collaborators who have the document open see the old text for about 0.2 seconds. Documented in docs/LIBRARY.md. Thanks to @fredericosantos for the idea and the first implementation
