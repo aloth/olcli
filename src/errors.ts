@@ -69,6 +69,33 @@ export class ProjectOwnerOnlyError extends Error {
   }
 }
 
+/**
+ * Password sign-in was refused because the instance requires a reCAPTCHA
+ * token, which olcli cannot produce. overleaf.com has reCAPTCHA switched on
+ * for its login form and answers a form post without a token with HTTP 400
+ * and `errorReason: "cannot_verify_user_not_robot"`, before it looks at the
+ * email and password. Retrying cannot help; only a browser sign-in or a
+ * session cookie can.
+ */
+export class CaptchaRequiredError extends Error {
+  readonly status?: number;
+  /** Host of the instance, like `www.overleaf.com`. */
+  readonly host: string;
+
+  constructor(host: string, status?: number) {
+    super(captchaRequiredMessage(host));
+    this.name = 'CaptchaRequiredError';
+    this.host = host;
+    this.status = status;
+  }
+}
+
+/** The message of a CaptchaRequiredError for `host`. */
+export function captchaRequiredMessage(host: string): string {
+  return `${host} requires a captcha for password sign-in, which olcli cannot complete. ` +
+    `Sign in with \`${AUTH_COMMAND} --browser\`, or paste a session cookie with \`${AUTH_COMMAND} --cookie\`.`;
+}
+
 /** HTTP statuses that mean "this session is not allowed", not "this request is wrong". */
 export function isAuthStatus(status: number): boolean {
   return status === 401 || status === 403;
@@ -114,6 +141,11 @@ export function formatError(error: unknown, options: FormatErrorOptions = {}): s
 
   if (error instanceof SessionExpiredError) {
     return [error.message, `${error.detail}.${verboseHint}`];
+  }
+
+  if (error instanceof CaptchaRequiredError) {
+    if (error.status === undefined) return [error.message];
+    return [error.message, `Overleaf answered HTTP ${error.status}.`];
   }
 
   if (error instanceof ProjectOwnerOnlyError) {

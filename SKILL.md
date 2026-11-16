@@ -65,9 +65,11 @@ reports each. Environment variables cannot be unset by a child process, so
 `OVERLEAF_SESSION` and `OVERLEAF_EMAIL`/`OVERLEAF_PASSWORD` are reported rather
 than silently ignored — they outrank anything on disk.
 
-For unattended use, prefer `OVERLEAF_EMAIL`/`OVERLEAF_PASSWORD` over
-`olcli auth --password`: every command reads them, and nothing is written to
-disk or to shell history.
+For unattended use on a self-hosted instance without reCAPTCHA, prefer
+`OVERLEAF_EMAIL`/`OVERLEAF_PASSWORD` over `olcli auth --password`: every
+command reads them, and nothing is written to disk or to shell history.
+overleaf.com requires a captcha for password sign-in, which olcli cannot
+complete; use `olcli auth --browser` or `OVERLEAF_SESSION` there.
 
 ### Self-hosted Overleaf
 

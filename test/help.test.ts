@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { colorDisabled, icon, isInteractive } from '../src/term.js';
+import { colorDisabled, hasUsableWidth, icon, isInteractive } from '../src/term.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SNAPSHOT = join(ROOT, 'test', 'snapshots', 'root-help.txt');
@@ -87,4 +87,10 @@ test('spinner results use words, not symbols, when stderr is not a terminal', ()
   const result = olcli(['list'], { NO_COLOR: '1' });
   assert.equal(result.status, 1);
   assert.doesNotMatch(result.stderr + result.stdout, /[\u2714\u2716\u26a0\u2139]/);
+});
+
+test('a terminal that reports a width of 0 gets no spinner animation', () => {
+  assert.equal(hasUsableWidth({ columns: 0 }), false);
+  assert.equal(hasUsableWidth({ columns: 80 }), true);
+  assert.equal(hasUsableWidth({}), true);
 });

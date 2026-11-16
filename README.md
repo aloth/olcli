@@ -63,7 +63,7 @@ olcli auth status             # instance, account, where the credential comes fr
 
 **Get your session cookie:** sign in to Overleaf in a browser, open the developer tools (F12), then Application (Chrome, Edge) or Storage (Firefox), Cookies, and copy the value of `overleaf_session2` (`overleaf.sid` on most self-hosted instances). A value on the command line also works but lands in your shell history.
 
-Self-hosted instances without reCAPTCHA also accept `olcli auth --email you@example.com`, which prompts for the password. Scripts can set `OVERLEAF_SESSION`, or `OVERLEAF_EMAIL` and `OVERLEAF_PASSWORD`, and skip `olcli auth` entirely.
+Self-hosted instances without reCAPTCHA also accept `olcli auth --email you@example.com`, which prompts for the password. overleaf.com requires a captcha for password sign-in, which olcli cannot complete, so use `olcli auth --browser` or `olcli auth --cookie` there; on a terminal, a refused password sign-in offers the browser sign-in instead. Scripts can set `OVERLEAF_SESSION`, or on self-hosted instances without reCAPTCHA `OVERLEAF_EMAIL` and `OVERLEAF_PASSWORD`, and skip `olcli auth` entirely.
 
 ### Self-hosted Overleaf
 

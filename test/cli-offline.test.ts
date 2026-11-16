@@ -422,3 +422,116 @@ test('pull keeps non-ASCII letters in the directory name and reuses a pre-0.16 d
     await live.close();
   }
 });
+
+/** A login page with reCAPTCHA on for login, and the answer overleaf.com gives a form post without a captcha token. */
+async function captchaOverleaf(): Promise<MockOverleaf> {
+  const requests: string[] = [];
+  const settings = JSON.stringify({ recaptchaSiteKey: 'site-key', recaptchaDisabled: { login: false } }).replace(/"/g, '&quot;');
+  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+    requests.push(`${req.method} ${req.url}`);
+    req.resume();
+    if (req.method === 'GET' && req.url === '/login') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(`<html><head><meta name="ol-csrfToken" content="csrf"><meta name="ol-ExposedSettings" content="${settings}"></head><body><form name="loginForm"><input name="email"><input name="password" type="password"></form></body></html>`);
+      return;
+    }
+    if (req.method === 'POST' && req.url === '/login') {
+      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ errorReason: 'cannot_verify_user_not_robot', message: { text: 'Sorry, we could not verify that you are not a robot.' } }));
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('not found');
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert(address && typeof address === 'object');
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    requests,
+    close: () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+  };
+}
+
+const CAPTCHA_MESSAGE = /requires a captcha for password sign-in, which olcli cannot complete\. Sign in with `olcli auth --browser`, or paste a session cookie with `olcli auth --cookie`\./;
+
+test('auth with a password refused by reCAPTCHA names the browser sign-in and never prompts without a terminal', async () => {
+  const mock = await captchaOverleaf();
+  try {
+    const env = { ...freshHome(), OVERLEAF_BASE_URL: mock.baseUrl };
+    // --password *** used here because a hidden prompt needs a terminal; this is the scripted case.
+    const result = await olcli(['auth', '--email', 'me@example.com', '--password', 'pw'], { env });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stdout + result.stderr, CAPTCHA_MESSAGE);
+    assert.doesNotMatch(result.stdout + result.stderr, /\[Y\/n\]/);
+    assert.equal(mock.requests.filter((r) => r === 'POST /login').length, 1);
+  } finally {
+    await mock.close();
+  }
+});
+
+test('commands that fall back to OVERLEAF_EMAIL/OVERLEAF_PASSWORD report the captcha, without a question', async () => {
+  const mock = await captchaOverleaf();
+  try {
+    const env = { ...freshHome(), OVERLEAF_BASE_URL: mock.baseUrl, OVERLEAF_EMAIL: 'me@example.com', OVERLEAF_PASSWORD: 'pw' };
+    const result = await olcli(['list'], { env });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stdout + result.stderr, CAPTCHA_MESSAGE);
+    assert.doesNotMatch(result.stdout + result.stderr, /\[Y\/n\]/);
+  } finally {
+    await mock.close();
+  }
+});
+
+test('remote helper with password credentials refused by reCAPTCHA prints the captcha message', async () => {
+  const mock = await captchaOverleaf();
+  try {
+    const result = await run(
+      'remote-helper.ts',
+      ['origin', `${mock.baseUrl}/project/${PROJECT_ID}`],
+      { input: 'capabilities\n\nimport refs/heads/main\n\n', env: { ...freshHome(), GIT_DIR: join(home, 'captcha.git'), OVERLEAF_EMAIL: 'me@example.com', OVERLEAF_PASSWORD: 'pw' } },
+    );
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /^fatal: .*requires a captcha for password sign-in/m);
+    assert.match(result.stderr, CAPTCHA_MESSAGE);
+  } finally {
+    await mock.close();
+  }
+});
+
+test('auth status warns about password credentials on overleaf.com, not on a self-hosted URL', async () => {
+  // overleaf.com: the warning comes from the URL alone. The sign-in attempt is
+  // pointed at a dead proxy so the test never reaches the network.
+  const env = {
+    ...freshHome(),
+    OVERLEAF_BASE_URL: 'https://www.overleaf.com',
+    OVERLEAF_EMAIL: 'me@example.com',
+    OVERLEAF_PASSWORD: 'pw',
+    HTTPS_PROXY: 'http://127.0.0.1:9',
+    OVERLEAF_TIMEOUT: '2000',
+  };
+  const text = await olcli(['auth', 'status'], { env });
+  assert.equal(text.status, 1, text.stdout + text.stderr);
+  assert.match(text.stdout, /Warning\s+overleaf\.com requires a captcha for password sign-in, which olcli cannot complete\. Sign in with: olcli auth --browser/);
+  const json = await olcli(['auth', 'status', '--json'], { env });
+  const parsed = JSON.parse(json.stdout);
+  assert.equal(parsed.credentialSource, 'OVERLEAF_EMAIL/OVERLEAF_PASSWORD');
+  assert.equal(parsed.warnings.length, 1);
+  assert.match(parsed.warnings[0], /overleaf\.com requires a captcha/);
+
+  const mock = await captchaOverleaf();
+  try {
+    const selfHosted = { ...freshHome(), OVERLEAF_BASE_URL: mock.baseUrl, OVERLEAF_EMAIL: 'me@example.com', OVERLEAF_PASSWORD: 'pw' };
+    const result = await olcli(['auth', 'status', '--json'], { env: selfHosted });
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(report.warnings, []);
+    assert.match(report.error, /requires a captcha for password sign-in/);
+    const plain = await olcli(['auth', 'status'], { env: selfHosted });
+    assert.doesNotMatch(plain.stdout, /Warning/);
+  } finally {
+    await mock.close();
+  }
+
+  const cookie = await olcli(['auth', 'status', '--json'], { env: { ...freshHome(), OVERLEAF_BASE_URL: 'https://www.overleaf.com', OVERLEAF_SESSION: 'x', HTTPS_PROXY: 'http://127.0.0.1:9', OVERLEAF_TIMEOUT: '2000' } });
+  assert.deepEqual(JSON.parse(cookie.stdout).warnings, []);
+});

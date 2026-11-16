@@ -40,7 +40,7 @@ import {
 } from './tracked-changes.js';
 import { planEntityMove, type MovePlan } from './move-plan.js';
 import { matchProject } from './project-match.js';
-import { HttpStatusError, ProjectOwnerOnlyError, SessionExpiredError, httpError, isAuthStatus } from './errors.js';
+import { CaptchaRequiredError, HttpStatusError, ProjectOwnerOnlyError, SessionExpiredError, httpError, isAuthStatus } from './errors.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -292,6 +292,57 @@ export interface SuggestionPlan {
 }
 
 /** Thrown when the account may review but not edit: turning an edit into a suggestion first writes untracked. */
+/**
+ * The `errorReason` Overleaf answers a login post with when its reCAPTCHA
+ * check fails (HTTP 400, JSON). Sent before the credentials are checked, so
+ * it also means nothing is known about the password.
+ */
+export const CAPTCHA_ERROR_REASON = 'cannot_verify_user_not_robot';
+
+function parseJsonObject(text: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** True when a login response body says the reCAPTCHA check failed. */
+export function isCaptchaRejection(body: string): boolean {
+  return parseJsonObject(body)?.errorReason === CAPTCHA_ERROR_REASON;
+}
+
+/**
+ * True when a login response body is JSON that gives a reason of its own
+ * (`errorReason` or `message`), such as a wrong password. Such an answer is
+ * not second-guessed with the login page markers.
+ */
+function hasLoginMessage(body: string): boolean {
+  const parsed = parseJsonObject(body);
+  return Boolean(parsed && (parsed.errorReason || parsed.message));
+}
+
+/**
+ * True when an Overleaf login page has reCAPTCHA switched on for login:
+ * `recaptchaDisabled.login === false` in the `ol-ExposedSettings` meta data,
+ * or, on releases without that setting, the reCAPTCHA script or widget on the
+ * page. Self-hosted instances without reCAPTCHA have neither.
+ */
+export function loginPageRequiresCaptcha(html: string): boolean {
+  const $ = cheerio.load(html);
+  const settingsText = $('meta[name="ol-ExposedSettings"]').attr('content');
+  if (settingsText) {
+    const settings = parseJsonObject(settingsText);
+    const disabled = settings?.recaptchaDisabled as { login?: unknown } | undefined;
+    if (disabled && typeof disabled === 'object' && typeof disabled.login === 'boolean') {
+      return !disabled.login && Boolean(settings?.recaptchaSiteKey || settings?.recaptchaSiteKeyV3 || settings?.recaptchaEnterpriseSiteKey);
+    }
+  }
+  const scriptSources = $('script[src]').toArray().map(el => $(el).attr('src') ?? '');
+  return scriptSources.some(src => /\/recaptcha\/(api|enterprise)\.js/.test(src)) || $('.g-recaptcha').length > 0;
+}
+
 export class SuggestionPermissionError extends Error {
   constructor(path: string, detail?: string) {
     super(`${path}: this account needs edit access to the project to turn edits into suggestions; review-only access cannot do it, because the edit is first undone without tracking. Nothing was changed${detail ? ` (${detail})` : ''}`);
@@ -558,11 +609,18 @@ export class OverleafClient {
     bootstrapClient.applySetCookieHeaders(loginResponse.headers['set-cookie'] as string[] | undefined);
 
     if (![302, 303].includes(loginResponse.status)) {
-      const loginFailure = typeof loginResponse.body === 'string'
-        ? OverleafClient.isLoginPage(cheerio.load(loginResponse.body))
-        : false;
+      const responseText = typeof loginResponse.body === 'string' ? loginResponse.body : '';
+      if (isCaptchaRejection(responseText)) {
+        throw new CaptchaRequiredError(new URL(baseUrl).host, loginResponse.status);
+      }
+      const loginFailure = responseText ? OverleafClient.isLoginPage(cheerio.load(responseText)) : false;
       if (loginFailure) {
         throw new Error('Password login failed. Email or password may be incorrect.');
+      }
+      // An answer that does not say why: if the login page asked for a
+      // captcha, that is the most likely reason.
+      if (!hasLoginMessage(responseText) && loginPageRequiresCaptcha(loginHtml)) {
+        throw new CaptchaRequiredError(new URL(baseUrl).host, loginResponse.status);
       }
       throw new HttpStatusError('Password login failed', loginResponse.status);
     }

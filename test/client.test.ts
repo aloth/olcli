@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { MAX_RETRY_AFTER_MS, OverleafClient, resolveCommentConcurrency, retryDelayMs } from '../src/client.js';
+import { MAX_RETRY_AFTER_MS, OverleafClient, isCaptchaRejection, loginPageRequiresCaptcha, resolveCommentConcurrency, retryDelayMs } from '../src/client.js';
+import { CaptchaRequiredError, HttpStatusError } from '../src/errors.js';
 
 interface CapturedRequest {
   method?: string;
@@ -426,4 +427,158 @@ test('a 429 with Retry-After: 3600 waits at most 60 seconds, not an hour', async
     globalThis.setTimeout = realSetTimeout;
     await new Promise(resolve => server.close(resolve));
   }
+});
+
+// ─── Password sign-in refused by reCAPTCHA ───
+//
+// Shapes measured against www.overleaf.com: the login page carries
+// `recaptchaDisabled: { login: false }` and a site key in ol-ExposedSettings
+// and loads recaptcha/api.js; a form post without a captcha token is answered
+// with HTTP 400, JSON, `errorReason: "cannot_verify_user_not_robot"`, before
+// the credentials are checked.
+
+const CAPTCHA_SETTINGS = JSON.stringify({ isOverleaf: true, recaptchaSiteKey: 'site-key', recaptchaDisabled: { login: false, passwordReset: false, register: false, addEmail: false } });
+const NO_CAPTCHA_SETTINGS = JSON.stringify({ isOverleaf: false, recaptchaDisabled: { login: true, passwordReset: true, register: true, addEmail: true } });
+const CAPTCHA_REJECTION = { errorReason: 'cannot_verify_user_not_robot', message: { text: 'Sorry, we could not verify that you are not a robot. Please check that Google reCAPTCHA is not being blocked by an ad blocker or firewall.' } };
+
+function loginPageHtml(options: { settings?: string; script?: boolean }): string {
+  const attr = (v: string) => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  return '<html><head><meta name="ol-csrfToken" content="login-csrf">'
+    + (options.settings ? `<meta name="ol-ExposedSettings" data-type="json" content="${attr(options.settings)}">` : '')
+    + '</head><body>'
+    + (options.script ? '<script src="https://www.recaptcha.net/recaptcha/api.js?render=explicit"></script>' : '')
+    + '<form name="loginForm"><input name="email"><input name="password" type="password"></form></body></html>';
+}
+
+async function withLoginServer(
+  page: string,
+  answer: { status: number; contentType: string; body: string },
+  run: (baseUrl: string, posts: string[]) => Promise<void>
+): Promise<void> {
+  const posts: string[] = [];
+  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
+    if (req.method === 'GET' && req.url === '/login') {
+      res.writeHead(200, { 'Content-Type': 'text/html', 'Set-Cookie': 'overleaf_session2=anon; Path=/' });
+      res.end(page);
+      return;
+    }
+    if (req.method === 'POST' && req.url === '/login') {
+      posts.push(Buffer.concat(chunks).toString('utf-8'));
+      res.writeHead(answer.status, { 'Content-Type': answer.contentType });
+      res.end(answer.body);
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert(address && typeof address === 'object');
+  try {
+    await run(`http://127.0.0.1:${address.port}`, posts);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+}
+
+test('password login: the measured reCAPTCHA rejection becomes CaptchaRequiredError', async () => {
+  await withLoginServer(
+    loginPageHtml({ settings: CAPTCHA_SETTINGS, script: true }),
+    { status: 400, contentType: 'application/json; charset=utf-8', body: JSON.stringify(CAPTCHA_REJECTION) },
+    async (baseUrl, posts) => {
+      const host = new URL(baseUrl).host;
+      await assert.rejects(
+        () => OverleafClient.fromPasswordLogin('me@example.com', 'right-password', baseUrl),
+        (error: unknown) => {
+          assert.ok(error instanceof CaptchaRequiredError);
+          assert.equal(error.status, 400);
+          assert.equal(error.message, `${host} requires a captcha for password sign-in, which olcli cannot complete. Sign in with \`olcli auth --browser\`, or paste a session cookie with \`olcli auth --cookie\`.`);
+          return true;
+        }
+      );
+      assert.equal(posts.length, 1, 'exactly one sign-in attempt');
+    }
+  );
+});
+
+test('password login: the captcha rejection is recognized even when the page shows no markers', async () => {
+  await withLoginServer(
+    loginPageHtml({}),
+    { status: 400, contentType: 'application/json', body: JSON.stringify(CAPTCHA_REJECTION) },
+    async (baseUrl) => {
+      await assert.rejects(() => OverleafClient.fromPasswordLogin('me@example.com', 'pw', baseUrl), CaptchaRequiredError);
+    }
+  );
+});
+
+test('password login: a bare 400 on a login page with reCAPTCHA on for login is a captcha error', async () => {
+  for (const page of [loginPageHtml({ settings: CAPTCHA_SETTINGS }), loginPageHtml({ script: true })]) {
+    await withLoginServer(page, { status: 400, contentType: 'text/plain', body: 'Bad Request' }, async (baseUrl) => {
+      await assert.rejects(() => OverleafClient.fromPasswordLogin('me@example.com', 'pw', baseUrl), CaptchaRequiredError);
+    });
+  }
+});
+
+test('password login: without reCAPTCHA a bare 400 keeps the generic HTTP error', async () => {
+  await withLoginServer(
+    loginPageHtml({ settings: NO_CAPTCHA_SETTINGS }),
+    { status: 400, contentType: 'text/plain', body: 'Bad Request' },
+    async (baseUrl) => {
+      await assert.rejects(
+        () => OverleafClient.fromPasswordLogin('me@example.com', 'pw', baseUrl),
+        (error: unknown) => {
+          assert.ok(!(error instanceof CaptchaRequiredError));
+          assert.ok(error instanceof HttpStatusError);
+          assert.equal(error.status, 400);
+          assert.equal(error.action, 'Password login failed');
+          return true;
+        }
+      );
+    }
+  );
+});
+
+test('password login: a wrong password keeps its old message, also on a page with reCAPTCHA', async () => {
+  // A JSON answer with a reason of its own is not second-guessed with page markers.
+  await withLoginServer(
+    loginPageHtml({ settings: CAPTCHA_SETTINGS, script: true }),
+    { status: 401, contentType: 'application/json', body: JSON.stringify({ message: { type: 'error', text: 'Your email or password is incorrect.' } }) },
+    async (baseUrl) => {
+      await assert.rejects(
+        () => OverleafClient.fromPasswordLogin('me@example.com', 'wrong', baseUrl),
+        (error: unknown) => {
+          assert.ok(!(error instanceof CaptchaRequiredError));
+          assert.ok(error instanceof HttpStatusError);
+          assert.equal(error.message, 'Password login failed (HTTP 401)');
+          return true;
+        }
+      );
+    }
+  );
+  // An HTML login form as the answer is the old "may be incorrect" case.
+  await withLoginServer(
+    loginPageHtml({ settings: NO_CAPTCHA_SETTINGS }),
+    { status: 200, contentType: 'text/html', body: loginPageHtml({}) },
+    async (baseUrl) => {
+      await assert.rejects(
+        () => OverleafClient.fromPasswordLogin('me@example.com', 'wrong', baseUrl),
+        /^Error: Password login failed\. Email or password may be incorrect\.$/
+      );
+    }
+  );
+});
+
+test('loginPageRequiresCaptcha and isCaptchaRejection read the measured shapes', () => {
+  assert.equal(loginPageRequiresCaptcha(loginPageHtml({ settings: CAPTCHA_SETTINGS })), true);
+  assert.equal(loginPageRequiresCaptcha(loginPageHtml({ script: true })), true);
+  assert.equal(loginPageRequiresCaptcha(loginPageHtml({ settings: NO_CAPTCHA_SETTINGS })), false);
+  // recaptchaDisabled.login is the authority when present, even with the script on the page.
+  assert.equal(loginPageRequiresCaptcha(loginPageHtml({ settings: NO_CAPTCHA_SETTINGS, script: true })), false);
+  assert.equal(loginPageRequiresCaptcha(loginPageHtml({})), false);
+  assert.equal(isCaptchaRejection(JSON.stringify(CAPTCHA_REJECTION)), true);
+  assert.equal(isCaptchaRejection(JSON.stringify({ message: { text: 'Your email or password is incorrect.' } })), false);
+  assert.equal(isCaptchaRejection('<html></html>'), false);
+  assert.equal(isCaptchaRejection(''), false);
 });

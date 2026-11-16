@@ -52,7 +52,9 @@ Help:
 Environment:
   OVERLEAF_SESSION        session cookie (instead of olcli auth)
   OVERLEAF_EMAIL, OVERLEAF_PASSWORD
-                          password login when no session cookie works
+                          password login when no session cookie works;
+                          self-hosted servers without reCAPTCHA only
+                          (overleaf.com: olcli auth --browser)
   OVERLEAF_BASE_URL       instance URL, like --base-url
   OVERLEAF_COOKIE_NAME    session cookie name, like --cookie-name
   OVERLEAF_TIMEOUT        HTTP timeout in milliseconds, like --timeout
