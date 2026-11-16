@@ -4,8 +4,8 @@ Thanks for helping. This file covers the things a fresh clone does not tell
 you: how to get the checks passing locally, which tests need a real Overleaf
 account, and what happens to a pull request after you open it.
 
-For how the code is shaped and why — there is no public Overleaf API, so the
-client authenticates as a logged-in browser session — see `docs/ARCHITECTURE.md`.
+For how the code is shaped and why (there is no public Overleaf API, so the
+client authenticates as a logged-in browser session), see `docs/ARCHITECTURE.md`.
 
 ## Getting set up
 
@@ -17,11 +17,11 @@ npm run build
 ```
 
 Use `npm ci`, not `npm install`. CI fails when `package-lock.json` and
-`package.json` disagree, which is the point — `npm install` would quietly
+`package.json` disagree, which is the point: `npm install` would quietly
 rewrite the lockfile and hide the disagreement until someone else hit it.
 
 **Node 20.18.1 or newer.** That exact patch version is the floor, not "Node
-20". `cheerio` pulls in `undici@7.x`, which references `File` as a global —
+20". `cheerio` pulls in `undici@7.x`, which references `File` as a global;
 Node exposes it from 20 onwards, and every `undici` release in the range
 declares `>=20.18.1` itself. On an older runtime olcli dies before printing
 anything, `--version` included. CI runs 20.18.1 and 24: the floor itself, and
@@ -67,7 +67,7 @@ an unrelated pull request.
 ## Tests
 
 `npm test` runs `tsx --test test/*.test.ts`. These need no Overleaf account
-and no network — they are the ones CI runs.
+and no network; they are the ones CI runs.
 
 **`test/e2e*.sh` are deliberately outside that glob.** They drive a real
 Overleaf account: logging in, pulling, pushing and compiling against a live
@@ -77,7 +77,7 @@ account, and a pull request that made it try would fail for everyone.
 Prefer adding to the unit suite. Much of olcli is written so that it can be:
 `diff.ts`, `ignore.ts`, `move-plan.ts`, `paths.ts`, `rename-plan.ts` and `scan.ts` are pure
 functions over data, and `client.ts` request construction can be tested
-against a local HTTP server that captures the outgoing request — see
+against a local HTTP server that captures the outgoing request, as in
 `test/client.test.ts`. Reach for e2e only when the thing under test is the
 conversation with Overleaf itself.
 
@@ -102,12 +102,9 @@ Use a scratch project, never one with work in it.
 
 ## Opening a pull request
 
-Discuss first for anything beyond a small fix. Open an issue describing the
-problem and the shape of the change; design questions get settled there, which
-is faster than settling them in review of finished code. Small, obvious fixes
-can go straight to a pull request.
+Pull requests are welcome at any time, and opening an issue first is optional. For a larger change, a draft pull request works just as well as an issue: open it early, describe the problem and the shape of the change, and we discuss it there. Small, obvious fixes can go straight to a pull request.
 
-**Write a CHANGELOG entry.** `CHANGELOG.md` is maintained by hand — nothing
+**Write a CHANGELOG entry.** `CHANGELOG.md` is maintained by hand; nothing
 generates it from commits. Add your entry under an `## [Unreleased]` heading
 at the top, using the `Added` / `Changed` / `Fixed` sections already in use.
 Say what changed and why it was worth changing; the existing entries are the
@@ -122,9 +119,9 @@ reads better consistent with itself than with the prose around it.
 
 Then the usual: branch, commit, push to your fork, open the pull request.
 
-### If your pull request is reimplemented
+### What happens after you open a pull request
 
-Sometimes the maintainer reimplements a change instead of merging the pull request as is, for example to fold several pull requests into one release or to fit the change to code that moved in the meantime. You are still credited: the commit that lands the change carries a `Co-authored-by: Your Name <your-email>` trailer for you, using the name and email of your commits in the pull request, and the CHANGELOG entry names you and links the pull request.
+We review your pull request and, when it does what it says, merge it as it is, so the change lands under your name. If something still needs work, we usually say what we found and fix it ourselves in a follow-up instead of asking you for another round. When a change has to be folded into code that moved in the meantime, the commit that lands it carries a `Co-authored-by: Your Name <your-email>` trailer for you, and the CHANGELOG entry names you and links the pull request.
 
 ### What to expect from CI
 
@@ -139,7 +136,7 @@ reason for a red build.
 
 **"Update branch" is enabled on this repository.** It merges `main` into your
 branch from a button, so a stale branch does not need a maintainer pushing to
-your fork. The button only appears when the merge is clean — real conflicts
+your fork. The button only appears when the merge is clean; real conflicts
 still mean merging `main` locally and resolving them yourself.
 
 ## Releases
@@ -164,8 +161,8 @@ someone to cite a version they are not running.
 
 Use the issue templates. For anything involving requests to Overleaf, include
 the output of `olcli --verbose <command>`, which prints requests and responses
-to stderr, and `olcli check`, which reports where credentials are coming from
+to stderr, and `olcli auth status`, which reports where credentials are coming from
 without printing them.
 
-Redact your session cookie. It is a live credential — anyone holding it is
+Redact your session cookie. It is a live credential: anyone holding it is
 logged into your account.
