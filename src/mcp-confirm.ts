@@ -290,7 +290,8 @@ export type ConfirmationOutcome =
   | 'timeout'
   | 'aborted'
   | 'error'
-  | 'unsupported';
+  | 'unsupported'
+  | 'unsupported_no_cli';
 
 /** What the agent is told when nothing was written, by outcome. */
 export function outcomeMessage(outcome: ConfirmationOutcome, detail?: string): string {
@@ -307,6 +308,8 @@ export function outcomeMessage(outcome: ConfirmationOutcome, detail?: string): s
       return 'The request was canceled while waiting for the user. Nothing was written to Overleaf.';
     case 'error':
       return `The confirmation could not be shown or read${detail ? `: ${detail}` : ''}. Nothing was written to Overleaf.`;
+    case 'unsupported_no_cli':
+      return `This MCP client did not declare the elicitation capability, so olcli cannot ask the user to confirm this change. Nothing was written to Overleaf. There is no olcli command for this change yet, so show the preview to the user. To let this server write without asking, relying on the MCP client's own tool approval, the user can set ${UNCONFIRMED_WRITES_ENV}=1 in the server's environment.`;
     case 'unsupported':
       return `This MCP client did not declare the elicitation capability, so olcli cannot ask the user to confirm this change. Nothing was written to Overleaf. Show the preview and cli_command to the user: they can review it and apply it by running cli_command in a terminal where olcli is signed in. Run it yourself only if the user explicitly asks you to. To let this server write without asking, relying on the MCP client's own tool approval as olcli 0.15.0 did, the user can set ${UNCONFIRMED_WRITES_ENV}=1 in the server's environment.`;
   }

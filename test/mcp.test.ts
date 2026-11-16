@@ -202,7 +202,7 @@ test('every tool has annotations; write tools are not read-only and read tools a
   const fake = fakeClient();
   const h = await connect(async () => fake);
   const { tools } = await h.client.listTools();
-  assert.equal(tools.length, 21);
+  assert.equal(tools.length, 22);
   for (const tool of tools) {
     assert.ok(tool.annotations, `${tool.name} has annotations`);
     assert.equal(tool.annotations.openWorldHint, true, `${tool.name} openWorldHint`);
@@ -397,6 +397,128 @@ test('reject_tracked_changes: apply true without elicitation -> CLI command with
   assert.equal(state.sent.length, 0);
   assert.equal(result.json.cli_command, `olcli changes reject --project ${PROJECT} --yes i`);
   await h.close();
+});
+
+/**
+ * A real OverleafClient with a stubbed socket holding "alpha beta delta."
+ * where "gamma" was replaced by "beta" as plain text. A tracked update adds
+ * the tracked delete and insert, as the ranges tracker would.
+ */
+function suggestClient() {
+  const client: any = new OverleafClient({ cookies: { session: 's' }, csrf: 'c' });
+  const state = { content: 'alpha beta delta.\n', version: 3, changes: [] as any[], sent: [] as any[] };
+  client.suggestionVerifyDelaysMs = [0];
+  client.getProjectInfo = async () => ({ rootFolder: [{ docs: [{ _id: 'd1', name: 'main.tex' }], folders: [] }] });
+  client.getProjectById = async (id: string) => ({ id, name: 'Paper' });
+  client.openProjectSocket = async () => ({ permissionsLevel: 'owner' });
+  client.closeProjectSocket = async () => {};
+  client.joinDocument = async (_s: object, docId: string) => ({
+    docId, content: state.content, lines: [], version: state.version, type: 'sharejs-text-ot', ranges: { changes: JSON.parse(JSON.stringify(state.changes)) },
+  });
+  client.socketRpc = async (_s: object, name: string, args: any[]) => {
+    const update = args[1];
+    state.sent.push({ name, update });
+    state.content = applyTextOps(state.content, update.op);
+    if (update.meta?.tc) {
+      state.changes.push({ id: `${update.meta.tc}000001`, op: { d: 'gamma', p: 10 }, metadata: { user_id: 'u1' } });
+      state.changes.push({ id: `${update.meta.tc}000002`, op: { i: 'beta', p: 6 }, metadata: { user_id: 'u1' } });
+    }
+    state.version++;
+    return [];
+  };
+  return { client, state };
+}
+
+const SUGGEST_EDIT = { before: 'alpha ', deleted: 'gamma', inserted: 'beta', after: ' delta', hint: 6 };
+
+test('suggest_changes: confirmed -> done; the dialog shows each edit and what is left alone', async () => {
+  const { client, state } = suggestClient();
+  const h = await connect(async () => client);
+  const result = await h.call('suggest_changes', { project_id: PROJECT, path: 'main.tex', edits: [SUGGEST_EDIT, { before: 'zz', deleted: 'a', inserted: 'b', after: 'zz' }] });
+  assert.equal(result.isError, false, result.text[0]);
+  assert.equal(h.dialogs.length, 1);
+  const message = h.dialogs[0].message;
+  assert.match(message, /Turn 1 edit in main\.tex into suggestions in Overleaf project "Paper" \(6ad7a5fe455ae390791ca9ef\) \(experimental\)/);
+  assert.match(message, /1\. at main\.tex:1:7: becomes a suggestion\n {3}suggested deletion: "gamma"\n {3}suggested insertion: "beta"\n {3}between "alpha " and " delta"/);
+  assert.match(message, /2\.: neither the old nor the new text is in the document, left alone/);
+  assert.match(message, /about 0\.2 seconds/);
+  assert.deepEqual(result.json.results.map((r: any) => r.result), ['done', 'not-found']);
+  assert.equal(state.sent.length, 2);
+  assert.equal(state.sent[0].update.meta, undefined);
+  assert.match(state.sent[1].update.meta.tc, /^[0-9a-f]{18}$/);
+  await h.close();
+});
+
+test('suggest_changes: declined -> nothing sent', async () => {
+  const { client, state } = suggestClient();
+  const h = await connect(async () => client, { answer: { action: 'decline' } });
+  const result = await h.call('suggest_changes', { project_id: PROJECT, path: 'main.tex', edits: [SUGGEST_EDIT] });
+  assert.equal(result.json.confirmation, 'declined');
+  assert.equal(state.sent.length, 0);
+  await h.close();
+});
+
+test('suggest_changes: an edit that is already tracked asks nothing and sends nothing', async () => {
+  const { client, state } = suggestClient();
+  const h = await connect(async () => client);
+  await h.call('suggest_changes', { project_id: PROJECT, path: 'main.tex', edits: [SUGGEST_EDIT] });
+  const again = await h.call('suggest_changes', { project_id: PROJECT, path: 'main.tex', edits: [SUGGEST_EDIT] });
+  assert.equal(h.dialogs.length, 1, 'only the first call asks');
+  assert.equal(again.json.applied, false);
+  assert.deepEqual(again.json.results.map((r: any) => r.result), ['already-tracked']);
+  assert.equal(state.sent.length, 2);
+  await h.close();
+});
+
+test('suggest_changes: a doc that changed after the preview is not written', async () => {
+  const { client, state } = suggestClient();
+  const h = await connect(async () => client);
+  const plan = client.planSuggestions.bind(client);
+  client.planSuggestions = async (...args: any[]) => {
+    const result = await plan(...args);
+    state.version++;
+    return result;
+  };
+  const result = await h.call('suggest_changes', { project_id: PROJECT, path: 'main.tex', edits: [SUGGEST_EDIT] });
+  assert.equal(result.isError, true);
+  assert.match(result.text[0], /changed since the preview/);
+  assert.equal(state.sent.length, 0);
+  await h.close();
+});
+
+test('suggest_changes: client without elicitation -> nothing sent, preview without a CLI command', async () => {
+  const { client, state } = suggestClient();
+  const h = await connect(async () => client, { elicitation: false });
+  const result = await h.call('suggest_changes', { project_id: PROJECT, path: 'main.tex', edits: [SUGGEST_EDIT] });
+  assert.equal(result.json.confirmation, 'unsupported');
+  assert.equal(result.json.cli_command, undefined);
+  assert.match(result.json.message, /no olcli command for this change/);
+  assert.match(result.json.preview, /becomes a suggestion/);
+  assert.equal(state.sent.length, 0);
+  await h.close();
+});
+
+test('suggest_changes: env opt-out writes without a dialog', async () => {
+  const { client, state } = suggestClient();
+  const h = await connect(async () => client, { env: { [UNCONFIRMED_WRITES_ENV]: '1' } });
+  const result = await h.call('suggest_changes', { project_id: PROJECT, path: 'main.tex', edits: [SUGGEST_EDIT] });
+  assert.equal(h.dialogs.length, 0);
+  assert.deepEqual(result.json.results.map((r: any) => r.result), ['done']);
+  assert.equal(state.sent.length, 2);
+  await h.close();
+});
+
+test('suggest_changes: the schema requires project_id, path and edits; the description says experimental', async () => {
+  const h = await connect(async () => fakeClient());
+  const { tools } = await h.client.listTools();
+  await h.close();
+  const tool = tools.find(item => item.name === 'suggest_changes')!;
+  assert.deepEqual(tool.inputSchema.required, ['project_id', 'path', 'edits']);
+  assert.match(tool.description ?? '', /^Experimental\./);
+  assert.match(tool.description ?? '', /for projects with track changes/);
+  assert.match(tool.description ?? '', /history-ot documents are refused/);
+  assert.doesNotMatch(tool.description ?? '', /premium/);
+  assert.equal(tool.annotations?.readOnlyHint, false);
 });
 
 test('push_file: dialog shows path, size and the diff against the remote file', async () => {

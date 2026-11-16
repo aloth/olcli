@@ -28,6 +28,11 @@ import {
   describeAuthor,
   parseHistoryOtChanges,
   parseShareJsChanges,
+  matchSuggestionEdit,
+  trackedParts,
+  generateIdSeed,
+  type SuggestionEdit,
+  type SuggestionOutcome,
   type DocTrackedChange,
   type ShareJsTextOp,
   type TrackedChangeAuthor,
@@ -56,20 +61,6 @@ export function retryDelayMs(retryAfter: string | string[] | undefined, attempt:
   const seconds = raw === undefined || raw.trim() === '' ? NaN : Number(raw);
   if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, MAX_RETRY_AFTER_MS);
   return 1000 * 2 ** attempt * (0.75 + random() * 0.5);
-}
-
-/** Offset of the occurrence of `needle` nearest to `hint`, or -1. */
-function nearestIndex(text: string, needle: string, hint: number): number {
-  let best = -1;
-  for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + 1)) {
-    if (best === -1 || Math.abs(i - hint) < Math.abs(best - hint)) best = i;
-  }
-  return best;
-}
-
-/** The editor names tracked changes by an 18-hex-digit seed plus a counter, and sends the seed as `meta.tc`. */
-function trackChangesSeed(): string {
-  return Array.from({ length: 18 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
 }
 
 const DEFAULT_BASE_URL = 'https://www.overleaf.com';
@@ -274,23 +265,39 @@ export interface AcceptancePlan {
 
 export { RejectConflictError };
 
+export type { SuggestionEdit };
+
 /**
- * An edit that was made outside Overleaf and pushed as plain text (through
- * git, `olcli push` or a sync): `deleted` was replaced by `inserted` between
- * `before` and `after`. `suggestChanges` turns it into a tracked change.
+ * What `suggestChanges` did with one edit.
+ * - `done`: now a tracked change, checked by reading the doc again.
+ * - `not-pushed`: Overleaf still has the old text; nothing was sent.
+ * - `not-found`: neither text is there; nothing was sent.
+ * - `already-tracked`: the edit is already a tracked change, for example from an earlier call; nothing was sent.
+ * - `unchanged`: `inserted` equals `deleted`, so there is no edit; nothing was sent.
+ * - `invalid`: `before`, `inserted` and `after` are all empty, so the edit cannot be found; nothing was sent.
+ * - `not-tracked`: the edit was sent, but reading the doc again shows no tracked change for it. The text is as before the call.
  */
-export interface SuggestionEdit {
-  before: string;
-  after: string;
-  deleted: string;
-  inserted: string;
-  /** About where the edit is in the doc; the match nearest to it wins. */
-  hint: number;
+export type SuggestionResult = 'done' | 'not-pushed' | 'not-found' | 'already-tracked' | 'unchanged' | 'invalid' | 'not-tracked';
+
+export type { SuggestionOutcome };
+
+/** What `planSuggestions` found for each edit, before anything is written. */
+export interface SuggestionPlan {
+  docId: string;
+  path: string;
+  version: number;
+  /** The account's access level in the project, when Overleaf sent it. */
+  permissionsLevel?: string;
+  edits: Array<{ edit: SuggestionEdit; outcome: SuggestionOutcome; line?: number; column?: number }>;
 }
 
-/** done: now a tracked change. not-pushed: Overleaf still has the old text. not-found: neither text is there. */
-export type SuggestionResult = 'done' | 'not-pushed' | 'not-found';
-
+/** Thrown when the account may review but not edit: turning an edit into a suggestion first writes untracked. */
+export class SuggestionPermissionError extends Error {
+  constructor(path: string, detail?: string) {
+    super(`${path}: this account needs edit access to the project to turn edits into suggestions; review-only access cannot do it, because the edit is first undone without tracking. Nothing was changed${detail ? ` (${detail})` : ''}`);
+    this.name = 'SuggestionPermissionError';
+  }
+}
 
 export interface AddCommentOptions {
   filePath: string;
@@ -327,6 +334,8 @@ interface ProjectSocketSession {
   sid: string;
   projectId: string;
   pollUrl: () => string;
+  /** From joinProjectResponse: `owner`, `readAndWrite`, `review` or `readOnly`, when Overleaf sent it. */
+  permissionsLevel?: string;
 }
 
 export interface SessionCookiePair {
@@ -1419,7 +1428,11 @@ export class OverleafClient {
       if (packets.some(packet => {
         if (!packet.startsWith('5:::')) return false;
         try {
-          return JSON.parse(packet.slice(4))?.name === 'joinProjectResponse';
+          const payload = JSON.parse(packet.slice(4));
+          if (payload?.name !== 'joinProjectResponse') return false;
+          const level = payload?.args?.[0]?.permissionsLevel;
+          if (typeof level === 'string') session.permissionsLevel = level;
+          return true;
         } catch {
           return false;
         }
@@ -2836,14 +2849,69 @@ export class OverleafClient {
   }
 
   /**
-   * Turn edits that already reached Overleaf as plain text into tracked
-   * changes, as if they had been typed in Reviewing mode: each edit is undone
-   * without tracking and then redone with tracking (the update's `meta.tc`).
-   * The text ends up as it was, so a git clone that pushed the edit has
-   * nothing new to pull. An edit whose new text is not in the doc is left
-   * alone and reported. One socket, one join; sharejs-text-ot docs only.
+   * Work out what `suggestChanges` would do with `edits`, without writing:
+   * per edit the outcome and, for an edit that would become a suggestion or
+   * is already tracked, its line and column. Refuses history-ot docs, like
+   * `suggestChanges`.
    */
-  async suggestChanges(projectId: string, filePath: string, edits: SuggestionEdit[]): Promise<SuggestionResult[]> {
+  async planSuggestions(projectId: string, filePath: string, edits: SuggestionEdit[]): Promise<SuggestionPlan> {
+    const docs = this.collectProjectDocs(await this.getProjectInfo(projectId));
+    const wanted = filePath.replace(/^\/+/, '');
+    const doc = docs.find(item => item.path.replace(/^\/+/, '') === wanted);
+    if (!doc) {
+      throw new Error(`Doc not found: ${filePath}`);
+    }
+    const session = await this.openProjectSocket(projectId);
+    try {
+      const joinedDoc = await this.joinDocument(session, doc.id);
+      if (joinedDoc.type !== 'sharejs-text-ot') {
+        throw new Error(`${doc.path}: turning edits into tracked changes is not supported for history-ot docs yet`);
+      }
+      const changes = parseShareJsChanges(joinedDoc.ranges);
+      const planned = edits.map(edit => {
+        const match = matchSuggestionEdit(joinedDoc.content, changes, edit);
+        const location = match.position === undefined ? undefined : this.positionToLineColumn(joinedDoc.content, match.position);
+        if (match.outcome === 'suggest') {
+          // A repeated edit later in the list must see this one as tracked.
+          if (edit.deleted) changes.push({ id: '', kind: 'delete', position: match.position! + edit.inserted.length, text: edit.deleted, userId: null });
+          if (edit.inserted) changes.push({ id: '', kind: 'insert', position: match.position!, text: edit.inserted, userId: null });
+        }
+        return { edit, outcome: match.outcome, ...(location ?? {}) };
+      });
+      return { docId: doc.id, path: doc.path, version: joinedDoc.version, permissionsLevel: session.permissionsLevel, edits: planned };
+    } finally {
+      await this.closeProjectSocket(session);
+    }
+  }
+
+  /**
+   * Delays before each read-back of a doc after `suggestChanges` wrote to it.
+   * The real-time service acknowledges an update when it is queued, so the
+   * new ranges can take a moment to show up.
+   */
+  private suggestionVerifyDelaysMs: number[] = [0, 300, 700, 1500];
+
+  /**
+   * Experimental. Turn edits that already reached Overleaf as plain text
+   * (through git, `olcli push` or a sync) into tracked changes, as if they
+   * had been typed in Reviewing mode: each edit is undone without tracking
+   * and then redone with tracking (the update's `meta.tc`). The text ends up
+   * as it was, so a git clone that pushed the edit has nothing new to pull.
+   *
+   * Limits: sharejs-text-ot docs only; history-ot docs are refused. Between
+   * the undo and the redo, collaborators who have the doc open see the old
+   * text for a short moment (about 0.2 s on overleaf.com). The account needs
+   * edit access: the undo is an untracked edit, which review-only access
+   * cannot send.
+   *
+   * One result per edit, in order (see `SuggestionResult`). Edits that are
+   * invalid, unchanged, not pushed, not found or already tracked are left
+   * alone. After writing, the doc is read again and an edit without a
+   * tracked change is reported as `not-tracked` instead of `done`. With
+   * `expectedVersion` (from `planSuggestions`), a doc that changed since is
+   * refused with `RejectConflictError` and nothing is written.
+   */
+  async suggestChanges(projectId: string, filePath: string, edits: SuggestionEdit[], options: { expectedVersion?: number } = {}): Promise<SuggestionResult[]> {
     const docs = this.collectProjectDocs(await this.getProjectInfo(projectId));
     const wanted = filePath.replace(/^\/+/, '');
     const doc = docs.find(item => item.path.replace(/^\/+/, '') === wanted);
@@ -2851,39 +2919,101 @@ export class OverleafClient {
       throw new Error(`Doc not found: ${filePath}`);
     }
 
+    const results: SuggestionResult[] = [];
+    const written: Array<{ index: number; seed: string; position: number; edit: SuggestionEdit }> = [];
     const session = await this.openProjectSocket(projectId);
     try {
       const joinedDoc = await this.joinDocument(session, doc.id);
       if (joinedDoc.type !== 'sharejs-text-ot') {
         throw new Error(`${doc.path}: turning edits into tracked changes is not supported for history-ot docs yet`);
       }
+      if (options.expectedVersion !== undefined && joinedDoc.version !== options.expectedVersion) {
+        throw new RejectConflictError(`${doc.path} changed since the preview (version ${options.expectedVersion} -> ${joinedDoc.version}); nothing was written, run it again`);
+      }
       const content = joinedDoc.content;
+      const changes = parseShareJsChanges(joinedDoc.ranges);
+      const level = session.permissionsLevel;
+      const canEdit = level === undefined || level === 'owner' || level === 'readAndWrite';
       let version = joinedDoc.version;
       const send = async (op: ShareJsTextOp[], tc?: string) => {
         await this.socketRpc(session, 'applyOtUpdate', [doc.id, { doc: doc.id, op, v: version, ...(tc ? { meta: { tc } } : {}) }]);
         version++;
       };
 
-      const results: SuggestionResult[] = [];
       for (const edit of edits) {
-        const from = edit.hint - edit.before.length;
-        const at = edit.inserted === edit.deleted ? -1 : nearestIndex(content, edit.before + edit.inserted + edit.after, from);
-        if (at === -1) {
-          results.push(nearestIndex(content, edit.before + edit.deleted + edit.after, from) === -1 ? 'not-found' : 'not-pushed');
+        const match = matchSuggestionEdit(content, changes, edit);
+        if (match.outcome !== 'suggest') {
+          results.push(match.outcome === 'invalid' || match.outcome === 'unchanged' || match.outcome === 'not-pushed'
+            || match.outcome === 'not-found' || match.outcome === 'already-tracked' ? match.outcome : 'not-found');
           continue;
         }
-        const p = at + edit.before.length;
+        // Refuse before the first write: a review-only account can send the tracked redo but not the untracked undo.
+        if (!canEdit) throw new SuggestionPermissionError(doc.path, `access level ${level}`);
+        const p = match.position!;
         // Each edit leaves the text as it found it, so the offsets of the next edits stay valid.
         const undo: ShareJsTextOp[] = [...(edit.inserted ? [{ p, d: edit.inserted }] : []), ...(edit.deleted ? [{ p, i: edit.deleted }] : [])];
         const redo: ShareJsTextOp[] = [...(edit.deleted ? [{ p, d: edit.deleted }] : []), ...(edit.inserted ? [{ p, i: edit.inserted }] : [])];
-        await send(undo);
-        await send(redo, trackChangesSeed());
+        try {
+          await send(undo);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (/not authorized/.test(message)) {
+            throw new SuggestionPermissionError(doc.path, message);
+          }
+          if (/did not return an acknowledgement/.test(message)) {
+            // What a review-only account gets live: the server refuses the untracked undo and drops the socket.
+            throw new SuggestionPermissionError(doc.path, `${message}; if the account does have edit access, check ${doc.path} on Overleaf, since the undo may have arrived without the redo`);
+          }
+          throw error;
+        }
+        const seed = generateIdSeed();
+        await send(redo, seed);
+        written.push({ index: results.length, seed, position: p, edit });
         results.push('done');
+        // A repeated edit in the same call must see this one as tracked.
+        if (edit.deleted) changes.push({ id: `${seed}-d`, kind: 'delete', position: p + edit.inserted.length, text: edit.deleted, userId: null });
+        if (edit.inserted) changes.push({ id: `${seed}-i`, kind: 'insert', position: p, text: edit.inserted, userId: null });
       }
-      return results;
     } finally {
       await this.closeProjectSocket(session);
     }
+
+    if (written.length > 0) {
+      const unverified = await this.unverifiedSuggestions(projectId, doc.id, written);
+      for (const index of unverified) results[index] = 'not-tracked';
+    }
+    return results;
+  }
+
+  /**
+   * Read a doc again until every written suggestion shows up as a tracked
+   * change, or the read-back delays run out. Returns the result indexes that
+   * never showed up. A change counts when its id starts with the seed sent
+   * with the redo, or, since the ranges tracker merges an insert into an
+   * adjacent one by the same user, when a tracked change covers the edit.
+   */
+  private async unverifiedSuggestions(projectId: string, docId: string, written: Array<{ index: number; seed: string; position: number; edit: SuggestionEdit }>): Promise<number[]> {
+    let missing = written;
+    for (const delay of this.suggestionVerifyDelaysMs) {
+      if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
+      const session = await this.openProjectSocket(projectId);
+      let changes: DocTrackedChange[];
+      try {
+        changes = parseShareJsChanges((await this.joinDocument(session, docId)).ranges);
+      } finally {
+        await this.closeProjectSocket(session);
+      }
+      missing = missing.filter(item => {
+        const { deleted, inserted } = item.edit;
+        const bySeed = (kind: 'insert' | 'delete') => changes.some(change => change.kind === kind && change.id.startsWith(item.seed));
+        const parts = trackedParts(changes, item.position, deleted, inserted);
+        const insertOk = inserted === '' || bySeed('insert') || parts.insert;
+        const deleteOk = deleted === '' || bySeed('delete') || parts.delete;
+        return !(insertOk && deleteOk);
+      });
+      if (missing.length === 0) break;
+    }
+    return missing.map(item => item.index);
   }
 
   async resolveComment(projectId: string, threadId: string): Promise<ProjectComment> {

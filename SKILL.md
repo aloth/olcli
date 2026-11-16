@@ -119,7 +119,7 @@ olcli-mcp
 npx -y --package @aloth/olcli olcli-mcp
 ```
 
-Available MCP tools: `list_projects`, `get_project_info`, `pull_project`, `push_file`, `compile`, `download_pdf`, `list_comments`, `get_entities`, `download_file`, `add_comment`, `reply_to_comment`, `resolve_comment`, `delete_entity`, `rename_entity`, `rename_project`, `plan_project_renames`, `compile_with_outputs`, `diff_project`, `create_project`, `accept_tracked_changes`, `reject_tracked_changes`.
+Available MCP tools: `list_projects`, `get_project_info`, `pull_project`, `push_file`, `compile`, `download_pdf`, `list_comments`, `get_entities`, `download_file`, `add_comment`, `reply_to_comment`, `resolve_comment`, `delete_entity`, `rename_entity`, `rename_project`, `plan_project_renames`, `compile_with_outputs`, `diff_project`, `create_project`, `accept_tracked_changes`, `reject_tracked_changes`, `suggest_changes` (experimental).
 
 `compile`, `download_pdf` and `compile_with_outputs` accept an optional `resource_path` to compile a specific root document.
 
