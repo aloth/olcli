@@ -41,6 +41,22 @@ import { HttpStatusError, ProjectOwnerOnlyError, SessionExpiredError, httpError,
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
 const USER_AGENT = `olcli/${pkg.version}`;
+/** How often a request answered with HTTP 429 is retried before the 429 is returned to the caller. */
+const MAX_429_RETRIES = 5;
+/** Longest wait olcli accepts from a Retry-After header, so a server cannot stall a command for an hour. */
+export const MAX_RETRY_AFTER_MS = 60_000;
+
+/**
+ * How long to wait before retry number `attempt + 1` of a request answered with 429. A Retry-After value in
+ * seconds wins when present, capped at 60 s; a missing, non-numeric or negative value falls back to exponential
+ * backoff (1, 2, 4, 8, 16 s with +/-25% jitter).
+ */
+export function retryDelayMs(retryAfter: string | string[] | undefined, attempt: number, random: () => number = Math.random): number {
+  const raw = Array.isArray(retryAfter) ? retryAfter[0] : retryAfter;
+  const seconds = raw === undefined || raw.trim() === '' ? NaN : Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, MAX_RETRY_AFTER_MS);
+  return 1000 * 2 ** attempt * (0.75 + random() * 0.5);
+}
 
 /** Offset of the occurrence of `needle` nearest to `hint`, or -1. */
 function nearestIndex(text: string, needle: string, hint: number): number {
@@ -153,6 +169,8 @@ export type CommentStatus = 'all' | 'open' | 'resolved';
 export interface ListCommentsOptions {
   status?: CommentStatus;
   contextLines?: number;
+  /** For `listReview`: characters of text around each tracked change, as in `ListTrackedChangesOptions`. */
+  surroundingChars?: number;
   /** Sockets used to join docs in parallel (1-8). Defaults to OLCLI_CONCURRENCY, else 4. */
   concurrency?: number;
 }
@@ -190,10 +208,20 @@ export interface TrackedChange {
   author: TrackedChangeAuthor;
   timestamp?: string;
   context?: CommentContext;
+  /**
+   * Up to `surroundingChars` characters of the visible text right before and
+   * right after the change (after the inserted text for an insert). Only set
+   * when asked for; enough to find the change again in a copy of the doc that
+   * was edited since, where `position` no longer fits.
+   */
+  before?: string;
+  after?: string;
 }
 
 export interface ListTrackedChangesOptions {
   contextLines?: number;
+  /** Characters of text to return around each change as `before`/`after` (0, the default, returns none). */
+  surroundingChars?: number;
   /** Sockets used to join docs in parallel (1-8). Defaults to OLCLI_CONCURRENCY, else 4. */
   concurrency?: number;
 }
@@ -701,6 +729,8 @@ export class OverleafClient {
     timeoutMs?: number;
     maxRedirects?: number;
     expect?: 'text' | 'json' | 'buffer';
+    /** Wait and retry when Overleaf answers 429 (default). Off where a 429 has its own handling. */
+    retryOn429?: boolean;
   } = {}): Promise<{ status: number; ok: boolean; headers: Record<string, string | string[]>; body: string | Buffer | any }> {
     const method = options.method || 'GET';
     const timeoutMs = options.timeoutMs ?? this.timeoutMs;
@@ -800,7 +830,16 @@ export class OverleafClient {
       });
     };
 
-    return doRequest(url, maxRedirects);
+    // Overleaf answers bursts with 429 before doing anything, so a retry is safe for every method. It sends no
+    // Retry-After in practice and its limit lasts about 25 s, so wait 1, 2, 4, 8 and 16 s (about 30 s in all), with
+    // +/-25% jitter so parallel callers do not retry in step. A Retry-After header wins when present, capped at 60 s.
+    for (let attempt = 0; ; attempt++) {
+      const res = await doRequest(url, maxRedirects);
+      if (res.status !== 429 || options.retryOn429 === false || attempt >= MAX_429_RETRIES) return res;
+      const waitMs = retryDelayMs(res.headers['retry-after'], attempt);
+      this.logVerbose(`${method} ${url} -> 429, retrying in ${Math.round(waitMs)}ms (${attempt + 1}/${MAX_429_RETRIES})`);
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+    }
   }
 
   /**
@@ -1349,12 +1388,14 @@ export class OverleafClient {
     return docs;
   }
 
-  private async openProjectSocket(projectId: string): Promise<ProjectSocketSession> {
+  /** `retryOn429: false` for sockets the caller can do without: a rate-limited one then fails at once. */
+  private async openProjectSocket(projectId: string, { retryOn429 = true } = {}): Promise<ProjectSocketSession> {
     const handshakeUrl = `${this.baseUrl}/socket.io/1/?projectId=${encodeURIComponent(projectId)}&t=${Date.now()}`;
     const handshakeResponse = await this.httpRequest(handshakeUrl, {
       headers: { 'Cookie': this.getCookieHeader(), 'User-Agent': USER_AGENT },
       expect: 'text',
-      timeoutMs: 5000
+      timeoutMs: 5000,
+      retryOn429
     });
 
     if (!handshakeResponse.ok) {
@@ -2433,7 +2474,7 @@ export class OverleafClient {
     const extra = Array.from({ length: Math.min(concurrency, docs.length) - 1 }, async () => {
       let session: ProjectSocketSession;
       try {
-        session = await this.openProjectSocket(projectId);
+        session = await this.openProjectSocket(projectId, { retryOn429: false });
       } catch (error) {
         if ((error as { status?: number }).status === 429) return;
         if (failure === undefined) failure = error;
@@ -2464,7 +2505,7 @@ export class OverleafClient {
     const joinedDocs = await this.joinDocuments(projectId, docs, resolveCommentConcurrency(options.concurrency));
     return {
       comments: this.commentsFromDocs(docs, joinedDocs, threads, options.status || 'all', contextLines),
-      changes: await this.changesFromDocs(projectId, projectInfo, docs, joinedDocs, contextLines)
+      changes: await this.changesFromDocs(projectId, projectInfo, docs, joinedDocs, contextLines, options.surroundingChars)
     };
   }
 
@@ -2570,7 +2611,7 @@ export class OverleafClient {
     const projectInfo = await this.getProjectInfo(projectId);
     const docs = this.collectProjectDocs(projectInfo);
     const joinedDocs = await this.joinDocuments(projectId, docs, resolveCommentConcurrency(options.concurrency));
-    return this.changesFromDocs(projectId, projectInfo, docs, joinedDocs, options.contextLines || 0);
+    return this.changesFromDocs(projectId, projectInfo, docs, joinedDocs, options.contextLines || 0, options.surroundingChars);
   }
 
   private async changesFromDocs(
@@ -2578,7 +2619,8 @@ export class OverleafClient {
     projectInfo: ProjectInfo,
     docs: ProjectDoc[],
     joinedDocs: JoinedDocument[],
-    contextLines: number
+    contextLines: number,
+    surroundingChars = 0
   ): Promise<TrackedChange[]> {
     const perDoc = joinedDocs.map(doc => this.docTrackedChanges(doc));
     const anyChanges = perDoc.some(doc => doc.changes.length > 0);
@@ -2589,6 +2631,7 @@ export class OverleafClient {
       const { changes, visibleContent } = perDoc[index];
       for (const change of changes) {
         const location = this.positionToLineColumn(visibleContent, change.position);
+        const end = change.kind === 'insert' ? change.position + change.text.length : change.position;
         result.push({
           id: change.id,
           docId: doc.id,
@@ -2600,7 +2643,11 @@ export class OverleafClient {
           text: change.text,
           author: describeAuthor(change.userId, users),
           ...(change.timestamp ? { timestamp: change.timestamp } : {}),
-          ...(contextLines > 0 ? { context: this.buildCommentContext(visibleContent, location.line, contextLines) } : {})
+          ...(contextLines > 0 ? { context: this.buildCommentContext(visibleContent, location.line, contextLines) } : {}),
+          ...(surroundingChars > 0 ? {
+            before: visibleContent.slice(Math.max(0, change.position - surroundingChars), change.position),
+            after: visibleContent.slice(end, end + surroundingChars)
+          } : {})
         });
       }
     }
@@ -2633,16 +2680,7 @@ export class OverleafClient {
     const byDoc = new Map<string, TrackedChange[]>();
     for (const change of selected) byDoc.set(change.docId, [...(byDoc.get(change.docId) ?? []), change]);
     for (const [docId, changes] of byDoc) {
-      const response = await this.httpRequest(`${this.baseUrl}/project/${projectId}/doc/${docId}/changes/accept`, {
-        method: 'POST',
-        headers: this.getHeaders(true),
-        body: JSON.stringify({ change_ids: changes.map(change => change.id) }),
-        expect: 'text'
-      });
-      if (!response.ok) {
-        throw httpError(`Failed to accept tracked changes in ${changes[0].path}`, response.status);
-      }
-      this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
+      await this.acceptTrackedChangesInDoc(projectId, docId, changes.map(change => change.id), changes[0].path);
     }
 
     const after = await this.listTrackedChanges(projectId);
@@ -2651,6 +2689,25 @@ export class OverleafClient {
       throw new Error(`Overleaf did not accept: ${remaining.map(change => change.id).join(', ')}`);
     }
     return selected;
+  }
+
+  /**
+   * Accept tracked changes of one doc with a single request, the editor's
+   * route, without listing the project before or after. For callers that
+   * already hold the changes and their doc id and re-read the project anyway;
+   * `acceptTrackedChanges` resolves ids and checks the result for you.
+   */
+  async acceptTrackedChangesInDoc(projectId: string, docId: string, ids: string[], label = docId): Promise<void> {
+    const response = await this.httpRequest(`${this.baseUrl}/project/${projectId}/doc/${docId}/changes/accept`, {
+      method: 'POST',
+      headers: this.getHeaders(true),
+      body: JSON.stringify({ change_ids: ids }),
+      expect: 'text'
+    });
+    if (!response.ok) {
+      throw httpError(`Failed to accept tracked changes in ${label}`, response.status);
+    }
+    this.applySetCookieHeaders(response.headers['set-cookie'] as string[] | undefined);
   }
 
   private selectTrackedChanges(all: TrackedChange[], ids: string[]): TrackedChange[] {

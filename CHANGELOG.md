@@ -7,6 +7,16 @@ All notable changes to this project will be documented in this file.
 ### Added
 - **Turn pushed edits into tracked changes** - `suggestChanges(projectId, path, edits)` makes edits that reached Overleaf as plain text, through git, `olcli push` or a sync, show up as tracked changes, as if they had been typed in Reviewing mode. Each edit is given as the old and new text with some text around it; olcli finds the new text, undoes the edit without tracking and redoes it with tracking (`meta.tc` on the update, as the editor sends it). The text ends up as it was, so a git clone that pushed the edit has nothing new to pull. An edit whose new text is not on Overleaf yet is reported as `not-pushed` and left alone. sharejs-text-ot docs only; history-ot docs are refused
 
+## [0.17.0] - 2026-11-15
+
+### Added
+- **Context around tracked changes** ([#64](https://github.com/aloth/olcli/pull/64)) - `listTrackedChanges` and `listReview` accept `surroundingChars`. With it, each change carries `before` and `after`: up to that many characters of the visible text right before and right after the change. This lets an integration find a change again in a local copy that has moved on since, which `position` alone cannot do, especially for deletions. Works for sharejs-text-ot and history-ot docs. Off by default, so CLI output and JSON are unchanged. Thanks to @fredericosantos
+- **`acceptTrackedChangesInDoc(projectId, docId, ids)`** ([#67](https://github.com/aloth/olcli/pull/67)) - accepts tracked changes in one doc with a single request, without reading the whole project before and after. Meant for editor integrations that already know the doc and read the project again themselves. `acceptTrackedChanges` now uses it internally and still checks the result; its behavior is unchanged. Thanks to @fredericosantos
+- **Tracked-change types exported** ([#65](https://github.com/aloth/olcli/pull/65)) - `TrackedChange`, `ListTrackedChangesOptions`, `ProjectReview`, the acceptance and rejection plan types, `RejectConflictError`, `TrackedChangeKind`, `TrackedChangeAuthor` and `ShareJsTextOp` are exported from `@aloth/olcli`, so library code no longer has to import from `dist/client.js`. Thanks to @fredericosantos
+
+### Fixed
+- **Rate-limited requests are retried** ([#63](https://github.com/aloth/olcli/pull/63)) - Overleaf answers a burst of requests with HTTP 429 for about 25 seconds, so a command that sends several requests in a row, such as adding a comment and then reading the threads back, could fail with "Overleaf is rate limiting requests". Every request now retries a 429 up to 5 times, after about 1, 2, 4, 8 and 16 seconds with random jitter, or after the time in `Retry-After` when Overleaf sends one, capped at 60 seconds. A 429 means Overleaf did nothing, so retrying is safe for every request. `--verbose` logs each retry. The additional sockets olcli opens to read many docs in parallel do not retry, so a rate limit there still just drops that socket. Thanks to @fredericosantos
+
 ## [0.16.2] - 2026-11-11
 
 ### Fixed
