@@ -213,16 +213,16 @@ function projectDir(files: Record<string, string>): string {
   return dir;
 }
 
-test('diff --exit-code exits 2 when no credential is found, 1 without the flag', async () => {
+test('diff --exit-code exits 2 when no credential is found, 4 (not signed in) without the flag', async () => {
   const gated = await olcli(['diff', '--exit-code']);
   assert.equal(gated.status, 2, gated.stderr);
   assert.match(gated.stderr, /No session cookie or password credentials found/);
 
   const plain = await olcli(['diff']);
-  assert.equal(plain.status, 1, plain.stderr);
+  assert.equal(plain.status, 4, plain.stderr);
 });
 
-test('diff --exit-code exits 2 on usage errors, other commands keep 1', async () => {
+test('diff --exit-code exits 2 on usage errors, and so does every other command', async () => {
   const unknown = await olcli(['diff', '--exit-code', '--bogus']);
   assert.equal(unknown.status, 2);
   assert.match(unknown.stderr, /unknown option '--bogus'/);
@@ -234,8 +234,8 @@ test('diff --exit-code exits 2 on usage errors, other commands keep 1', async ()
   assert.equal(missingValue.status, 2);
   assert.match(missingValue.stderr, /argument missing/);
 
-  assert.equal((await olcli(['diff', '--bogus'])).status, 1);
-  assert.equal((await olcli(['pull', '--bogus'])).status, 1);
+  assert.equal((await olcli(['diff', '--bogus'])).status, 2);
+  assert.equal((await olcli(['pull', '--bogus'])).status, 2);
 
   const help = await olcli(['diff', '--exit-code', '--help']);
   assert.equal(help.status, 0);
@@ -263,15 +263,15 @@ test('diff --exit-code exits 2 on an invalid session and 0 or 1 on a real compar
   }
 });
 
-test('whoami exits 1 when not authenticated or the session is invalid, 0 when valid', async () => {
+test('whoami exits 4 when not authenticated or the session is invalid, 0 when valid', async () => {
   const none = await olcli(['whoami']);
-  assert.equal(none.status, 1, none.stdout + none.stderr);
+  assert.equal(none.status, 4, none.stdout + none.stderr);
   assert.match(none.stdout, /Not signed in/);
 
   const expired = await mockOverleaf({ loggedIn: false });
   try {
     const result = await olcli(['whoami'], { env: sessionEnv(expired) });
-    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.equal(result.status, 4, result.stdout + result.stderr);
     assert.match(result.stdout + result.stderr, /Session expired or invalid\. Run: olcli auth/);
   } finally {
     await expired.close();
@@ -292,7 +292,7 @@ test('an expired session names the fix before the detail, on every command', asy
   try {
     for (const args of [['list'], ['info', 'Paper'], ['pull', 'Paper']]) {
       const result = await olcli(args, { env: sessionEnv(expired) });
-      assert.equal(result.status, 1, `${args.join(' ')}: ${result.stdout}${result.stderr}`);
+      assert.equal(result.status, 4, `${args.join(' ')}: ${result.stdout}${result.stderr}`);
       const output = result.stdout + result.stderr;
       assert.match(output, /Session expired or invalid\. Run: olcli auth/, args.join(' '));
       assert.doesNotMatch(output, /Failed: /, args.join(' '));
@@ -302,9 +302,9 @@ test('an expired session names the fix before the detail, on every command', asy
   }
 });
 
-test('auth status shows instance, account, source and a masked cookie; exits 1 when signed out', async () => {
+test('auth status shows instance, account, source and a masked cookie; exits 4 when signed out', async () => {
   const none = await olcli(['auth', 'status']);
-  assert.equal(none.status, 1, none.stdout + none.stderr);
+  assert.equal(none.status, 4, none.stdout + none.stderr);
   assert.match(none.stdout, /Not signed in/);
   assert.match(none.stdout, /Run: olcli auth/);
 
@@ -377,7 +377,7 @@ test('auth --cookie without a value prompts, and without a terminal says how to 
 
 test('no error or hint suggests --password on the command line', async () => {
   const none = await olcli(['list'], { env: freshHome() });
-  assert.equal(none.status, 1);
+  assert.equal(none.status, 4);
   assert.doesNotMatch(none.stdout + none.stderr, /--password/);
   assert.match(none.stderr, /olcli auth --cookie/);
   for (const file of ['cli.ts', 'mcp.ts', 'mcp-server.ts', 'remote-helper.ts']) {
@@ -461,7 +461,7 @@ test('auth with a password refused by reCAPTCHA names the browser sign-in and ne
     const env = { ...freshHome(), OVERLEAF_BASE_URL: mock.baseUrl };
     // --password *** used here because a hidden prompt needs a terminal; this is the scripted case.
     const result = await olcli(['auth', '--email', 'me@example.com', '--password', 'pw'], { env });
-    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.equal(result.status, 4, result.stdout + result.stderr);
     assert.match(result.stdout + result.stderr, CAPTCHA_MESSAGE);
     assert.doesNotMatch(result.stdout + result.stderr, /\[Y\/n\]/);
     assert.equal(mock.requests.filter((r) => r === 'POST /login').length, 1);
@@ -475,7 +475,7 @@ test('commands that fall back to OVERLEAF_EMAIL/OVERLEAF_PASSWORD report the cap
   try {
     const env = { ...freshHome(), OVERLEAF_BASE_URL: mock.baseUrl, OVERLEAF_EMAIL: 'me@example.com', OVERLEAF_PASSWORD: 'pw' };
     const result = await olcli(['list'], { env });
-    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.equal(result.status, 4, result.stdout + result.stderr);
     assert.match(result.stdout + result.stderr, CAPTCHA_MESSAGE);
     assert.doesNotMatch(result.stdout + result.stderr, /\[Y\/n\]/);
   } finally {

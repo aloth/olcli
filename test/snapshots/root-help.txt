@@ -47,7 +47,7 @@ Settings:
   ignored [options] [dir]                            Show ignore patterns currently in effect for a project directory
 
 Help:
-  help [command]                                     display help for command
+  help [command]                                     Help for a command, or a topic: exit-codes, environment
 
 Environment:
   OVERLEAF_SESSION        session cookie (instead of olcli auth)

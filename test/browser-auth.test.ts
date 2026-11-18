@@ -309,7 +309,7 @@ function olcli(args: string[], env: Record<string, string> = {}): Promise<{ stat
 test('--browser cannot be combined with --cookie, --email or --password', async () => {
   for (const extra of [['--cookie', 'abc'], ['--cookie'], ['--email', 'me@example.com'], ['--password', 'x']]) {
     const result = await olcli(['auth', '--browser', ...extra]);
-    assert.equal(result.status, 1, extra.join(' '));
+    assert.equal(result.status, 2, extra.join(' '));
     assert.match(result.stderr, /Use either --browser or --cookie or --email\/--password/);
   }
 });

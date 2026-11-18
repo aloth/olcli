@@ -43,6 +43,7 @@ import {
   runLatexdiff,
 } from './latexdiff.js';
 import { loadIgnore } from './ignore.js';
+import { EXIT, HELP_TOPICS, UsageError, commanderExitCode, exitCodeFor } from './exit-codes.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -81,6 +82,14 @@ if (colorDisabled()) chalk.level = 0;
 
 const program = new Command();
 
+// Before any subcommand exists: Commander copies the exit callback into each
+// subcommand when it is created. Every parse error (unknown option or
+// command, missing argument or value) exits 2 instead of Commander's 1, so a
+// script can tell a typo from a failed run. `diff` sets its own, see there.
+program.exitOverride((error) => {
+  process.exit(commanderExitCode(error));
+});
+
 program
   .name('olcli')
   .description('Overleaf CLI - interact with Overleaf projects from the command line')
@@ -110,15 +119,24 @@ Environment:
 /**
  * The one way a command reports a failure: the cause (and the command that
  * fixes it) on the spinner line, details such as the HTTP status on stderr
- * after it. Exits with `code`, 1 unless the command reserves 1 for something
- * else (`diff --exit-code`).
+ * after it. Exits with the status from the exit-code table for the error
+ * (`olcli help exit-codes`), or with `code` when the command reserves its
+ * statuses for something else (`diff --exit-code`).
  */
-function failWith(spinner: Ora, error: unknown, code = 1): never {
+function failWith(spinner: Ora, error: unknown, code?: number): never {
   const verbose = Boolean(program.opts().verbose);
   const [first, ...rest] = formatError(error, { verbose });
   spinner.fail(first);
   for (const line of rest) console.error(chalk.dim(`  ${line}`));
-  process.exit(code);
+  process.exit(code ?? exitCodeFor(error));
+}
+
+/** A usage error found after parsing: the message on stderr, exit 2. */
+function usageError(...lines: string[]): never {
+  const [first, ...rest] = lines;
+  console.error(chalk.red(first));
+  for (const line of rest) console.error(line);
+  process.exit(EXIT.USAGE);
 }
 
 /** Everything on stdin, as text. Used by `auth --cookie -`. */
@@ -163,11 +181,11 @@ function defaultProjectDir(projectId: string, name: string, cwd = '.'): string {
 /**
  * Helper to get authenticated client
  *
- * `failureCode` is the status when no credential is found at all. It is 1 for
- * every command except `diff --exit-code`, which reserves 1 for "something
- * differs" and reports a run that could not start as 2.
+ * `failureCode` is the status when no credential is found at all. It is 4
+ * (not signed in) for every command except `diff --exit-code`, which keeps
+ * diff(1)'s statuses and reports a run that could not start as 2.
  */
-async function getClient(cookieOpt?: string, baseUrlOpt?: string, failureCode = 1): Promise<OverleafClient> {
+async function getClient(cookieOpt?: string, baseUrlOpt?: string, failureCode: number = EXIT.AUTH): Promise<OverleafClient> {
   const baseUrl = baseUrlOpt || (program.opts().baseUrl as string | undefined) || getBaseUrl();
   const cookieName = (program.opts().cookieName as string | undefined) || getSessionCookieName();
   const cookie = cookieOpt || getSessionCookie();
@@ -253,7 +271,7 @@ async function resolveProject(
   }
 
   // No project found
-  throw new Error('No project specified. Provide a project name/ID or run from a synced directory.');
+  throw new UsageError('No project specified. Provide a project name/ID or run from a synced directory.');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -302,8 +320,7 @@ reCAPTCHA only).`)
   .action(async (options) => {
     if (options.browser) {
       if (options.cookie || options.email || options.password) {
-        console.error(chalk.red('Use either --browser or --cookie or --email/--password, not several.'));
-        process.exit(1);
+        usageError('Use either --browser or --cookie or --email/--password, not several.');
       }
       await authWithBrowser(options);
       return;
@@ -333,13 +350,11 @@ reCAPTCHA only).`)
     }
 
     if (options.cookie && (options.email || options.password)) {
-      console.error(chalk.red('Use either --cookie or --email/--password, not both.'));
-      process.exit(1);
+      usageError('Use either --cookie or --email/--password, not both.');
     }
 
     if (!options.cookie && !options.email) {
-      console.error(chalk.red('--email is required for password login.'));
-      process.exit(1);
+      usageError('--email is required for password login.');
     }
 
     // The cookie is a secret, so it does not have to travel through argv:
@@ -359,7 +374,7 @@ reCAPTCHA only).`)
         }
         if (error instanceof PromptCancelled) {
           console.error(chalk.red('Cancelled.'));
-          process.exit(1);
+          process.exit(EXIT.INTERRUPTED);
         }
         throw error;
       }
@@ -397,7 +412,7 @@ reCAPTCHA only).`)
           }
           if (error instanceof PromptCancelled) {
             console.error(chalk.red('Cancelled.'));
-            process.exit(1);
+            process.exit(EXIT.INTERRUPTED);
           }
           throw error;
         }
@@ -468,7 +483,7 @@ reCAPTCHA only).`)
         });
         if (offer.outcome === 'browser') return;
         if (offer.outcome === 'unavailable') console.error(chalk.dim(`  Browser sign-in is not available here: ${offer.reason}`));
-        process.exit(1);
+        process.exit(EXIT.AUTH);
       }
       failWith(spinner, error);
     }
@@ -537,7 +552,7 @@ async function authWithBrowser(options: { saveLocal?: boolean }): Promise<void> 
   } catch (error: any) {
     if (error instanceof BrowserSignInAborted) {
       spinner.fail('Cancelled. The browser was closed and its temporary profile deleted.');
-      process.exit(130);
+      process.exit(EXIT.INTERRUPTED);
     }
     failWith(spinner, error);
   } finally {
@@ -551,9 +566,10 @@ async function authWithBrowser(options: { saveLocal?: boolean }): Promise<void> 
  * session valid) and `check` (where do credentials come from), which both
  * stay as hidden aliases.
  *
- * Exit status 1 when no credential is found or the session is rejected, so
- * `olcli auth status || olcli auth` works. exitCode rather than exit(): the
- * report still has to reach a pipe.
+ * Exit status 4 when no credential is found or the session is rejected, so
+ * `olcli auth status || olcli auth` works; 1 when Overleaf could not be
+ * asked (network, server error). exitCode rather than exit(): the report
+ * still has to reach a pipe.
  */
 async function authStatus(options: { json?: boolean }): Promise<void> {
   const baseUrl = (program.opts().baseUrl as string | undefined) || getBaseUrl();
@@ -640,7 +656,7 @@ async function authStatus(options: { json?: boolean }): Promise<void> {
   print();
 
   if (!report.signedIn) {
-    process.exitCode = 1;
+    process.exitCode = failure === undefined ? EXIT.AUTH : exitCodeFor(failure);
     if (options.json) return;
     console.log();
     if (!resolved && !password) {
@@ -671,8 +687,9 @@ authCmd
   .description('Show instance, account, credential source and a masked cookie')
   .option('--json', 'Output as JSON')
   .addHelpText('after', `
-Exits 1 when no credential is found or Overleaf rejects the session, so
-'olcli auth status || olcli auth' signs in only when needed. The cookie is
+Exits 4 when no credential is found or Overleaf rejects the session, and 1
+when Overleaf cannot be reached, so 'olcli auth status || olcli auth' signs
+in only when needed (see: olcli help exit-codes). The cookie is
 shown masked: its last four characters and its length.
 
 Credential sources, first match wins:
@@ -1385,9 +1402,7 @@ projectCmd
   .action(async (name, options) => {
     const template = options.template as string;
     if (template !== 'blank' && template !== 'example') {
-      console.error(chalk.red(`Unsupported project template: ${template}`));
-      console.error('Supported templates: blank, example');
-      process.exit(1);
+      usageError(`Unsupported project template: ${template}`, 'Supported templates: blank, example');
     }
 
     const spinner = ora('Creating project...').start();
@@ -1483,7 +1498,7 @@ projectCmd
         });
       } catch (err: any) {
         spinner.fail(err.message);
-        process.exit(1);
+        process.exit(EXIT.USAGE);
       }
 
       const { planned, skipped, collisions } = plan!;
@@ -1511,7 +1526,7 @@ projectCmd
         for (const c of collisions) console.log(chalk.red(`  ${c}`));
         console.log(chalk.red('Refusing to apply. Overleaf allows duplicate names, so this would'));
         console.log(chalk.red('succeed silently and leave projects you cannot tell apart.'));
-        process.exit(1);
+        process.exit(EXIT.CONFLICT);
       }
 
       if (options.max !== undefined && planned.length > options.max) {
@@ -1600,10 +1615,7 @@ program
       projectId = meta.projectId;
       projectName = meta.projectName;
     } else if (!project) {
-      console.error(chalk.red('No project specified.'));
-      console.error('Usage: olcli pull <project> [dir]');
-      console.error('Or run from a directory with .olcli.json');
-      process.exit(1);
+      usageError('No project specified.', 'Usage: olcli pull <project> [dir]', 'Or run from a directory with .olcli.json');
     }
 
     const spinner = ora('Fetching project...').start();
@@ -1775,9 +1787,7 @@ program
     }
 
     if (!projectId && !projectName) {
-      console.error(chalk.red('No project specified.'));
-      console.error('Either run from a directory with .olcli.json or use --project');
-      process.exit(1);
+      usageError('No project specified.', 'Either run from a directory with .olcli.json or use --project');
     }
 
     const spinner = ora('Connecting...').start();
@@ -2013,9 +2023,7 @@ skipped, or pushed. Combine it with --dry-run to preview deletions:
     }
 
     if (!projectId && !projectName) {
-      console.error(chalk.red('No project specified.'));
-      console.error('Either run from a directory with .olcli.json or use --project');
-      process.exit(1);
+      usageError('No project specified.', 'Either run from a directory with .olcli.json or use --project');
     }
 
     const spinner = ora('Connecting...').start();
@@ -2274,14 +2282,14 @@ program
   .option('--no-default-ignore', 'Disable built-in LaTeX artifact ignore list (only .olignore applies)')
   .option('--no-ignore', 'Disable all ignore filtering')
   .option('--cookie <session>', 'Session cookie override')
-  // Commander reports an unknown option or a missing option value with status
-  // 1, which under --exit-code means "something differs". Only this command's
-  // own usage errors are remapped; help and version still exit 0.
+  // A usage error exits 2 on every command (olcli help exit-codes), which is
+  // also what --exit-code reserves for a failed run, so the two agree. Kept
+  // explicit here because under --exit-code a 1 would read as "differs".
   .exitOverride((error) => {
     const args = process.argv.slice(2);
     const end = args.indexOf('--');
     const exitCodeRequested = (end === -1 ? args : args.slice(0, end)).includes('--exit-code');
-    process.exit(error.exitCode !== 0 && exitCodeRequested ? DIFF_EXIT_FAILURE : error.exitCode);
+    process.exit(error.exitCode !== 0 && exitCodeRequested ? DIFF_EXIT_FAILURE : commanderExitCode(error));
   })
   .addHelpText('after', `
 The remote side is fetched fresh on every run, so the diff describes the
@@ -2326,9 +2334,7 @@ where the markup only covers the root document.`)
     ].filter(Boolean);
 
     if (latexdiffMode && conflicting.length > 0) {
-      console.error(chalk.red(`--latexdiff cannot be combined with ${conflicting.join(', ')}`));
-      console.error('It marks up one root document; those options select and shape unified patch output.');
-      process.exit(failureCode);
+      usageError(`--latexdiff cannot be combined with ${conflicting.join(', ')}`, 'It marks up one root document; those options select and shape unified patch output.');
     }
 
     if (!latexdiffMode) {
@@ -2340,14 +2346,13 @@ where the markup only covers the root document.`)
         options.latexdiffOpt?.length ? '--latexdiff-opt' : null,
       ].filter(Boolean);
       if (latexdiffOnly.length > 0) {
-        console.error(chalk.red(`${latexdiffOnly.join(', ')} only applies with --latexdiff`));
-        process.exit(failureCode);
+        usageError(`${latexdiffOnly.join(', ')} only applies with --latexdiff`);
       }
     }
 
     const spinner = ora('Connecting...').start();
     try {
-      const client = await getClient(options.cookie, undefined, failureCode);
+      const client = await getClient(options.cookie, undefined, options.exitCode ? DIFF_EXIT_FAILURE : EXIT.AUTH);
 
       let resolved;
       try {
@@ -2355,7 +2360,7 @@ where the markup only covers the root document.`)
       } catch (error: any) {
         spinner.fail(error.message);
         console.error('Either run from a directory with .olcli.json or pass a project name/ID');
-        process.exit(failureCode);
+        process.exit(options.exitCode ? DIFF_EXIT_FAILURE : exitCodeFor(error));
       }
       const { id: projectId, name: projectName } = resolved;
 
@@ -2481,7 +2486,7 @@ where the markup only covers the root document.`)
       // flush and then exit with this status on its own.
       if (options.exitCode) process.exitCode = differencesExitCode(entries);
     } catch (error: any) {
-      failWith(spinner, error, failureCode);
+      failWith(spinner, error, options.exitCode ? DIFF_EXIT_FAILURE : undefined);
     }
   });
 
@@ -2791,8 +2796,7 @@ configCmd
   .action((ms: string) => {
     const timeout = parseInt(ms, 10);
     if (isNaN(timeout)) {
-      console.error(chalk.red('Invalid timeout value. Must be a number.'));
-      process.exit(1);
+      usageError('Invalid timeout value. Must be a number.');
     }
     setTimeout(timeout);
     console.log(chalk.green(`Default timeout set to: ${timeout}ms`));
@@ -2870,7 +2874,28 @@ const HELP_GROUPS: [string, string[]][] = [
   });
   // Commander lists groups in the order their first command appears.
   (program.commands as Command[]).sort((a, b) => (order.get(a.name()) ?? 9999) - (order.get(b.name()) ?? 9999));
-  program.commandsGroup('Help:').helpCommand(true);
+  program.commandsGroup('Help:').helpCommand('help [command]', 'Help for a command, or a topic: exit-codes, environment');
 }
 
-program.parse(process.argv);
+/**
+ * `olcli help exit-codes` and `olcli help environment`: topics served by the
+ * built-in help command rather than new commands, so the root help does not
+ * grow. Returns the topic name when argv asks for one.
+ */
+export function requestedHelpTopic(args: string[]): string | undefined {
+  const valueOptions = new Set(['--base-url', '--cookie-name', '--timeout']);
+  let i = 0;
+  while (i < args.length && args[i].startsWith('-')) {
+    i += valueOptions.has(args[i]) ? 2 : 1;
+  }
+  if (args[i] !== 'help') return undefined;
+  const topic = args[i + 1];
+  return topic !== undefined && Object.hasOwn(HELP_TOPICS, topic) ? topic : undefined;
+}
+
+const helpTopic = requestedHelpTopic(process.argv.slice(2));
+if (helpTopic) {
+  process.stdout.write(HELP_TOPICS[helpTopic]);
+} else {
+  program.parse(process.argv);
+}

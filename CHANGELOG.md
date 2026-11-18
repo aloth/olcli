@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **Behavior change for scripts: one exit-code table for every command** - `olcli help exit-codes` prints it: 0 success, 1 failure, 2 usage error, 3 reserved for "differences found", 4 not signed in or session rejected, 5 conflict (nothing was written), 130 interrupted. Until now nearly every failure exited 1, so a script could not tell an expired session from a typo or a network error. Changes: an unknown option or command, a missing argument or option value, an invalid value and a missing project exit 2 instead of 1; no credential, a rejected session and a password sign-in refused by a captcha exit 4 instead of 1, also for `auth status` and its hidden aliases `whoami` and `check`; a document that changed since the preview of `changes reject` and a name collision in `project rename-bulk` exit 5 instead of 1; a cancelled prompt exits 130 instead of 1. `diff --exit-code` keeps the statuses of diff(1) it documented before: 0 same, 1 different, 2 failed. `olcli auth status || olcli auth` keeps working
+
+### Added
+- **`olcli help exit-codes` and `olcli help environment`** - help topics under the built-in `help` command: the exit-code table above, and every environment variable olcli reads. The root help names both topics; no new command
+
 ## [0.18.1] - 2026-11-18
 
 ### Fixed

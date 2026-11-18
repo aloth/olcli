@@ -293,7 +293,7 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 | `olcli auth --cookie <value>` | Authenticate with session cookie |
 | `olcli auth --email <e>` | Authenticate with password, prompted (self-hosted) |
 | `olcli auth --browser` | Sign in through a browser window, keep only the session cookie |
-| `olcli auth status` | Instance, account, credential source; exits 1 when not signed in |
+| `olcli auth status` | Instance, account, credential source; exits 4 when not signed in |
 | `olcli logout` | Clear the global config and the local `.olauth` |
 | `olcli list` | List all projects |
 | `olcli project create <name>` | Create a blank or example project |
@@ -332,6 +332,7 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 - **Dry run**: Use `olcli push --dry-run` or `olcli sync --dry-run` to preview before applying
 - **Preview content**: `push --dry-run` lists files by modification time; `olcli diff` compares actual contents, so the two lists can differ
 - **CI gate**: `olcli diff --exit-code` exits 1 when anything differs and 2 when the run failed, so a pipeline can distinguish drift from breakage
+- **Exit codes**: every other command exits 0 on success, 1 on failure, 2 on a usage error, 4 when not signed in, 5 on a conflict and 130 when interrupted; `olcli help exit-codes` prints the table
 - **Force overwrite**: Use `olcli pull --force` to overwrite local changes
 - **Two-way deletes**: `olcli sync` propagates *local* deletions to the remote; use `--no-delete` to opt out per run
 - **Build artifacts**: `.aux`, `.bbl`, `.log`, `.synctex.gz` etc. are filtered by default. Add custom patterns to a `.olignore` file (gitignore-style)

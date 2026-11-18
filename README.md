@@ -88,7 +88,7 @@ Or per command: `olcli --base-url https://latex.example.org list`. The MCP serve
 - **Git remote:** `git clone overleaf::https://www.overleaf.com/project/<id>` ([docs/GIT-REMOTE.md](docs/GIT-REMOTE.md))
 - **MCP server** for AI agents; every tool that writes asks you first ([docs/MCP.md](docs/MCP.md))
 - **Forgiving project names:** case-insensitive, unique prefixes, "Did you mean" suggestions
-- **Scriptable:** `--json` on listings, plain output when piped, `NO_COLOR`, exit codes that mean something
+- **Scriptable:** `--json` on listings, plain output when piped, `NO_COLOR`, exit codes that mean something (`olcli help exit-codes`)
 
 ## Use with Claude Code, Codex and Cursor
 
@@ -122,7 +122,7 @@ Inside a pulled directory (it contains `.olcli.json`), the project argument can 
 | Command | Description |
 |---------|-------------|
 | `olcli auth` | Sign in: `--browser`, `--cookie`, or `--email` |
-| `olcli auth status` | Instance, account, credential source; exits 1 when not signed in |
+| `olcli auth status` | Instance, account, credential source; exits 4 when not signed in |
 | `olcli logout` | Clear stored credentials |
 | `olcli list` | List projects (`--json`, `-n`) |
 | `olcli info [project]` | Project details and file list |

@@ -85,7 +85,7 @@ test('emoji and symbols only on an interactive stdout', () => {
 
 test('spinner results use words, not symbols, when stderr is not a terminal', () => {
   const result = olcli(['list'], { NO_COLOR: '1' });
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 4);
   assert.doesNotMatch(result.stderr + result.stdout, /[\u2714\u2716\u26a0\u2139]/);
 });
 
