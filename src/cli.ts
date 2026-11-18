@@ -43,6 +43,7 @@ import {
   runLatexdiff,
 } from './latexdiff.js';
 import { loadIgnore } from './ignore.js';
+import { nodeFloorNotice } from './node-floor.js';
 import { describeSuggestionPlan, parseSuggestionEdits, suggestionPlanJson, suggestionResultJson } from './suggest-cli.js';
 import { EXIT, HELP_TOPICS, UsageError, commanderExitCode, exitCodeFor } from './exit-codes.js';
 
@@ -3042,6 +3043,10 @@ export function requestedHelpTopic(args: string[]): string | undefined {
   const topic = args[i + 1];
   return topic !== undefined && Object.hasOwn(HELP_TOPICS, topic) ? topic : undefined;
 }
+
+// Once per run, terminal only; see src/node-floor.ts.
+const floorNotice = nodeFloorNotice();
+if (floorNotice) process.stderr.write(chalk.yellow(`${floorNotice}\n`));
 
 const helpTopic = requestedHelpTopic(process.argv.slice(2));
 if (helpTopic) {
