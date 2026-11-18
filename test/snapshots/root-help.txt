@@ -40,7 +40,7 @@ Build:
 
 Review:
   comments                                           View and manage Overleaf comments
-  changes                                            Accept or reject tracked changes (needs a premium project owner)
+  changes                                            Accept, reject or suggest tracked changes (premium projects)
 
 Settings:
   config                                             Manage olcli configuration

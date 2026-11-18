@@ -63,7 +63,9 @@ const results = await client.suggestChanges(projectId, 'main.tex', [
 // ['done']
 ```
 
-This method is experimental:
+The CLI does the same with `olcli changes suggest <file> [project] --edits edits.json` (preview) and `--yes` (write), reading the edits in this shape from a file or stdin (`--edits -`).
+
+This method is experimental, and so is the command:
 
 - Only documents in the `sharejs-text-ot` format are supported; `history-ot` documents are refused with an error.
 - Each edit is undone without tracking and redone with tracking. The text ends up the same, but collaborators who have the document open see the old text for a short moment, about 0.2 seconds.

@@ -43,6 +43,7 @@ import {
   runLatexdiff,
 } from './latexdiff.js';
 import { loadIgnore } from './ignore.js';
+import { describeSuggestionPlan, parseSuggestionEdits, suggestionPlanJson, suggestionResultJson } from './suggest-cli.js';
 import { EXIT, HELP_TOPICS, UsageError, commanderExitCode, exitCodeFor } from './exit-codes.js';
 
 // Read version from package.json
@@ -1068,7 +1069,7 @@ commentsCmd
 
 const changesCmd = program
   .command('changes')
-  .description('Accept or reject tracked changes (needs a premium project owner)')
+  .description('Accept, reject or suggest tracked changes (premium projects)')
   .addHelpText('after', `
 Tracked changes need a project whose owner has an Overleaf premium plan;
 collaborators on any plan can then accept and reject them.`);
@@ -1132,6 +1133,103 @@ changesCmd
       else console.log(chalk.green(`Rejected ${plan.changes.length} tracked change(s).`));
       setLastProject(proj.id);
     } catch (error: any) {
+      failWith(spinner, error);
+    }
+  });
+
+changesCmd
+  .command('suggest <file> [project]')
+  .description('Experimental: turn edits already on Overleaf into tracked changes. Shows a preview and writes nothing unless --yes is given')
+  .requiredOption('--edits <path>', 'JSON file with the edits, or "-" for stdin')
+  .option('--project <project>', 'Project name or ID (instead of the positional argument)')
+  .option('--yes', 'Write the suggestions after showing the preview')
+  .option('--json', 'Output as JSON')
+  .option('--cookie <session>', 'Session cookie override')
+  .addHelpText('after', `
+Experimental, and outside the stability promise of docs/STABILITY.md: the
+command, its options and its output may change in a minor release.
+
+Edits that reached Overleaf as plain text (through git, olcli push or a sync)
+become suggestions that collaborators can accept or reject, as if they had
+been typed in Reviewing mode. The text ends up the same. Each edit is the old
+and the new text with some unchanged text around it; hint is the approximate
+character offset and picks the nearest match:
+
+  [{ "before": "The ", "deleted": "quick", "inserted": "slow", "after": " fox", "hint": 120 }]
+
+The same shape as SuggestionEdit[] in the library and the edits of the MCP
+tool suggest_changes. Without --yes, olcli prints each edit's location and the
+suggested deletion and insertion, or why it is left alone, and writes nothing.
+With --yes it writes, and refuses (exit 5) when the document changed since the
+preview.
+
+Limits:
+  - sharejs-text-ot documents only; history-ot documents are refused
+  - each edit is undone without tracking and redone with tracking, so
+    collaborators with the document open see the old text for about 0.2 s
+  - needs edit access to the project; review-only access is refused before
+    anything is written
+  - track changes needs a project whose owner has an Overleaf premium plan
+
+Examples:
+  olcli changes suggest main.tex --edits edits.json
+  olcli changes suggest main.tex "My Paper" --edits edits.json --yes
+  cat edits.json | olcli changes suggest main.tex --edits - --yes --json`)
+  .action(async (file: string, project: string | undefined, options) => {
+    if (project && options.project && project !== options.project) {
+      usageError('Give the project either as an argument or with --project, not both.');
+    }
+    let edits;
+    try {
+      const text = options.edits === '-' ? await readStdin() : readFileSync(options.edits, 'utf-8');
+      edits = parseSuggestionEdits(text, options.edits === '-' ? 'stdin' : options.edits);
+    } catch (error) {
+      if (error instanceof UsageError) usageError(error.message);
+      usageError(`Cannot read the edits from ${options.edits}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    const spinner = ora('Planning suggestions...').start();
+    try {
+      const client = await getClient(options.cookie);
+      const proj = await resolveProject(client, project ?? options.project);
+      const plan = await client.planSuggestions(proj.id, file, edits);
+      spinner.stop();
+      const toSuggest = plan.edits.filter((item) => item.outcome === 'suggest').length;
+
+      if (!options.yes || toSuggest === 0) {
+        if (options.json) {
+          console.log(JSON.stringify(suggestionPlanJson(plan), null, 2));
+        } else {
+          for (const line of describeSuggestionPlan(plan)) console.log(line);
+          console.log();
+          if (toSuggest === 0) console.log(chalk.yellow('None of the edits can become a suggestion. Nothing was written.'));
+          else console.log(chalk.yellow(`Preview only: ${toSuggest} edit(s) would become suggestions. Run again with --yes to write.`));
+        }
+        return;
+      }
+
+      if (!options.json) {
+        for (const line of describeSuggestionPlan(plan)) console.log(line);
+        console.log();
+      }
+      const applying = ora(`Turning ${toSuggest} edit(s) into suggestions...`).start();
+      // expectedVersion: refuses (RejectConflictError, exit 5) when the
+      // document moved since the preview printed above.
+      const results = await client.suggestChanges(proj.id, file, edits, { expectedVersion: plan.version });
+      applying.stop();
+      const done = results.filter((r) => r === 'done').length;
+      const untracked = results.filter((r) => r === 'not-tracked').length;
+      if (options.json) {
+        console.log(JSON.stringify(suggestionResultJson(plan.path, edits, results), null, 2));
+      } else {
+        results.forEach((result, index) => console.log(`${index + 1}. ${result}`));
+        console.log(chalk.green(`${done} edit(s) are now suggestions in ${plan.path}.`));
+        if (untracked > 0) {
+          console.log(chalk.yellow(`${untracked} edit(s) were sent, but no tracked change showed up when the document was read again. The text is as before.`));
+        }
+      }
+      if (untracked > 0) process.exitCode = EXIT.FAILURE;
+    } catch (error) {
       failWith(spinner, error);
     }
   });

@@ -147,6 +147,7 @@ Inside a pulled directory (it contains `.olcli.json`), the project argument can 
 | `olcli comments resolve <id>` | Resolve a thread (`reopen` and `delete` too) |
 | `olcli changes accept <ids...>` | Accept tracked changes (premium projects) |
 | `olcli changes reject <ids...>` | Reject tracked changes; preview unless `--yes` |
+| `olcli changes suggest <file> [project]` | Experimental: turn pushed edits into suggestions (`--edits`); preview unless `--yes` |
 | `olcli config set-url <url>` | Set the instance URL (`get-url`, `set-cookie-name`, `set-timeout`) |
 | `olcli ignored [dir]` | Show the ignore patterns in effect |
 

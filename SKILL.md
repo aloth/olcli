@@ -317,6 +317,9 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 | `olcli comments resolve <id>` | Resolve a thread |
 | `olcli comments reopen <id>` | Reopen a thread |
 | `olcli comments delete <id>` | Delete a thread |
+| `olcli changes accept <ids...>` | Accept tracked changes |
+| `olcli changes reject <ids...>` | Reject tracked changes; preview unless `--yes` |
+| `olcli changes suggest <file> [project] --edits <path>` | Experimental: turn edits already on Overleaf into suggestions; preview unless `--yes`. sharejs-text-ot documents only, needs edit access, collaborators briefly see the old text; outside the 1.0 stability promise |
 | `olcli config set-url <url>` | Set self-hosted base URL |
 | `olcli config get-url` | Show the configured base URL |
 | `olcli config set-cookie-name <name>` | Set cookie name |
