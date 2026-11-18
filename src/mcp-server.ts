@@ -1191,13 +1191,13 @@ export function createOlcliMcpServer(options: OlcliMcpServerOptions): McpServer 
   // project-name history), and an agent that can trigger it on a
   // misunderstood instruction is a risk with no matching benefit. The agent
   // computes and explains the plan; a human runs
-  // `olcli project rename-bulk --apply`.
+  // `olcli project rename-bulk --yes`.
   // -------------------------------------------------------------------------
 
   server.registerTool(
     'plan_project_renames',
     {
-      description: 'Preview a bulk project rename across the account. Returns the planned renames, skipped projects and any name collisions. This tool NEVER renames anything - applying the plan requires the human to run `olcli project rename-bulk --apply` in a terminal.',
+      description: 'Preview a bulk project rename across the account. Returns the planned renames, skipped projects and any name collisions. This tool NEVER renames anything - applying the plan requires the human to run `olcli project rename-bulk --yes` in a terminal.',
       inputSchema: {
         match: z
           .string()
@@ -1227,7 +1227,7 @@ export function createOlcliMcpServer(options: OlcliMcpServerOptions): McpServer 
           note:
             plan.collisions.length > 0
               ? 'Collisions present. Overleaf allows duplicate names, so applying this would succeed silently and leave indistinguishable projects. Fix the pattern before proceeding.'
-              : 'Preview only. Run `olcli project rename-bulk --apply` to execute.',
+              : 'Preview only. Run `olcli project rename-bulk --yes` to execute.',
         };
       })
   );

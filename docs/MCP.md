@@ -39,7 +39,7 @@ Tools marked "asks first" change the Overleaf project. Before writing, the serve
 
 > **What `new_name` of `rename_entity` accepts.** The same destinations as `olcli mv`: a bare name renames in place and the entity keeps its folder; `chapters/intro.tex` moves the entity into `chapters/` (created if missing) and renames it; `chapters/` moves it and keeps the name; `/` is the project root. The result returns `old_path`, `new_path` and `created_folders`.
 
-> **Why `plan_project_renames` cannot apply.** A bulk rename across an account is unrecoverable: Overleaf keeps no project-name history, and it tolerates duplicate names, so a bad pattern succeeds silently and leaves projects nobody can tell apart. The tool returns the planned renames, skipped projects and any collisions; executing them requires a human running `olcli project rename-bulk --apply` in a terminal.
+> **Why `plan_project_renames` cannot apply.** A bulk rename across an account is unrecoverable: Overleaf keeps no project-name history, and it tolerates duplicate names, so a bad pattern succeeds silently and leaves projects nobody can tell apart. The tool returns the planned renames, skipped projects and any collisions; executing them requires a human running `olcli project rename-bulk --yes` in a terminal.
 
 ## Write confirmation
 

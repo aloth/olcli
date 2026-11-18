@@ -84,7 +84,7 @@ Or per command: `olcli --base-url https://latex.example.org list`. The MCP serve
 - **Files:** upload, download, delete, rename and move by path; download the project as a zip
 - **Review comments:** list, add, reply, resolve, reopen and delete comment threads
 - **Tracked changes:** list suggested insertions and deletions, accept or reject them. Track changes is an Overleaf premium feature: it is only available in projects whose owner has a premium plan, and invited collaborators on any plan can then use it. In other projects there are no tracked changes to list
-- **Projects:** create, rename, and bulk-rename by pattern (dry run unless `--apply`)
+- **Projects:** create, rename, and bulk-rename by pattern (dry run unless `--yes`)
 - **Git remote:** `git clone overleaf::https://www.overleaf.com/project/<id>` ([docs/GIT-REMOTE.md](docs/GIT-REMOTE.md))
 - **MCP server** for AI agents; every tool that writes asks you first ([docs/MCP.md](docs/MCP.md))
 - **Forgiving project names:** case-insensitive, unique prefixes, "Did you mean" suggestions
@@ -128,7 +128,7 @@ Inside a pulled directory (it contains `.olcli.json`), the project argument can 
 | `olcli info [project]` | Project details and file list |
 | `olcli project create <name>` | Create a blank or example project (`--template`) |
 | `olcli project rename <new> [project]` | Rename the project itself |
-| `olcli project rename-bulk` | Rename many projects by pattern (dry run unless `--apply`) |
+| `olcli project rename-bulk` | Rename many projects by pattern (dry run unless `--yes`) |
 | `olcli pull [project] [dir]` | Download project files |
 | `olcli push [dir]` | Upload local changes (`--dry-run`, `--all`, `--delete`) |
 | `olcli sync [dir]` | Pull then push, propagating local deletions (`--no-delete`, `--dry-run`) |

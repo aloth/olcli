@@ -6,7 +6,7 @@
  * for authentication. Download, upload, sync, and compile LaTeX projects.
  */
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import chalk from 'chalk';
 import type { Ora } from 'ora';
 import { colorDisabled, createSpinner as ora, icon } from './term.js';
@@ -91,6 +91,19 @@ program.exitOverride((error) => {
   process.exit(commanderExitCode(error));
 });
 
+// Moves the value of a deprecated option to its replacement before the
+// action reads its options, so actions only know the new names.
+program.hook('preAction', (_program, actionCommand) => {
+  for (const entry of deprecatedOptions) {
+    if (entry.command !== actionCommand) continue;
+    const value = actionCommand.getOptionValue(entry.attr);
+    if (value === undefined) continue;
+    if (actionCommand.getOptionValue(entry.target) === undefined) actionCommand.setOptionValue(entry.target, value);
+    actionCommand.setOptionValue(entry.attr, undefined);
+    deprecationNotice(entry.oldFlag, entry.newFlag);
+  }
+});
+
 program
   .name('olcli')
   .description('Overleaf CLI - interact with Overleaf projects from the command line')
@@ -130,6 +143,41 @@ function failWith(spinner: Ora, error: unknown, code?: number): never {
   spinner.fail(first);
   for (const line of rest) console.error(chalk.dim(`  ${line}`));
   process.exit(code ?? exitCodeFor(error));
+}
+
+/**
+ * Old spellings kept as hidden aliases (docs/CLI-CONVENTIONS.md). Each one
+ * still works, is left out of the help, and prints a one-line notice once
+ * per run on a terminal; scripts reading stderr through a pipe see nothing
+ * new. Removal is a breaking change and waits for a major release.
+ */
+interface DeprecatedOption {
+  command: Command;
+  /** Attribute name of the old option, e.g. `main` for `--main`. */
+  attr: string;
+  oldFlag: string;
+  /** Attribute name of the replacement, e.g. `resource`. */
+  target: string;
+  newFlag: string;
+}
+
+const deprecatedOptions: DeprecatedOption[] = [];
+const noticesShown = new Set<string>();
+
+/** Print a deprecation notice once per run, only when stderr is a terminal. */
+export function deprecationNotice(oldSpelling: string, newSpelling: string, stream: { isTTY?: boolean; write(text: string): unknown } = process.stderr): boolean {
+  const key = `${oldSpelling}->${newSpelling}`;
+  if (noticesShown.has(key) || !stream.isTTY) return false;
+  noticesShown.add(key);
+  stream.write(chalk.dim(`'${oldSpelling}' is deprecated; use '${newSpelling}'. It keeps working until the next major release.\n`));
+  return true;
+}
+
+function deprecatedOption(command: Command, flags: string, newFlag: string, target: string): Command {
+  const option = new Option(flags, `Deprecated alias of ${newFlag}`).hideHelp();
+  command.addOption(option);
+  deprecatedOptions.push({ command, attr: option.attributeName(), oldFlag: option.long!, target, newFlag });
+  return command;
 }
 
 /** A usage error found after parsing: the message on stderr, exit 2. */
@@ -1077,7 +1125,7 @@ collaborators on any plan can then accept and reject them.`);
 changesCmd
   .command('accept <ids...>')
   .description('Accept tracked changes by id (ids from: olcli comments list --changes)')
-  .option('--project <project>', 'Project name or ID (default: the project in .olcli.json in the current directory)')
+  .option('-p, --project <project>', 'Project name or ID (default: the project in .olcli.json in the current directory)')
   .option('--json', 'Output as JSON')
   .option('--cookie <session>', 'Session cookie override')
   .action(async (ids: string[], options) => {
@@ -1104,8 +1152,8 @@ changesCmd
 changesCmd
   .command('reject <ids...>')
   .description('Reject tracked changes by id: removes suggested insertions, restores suggested deletions. Shows a preview and writes nothing unless --yes is given')
-  .option('--project <project>', 'Project name or ID (default: the project in .olcli.json in the current directory)')
-  .option('--yes', 'Apply the rejection after showing the preview')
+  .option('-p, --project <project>', 'Project name or ID (default: the project in .olcli.json in the current directory)')
+  .option('-y, --yes', 'Apply the rejection after showing the preview')
   .option('--json', 'Output as JSON')
   .option('--cookie <session>', 'Session cookie override')
   .action(async (ids: string[], options) => {
@@ -1141,8 +1189,8 @@ changesCmd
   .command('suggest <file> [project]')
   .description('Experimental: turn edits already on Overleaf into tracked changes. Shows a preview and writes nothing unless --yes is given')
   .requiredOption('--edits <path>', 'JSON file with the edits, or "-" for stdin')
-  .option('--project <project>', 'Project name or ID (instead of the positional argument)')
-  .option('--yes', 'Write the suggestions after showing the preview')
+  .option('-p, --project <project>', 'Project name or ID (instead of the positional argument)')
+  .option('-y, --yes', 'Write the suggestions after showing the preview')
   .option('--json', 'Output as JSON')
   .option('--cookie <session>', 'Session cookie override')
   .addHelpText('after', `
@@ -1311,7 +1359,7 @@ program
   .option('-o, --output <path>', 'Output path')
   .option('-r, --resource <path>', 'Compile this .tex file as root document (e.g. paper.tex, folder/test.tex)')
   .option('--list', 'List available output files')
-  .option('--project <name>', 'Project name or ID')
+  .option('-p, --project <project>', 'Project name or ID')
   .option('--cookie <session>', 'Session cookie override')
   .action(async (type, options) => {
     const spinner = ora('Compiling project...').start();
@@ -1563,22 +1611,22 @@ projectCmd
     }
   });
 
-projectCmd
+const renameBulkCmd = projectCmd
   .command('rename-bulk')
-  .description('Rename many projects at once by pattern (dry-run unless --apply)')
+  .description('Rename many projects at once by pattern (dry run unless --yes)')
   .option('--match <regex>', 'Only consider projects whose name matches this regex')
   .option('--search <text>', 'Literal substring to replace in the name')
   .option('--replace <text>', 'Replacement for --search or --match (supports $1, $2 backrefs)')
   .option('--prefix <text>', 'Prepend this to the name')
   .option('--suffix <text>', 'Append this to the name')
-  .option('--apply', 'Actually rename. Without this flag nothing is changed.')
+  .option('-y, --yes', 'Actually rename. Without this flag nothing is changed.')
   .option('--max <n>', 'Refuse to apply if more than n projects would change', parseInt)
   .option('--cookie <session>', 'Session cookie override')
   .action(async (options) => {
     // Inverted default on purpose: for a single project a dry-run flag is a
     // convenience, but a bulk rename that fires on a typo is unrecoverable
     // (Overleaf keeps no project-name history). So doing nothing is the
-    // default and --apply is the deliberate act.
+    // default and --yes is the deliberate act.
     const spinner = ora('Fetching projects...').start();
     try {
       const client = await getClient(options.cookie);
@@ -1633,9 +1681,9 @@ projectCmd
         process.exit(1);
       }
 
-      if (!options.apply) {
+      if (!options.yes) {
         console.log();
-        console.log(chalk.yellow('Dry run. Nothing was changed. Re-run with --apply to rename.'));
+        console.log(chalk.yellow('Dry run. Nothing was changed. Re-run with --yes to rename.'));
         return;
       }
 
@@ -1842,7 +1890,7 @@ program
 program
   .command('push [dir]')
   .description('Upload local changes to Overleaf project')
-  .option('--project <name>', 'Project name or ID (overrides .olcli.json)')
+  .option('-p, --project <project>', 'Project name or ID (overrides .olcli.json)')
   .option('--all', 'Upload all files (not just changed)')
   .option('--delete', 'Propagate local deletions to the remote (opt-in; see docs)')
   .option('--dry-run', 'Show what would be uploaded without uploading')
@@ -2090,7 +2138,7 @@ program
 program
   .command('sync [dir]')
   .description('Pull then push (bidirectional sync, propagates local deletions)')
-  .option('--project <name>', 'Project name or ID')
+  .option('-p, --project <project>', 'Project name or ID (overrides .olcli.json)')
   .option('--no-delete', 'Do not propagate local deletions to the remote (safer)')
   .option('--dry-run', 'Show what would change without applying')
   .option('--no-default-ignore', 'Disable built-in LaTeX artifact ignore list (only .olignore applies)')
@@ -2363,7 +2411,7 @@ skipped, or pushed. Combine it with --dry-run to preview deletions:
     }
   });
 
-program
+const diffCmd = program
   .command('diff [project] [dir]')
   .description('Show content differences between local files and the remote project')
   .option('--name-only', 'List changed paths instead of printing patches')
@@ -2372,7 +2420,7 @@ program
   .option('--exit-code', 'Exit 1 if anything differs, 0 if nothing does, 2 on failure (for CI)')
   .option('--latexdiff', 'Mark the revision up inside the document with latexdiff (requires latexdiff on PATH)')
   .option('--pdf', 'Compile the marked-up document on Overleaf and download the PDF (implies --latexdiff)')
-  .option('--main <path>', 'Root .tex document to mark up (default: the only file declaring \\documentclass)')
+  .option('-r, --resource <path>', 'Root .tex document to mark up (default: the only file declaring \\documentclass)')
   .option('-o, --output <path>', `Where to write the marked-up .tex (default: ${DIFF_OUTPUT_DIR}/<root>-diff.tex)`)
   .option('--no-flatten', 'Leave \\input/\\include in place instead of inlining them')
   .option('--latexdiff-opt <opt>', 'Pass an option straight through to latexdiff (repeatable)',
@@ -2439,7 +2487,7 @@ where the markup only covers the root document.`)
       // Accepting these silently would produce a normal patch and no markup,
       // with nothing in the output saying the flag was dropped.
       const latexdiffOnly = [
-        options.main ? '--main' : null,
+        options.resource ? '--resource' : null,
         options.output ? '--output' : null,
         options.latexdiffOpt?.length ? '--latexdiff-opt' : null,
       ].filter(Boolean);
@@ -2612,7 +2660,7 @@ async function runLatexdiffMode(params: {
   failureCode: number;
   /** Only the flags this mode reads; the rest of `diff`'s options are rejected. */
   options: {
-    main?: string;
+    resource?: string;
     output?: string;
     pdf?: boolean;
     flatten?: boolean;
@@ -2627,7 +2675,7 @@ async function runLatexdiffMode(params: {
 
   let root = '';
   try {
-    root = resolveRootDocument(localFiles, options.main ? normalizeRemotePath(options.main) : undefined);
+    root = resolveRootDocument(localFiles, options.resource ? normalizeRemotePath(options.resource) : undefined);
   } catch (error) {
     if (!(error instanceof RootDocumentError)) throw error;
     spinner.stop();
@@ -2644,7 +2692,7 @@ async function runLatexdiffMode(params: {
   if (!remoteFiles.has(root)) {
     spinner.stop();
     console.error(chalk.red(`${root} is not in "${projectName}" yet, so there is no earlier version to mark up.`));
-    console.error(chalk.dim('  Push it first, or use --main to name a document that exists on both sides.'));
+    console.error(chalk.dim('  Push it first, or use --resource to name a document that exists on both sides.'));
     process.exit(failureCode);
   }
 
@@ -2945,6 +2993,10 @@ program
   });
 
 deprecatedAlias('check', 'Alias of: auth status');
+
+// Old spellings, hidden from the help (see docs/CLI-CONVENTIONS.md).
+deprecatedOption(diffCmd, '--main <path>', '--resource', 'resource');
+deprecatedOption(renameBulkCmd, '--apply', '--yes', 'yes');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ROOT HELP GROUPS

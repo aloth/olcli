@@ -113,7 +113,7 @@ export class RootDocumentError extends Error {
 /**
  * Decide which document to mark up.
  *
- * An explicit `--main` always wins, including for layouts this heuristic
+ * An explicit `--resource` always wins, including for layouts this heuristic
  * cannot read. Otherwise the document class is the signal, and ambiguity is
  * reported rather than guessed at: a project holding both `paper.tex` and
  * `poster.tex` has no correct default, and marking up the wrong one produces a
@@ -141,13 +141,13 @@ export function resolveRootDocument(files: Map<string, Buffer>, explicit?: strin
   if (candidates.length === 0) {
     throw new RootDocumentError(
       'No .tex file declaring \\documentclass was found, so there is no root document to mark up.\n' +
-      '  Pass --main <path> to name one.',
+      '  Pass -r, --resource <path> to name one.',
     );
   }
 
   throw new RootDocumentError(
     `${candidates.length} files declare \\documentclass, so the root document is ambiguous.\n` +
-    '  Pass --main <path> to choose one.',
+    '  Pass -r, --resource <path> to choose one.',
     candidates,
   );
 }

@@ -327,7 +327,7 @@ zip arxiv.zip *.tex main.bbl figures/*.pdf
 | `olcli config set-timeout <ms>` | Set HTTP timeout |
 | `olcli config get-timeout` | Show the configured HTTP timeout |
 | `olcli project rename <newname> [project]` | Rename a project |
-| `olcli project rename-bulk` | Rename many projects by pattern (dry-run unless `--apply`) |
+| `olcli project rename-bulk` | Rename many projects by pattern (dry run unless `--yes`) |
 
 ## Tips
 

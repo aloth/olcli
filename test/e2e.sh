@@ -652,7 +652,7 @@ if ! command -v latexdiff >/dev/null 2>&1; then
   log_warn "latexdiff not on PATH - skipping the --latexdiff section"
 else
   # A root document of our own, so the section does not depend on what the
-  # target project happens to contain, and --main keeps it unambiguous even in
+  # target project happens to contain, and --resource keeps it unambiguous even in
   # a project that already has one.
   LD_NAME="${TEST_ID}_ld.tex"
   LD_FILE="$PULL_DIR/$LD_NAME"
@@ -674,7 +674,7 @@ TEX
   rm -f "$LD_FILE.bak"
 
   run_test "diff --latexdiff writes a marked-up document" \
-    "cd '$PULL_DIR' && olcli diff --latexdiff --main '$LD_NAME' && test -s '.olcli-diff/${TEST_ID}_ld-diff.tex'"
+    "cd '$PULL_DIR' && olcli diff --latexdiff --resource '$LD_NAME' && test -s '.olcli-diff/${TEST_ID}_ld-diff.tex'"
 
   run_test "the markup strikes through the remote wording" \
     "grep -q 'DIFdel{.*preliminary' '$PULL_DIR/.olcli-diff/${TEST_ID}_ld-diff.tex'"
@@ -690,12 +690,12 @@ TEX
     "cd '$PULL_DIR' && olcli diff --latexdiff --name-only" \
     "false"
 
-  run_test "--main outside --latexdiff is refused rather than ignored" \
-    "cd '$PULL_DIR' && olcli diff --main '$LD_NAME'" \
+  run_test "--resource outside --latexdiff is refused rather than ignored" \
+    "cd '$PULL_DIR' && olcli diff --resource '$LD_NAME'" \
     "false"
 
   run_test "diff --latexdiff --pdf downloads a compiled PDF" \
-    "cd '$PULL_DIR' && olcli diff --latexdiff --pdf --main '$LD_NAME' && test -s '.olcli-diff/${TEST_ID}_ld-diff.pdf'"
+    "cd '$PULL_DIR' && olcli diff --latexdiff --pdf --resource '$LD_NAME' && test -s '.olcli-diff/${TEST_ID}_ld-diff.pdf'"
 
   run_test "the PDF is a PDF" \
     "head -c 4 '$PULL_DIR/.olcli-diff/${TEST_ID}_ld-diff.pdf' | grep -q '%PDF'"

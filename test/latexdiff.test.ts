@@ -85,7 +85,7 @@ test('resolveRootDocument: ambiguity is reported, never guessed', () => {
     (error: unknown) => {
       assert.ok(error instanceof RootDocumentError);
       assert.deepEqual(error.candidates, ['paper.tex', 'poster.tex']);
-      assert.match(error.message, /--main/);
+      assert.match(error.message, /--resource/);
       return true;
     },
   );
@@ -93,15 +93,15 @@ test('resolveRootDocument: ambiguity is reported, never guessed', () => {
 
 test('resolveRootDocument: no candidate at all is an error naming the flag', () => {
   const files = new Map([['sections/intro.tex', buf('\\section{Intro}\n')]]);
-  assert.throws(() => resolveRootDocument(files), /--main/);
+  assert.throws(() => resolveRootDocument(files), /--resource/);
 });
 
-test('resolveRootDocument: --main wins, including over the heuristic', () => {
+test('resolveRootDocument: --resource wins, including over the heuristic', () => {
   const files = new Map([['main.tex', buf(ROOT)], ['sections/intro.tex', buf('\\section{Intro}\n')]]);
   assert.equal(resolveRootDocument(files, 'sections/intro.tex'), 'sections/intro.tex');
 });
 
-test('resolveRootDocument: --main for a file that is not in the tree explains why', () => {
+test('resolveRootDocument: --resource for a file that is not in the tree explains why', () => {
   const files = new Map([['main.tex', buf(ROOT)]]);
   assert.throws(() => resolveRootDocument(files, 'missing.tex'), /ignore rule/);
 });

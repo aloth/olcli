@@ -31,7 +31,7 @@ Requires `latexdiff` on your PATH. It ships with TeX Live and MacTeX; nothing el
 
 `\input` and `\include` are inlined before comparing (`--no-flatten` to opt out). Without that, a remote compile would resolve those against the files sitting in the project (the old content) and quietly produce a PDF showing every input file as unchanged.
 
-Output goes to `.olcli-diff/`, which is dotted so that `push` and `sync` never pick it up; `-o <path>` puts it elsewhere. The root document is the `.tex` file declaring `\documentclass`; if several do, `--main <path>` picks one rather than the command guessing. `--latexdiff-opt` passes anything else straight through, e.g. `--latexdiff-opt --math-markup=0`.
+Output goes to `.olcli-diff/`, which is dotted so that `push` and `sync` never pick it up; `-o <path>` puts it elsewhere. The root document is the `.tex` file declaring `\documentclass`; if several do, `-r, --resource <path>` picks one (the same option `compile` and `pdf` use; `--main` still works as a deprecated alias) rather than the command guessing. `--latexdiff-opt` passes anything else straight through, e.g. `--latexdiff-opt --math-markup=0`.
 
 One limit worth knowing: `--pdf` compiles against the project, not against your working directory, so anything the markup needs must already be on Overleaf. A `.sty` or `.cls` you added locally fails the compile, and the compiler log is written next to the marked-up source when that happens. A *figure* you added locally does not fail it; Overleaf draws a placeholder box naming the missing file and the rest of the PDF is fine.
 
