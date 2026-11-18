@@ -226,6 +226,8 @@ All exports: [docs/LIBRARY.md](docs/LIBRARY.md).
 - [docs/GIT-REMOTE.md](docs/GIT-REMOTE.md): Overleaf as a git remote
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md): credentials, environment variables, timeout, ignore rules
 - [docs/LIBRARY.md](docs/LIBRARY.md): TypeScript library
+- [docs/STABILITY.md](docs/STABILITY.md): what semver covers from 1.0, and how deprecations work
+- [docs/CLI-CONVENTIONS.md](docs/CLI-CONVENTIONS.md): option names, deprecated spellings
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the client talks to Overleaf (there is no public Overleaf API, so it uses a browser session)
 
 ## Contributing

@@ -29,6 +29,8 @@ const comments = await client.listComments(projectId, { status: 'open' });
 
 ## Available exports
 
+From 1.0 these exports are covered by semver, see [STABILITY.md](STABILITY.md); `suggestChanges` and `planSuggestions` are experimental and are not.
+
 ```ts
 import {
   OverleafClient,
