@@ -15,6 +15,9 @@ All notable changes to this project will be documented in this file.
 - **docs/CLI-CONVENTIONS.md and tests that enforce it** - one name per concept: `-p, --project`, `-r, --resource`, `-y, --yes`, `-o, --output`, `--dry-run`, `--json`, with `--verbose`, `--base-url`, `--cookie-name`, `--timeout` and `--no-color` global only. Tests walk the command tree and fail on a second spelling of a vocabulary option, a short flag bound to two long options, a subcommand redeclaring a global option, more than 21 visible top-level commands, and a README.md or SKILL.md commands table that names a command that does not exist or misses one. The page also lists the inconsistencies that are still open
 - **`olcli help exit-codes` and `olcli help environment`** - help topics under the built-in `help` command: the exit-code table above, and every environment variable olcli reads. The root help names both topics; no new command
 
+### Fixed
+- **`whoami` and `check` no longer write to a pipe** - their pointer to `olcli auth status` is now the same one-line deprecation notice as other old spellings: once per run, on a terminal only, so a script that captures stderr of `olcli whoami` sees the report and nothing else
+
 ## [0.18.1] - 2026-11-18
 
 ### Fixed

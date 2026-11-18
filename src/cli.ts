@@ -727,7 +727,7 @@ function deprecatedAlias(name: string, description: string): void {
     .description(description)
     .option('--json', 'Output as JSON')
     .action(async (options) => {
-      console.error(chalk.dim(`'olcli ${name}' is now 'olcli auth status'.`));
+      deprecationNotice(`olcli ${name}`, 'olcli auth status');
       await authStatus(options);
     });
 }

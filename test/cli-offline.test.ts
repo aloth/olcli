@@ -328,7 +328,8 @@ test('auth status shows instance, account, source and a masked cookie; exits 4 w
 
     const check = await olcli(['check'], { env: { OVERLEAF_SESSION: cookie, OVERLEAF_BASE_URL: live.baseUrl } });
     assert.equal(check.status, 0, check.stdout + check.stderr);
-    assert.match(check.stderr, /now 'olcli auth status'/);
+    // The deprecation notice is for terminals only; a pipe sees the report alone.
+    assert.doesNotMatch(check.stderr, /deprecated/);
   } finally {
     await live.close();
   }
