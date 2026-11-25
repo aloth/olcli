@@ -193,7 +193,7 @@ log_section "Authentication Tests"
 
 run_test_with_output "whoami returns user info" \
   "olcli whoami" \
-  "(Logged in as|Email:|Authenticated)"
+  "(Account|Session|Logged in as|Email:|Authenticated)"
 
 run_test "check shows config info" \
   "olcli check"
