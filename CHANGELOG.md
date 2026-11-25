@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.19.0] - 2026-11-25
 
 ### Changed
 - **Notice on Node older than 22** - olcli 1.0 will require Node 22 or newer. Until then `engines` still allows Node 20.18.1, and on an older runtime the `olcli` command prints one line saying so when stdout and stderr are a terminal. Pipes, CI logs, the MCP server and the git remote helper never print it
